@@ -11,5 +11,5 @@
     "target": "es2022",
     "types": []
   },
-  "files": ["consumer.ts", "../src/history.js", "../src/shielded.js", "../src/activity.js"]
+  "files": ["consumer.ts", "../src/history.js", "../src/shielded.js", "../src/activity.js", "../src/bridge.js"]
 }

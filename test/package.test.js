@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./history", "./shielded", "./activity"];
+const ENTRIES = ["./history", "./shielded", "./activity", "./bridge"];
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 /** @param {string} file */
@@ -55,6 +55,13 @@ describe("the package", () => {
     assert.equal(PENDING_MS, 900_000);
     assert.deepEqual(activityRows(), []);
     assert.deepEqual(settleSends(), { drop: [], keep: [] });
+
+    const { arrivalsOf, depositArrivals, migrationPayouts, serviceArrivals } = await import("@dusk-network/app-core/bridge");
+
+    assert.equal(typeof depositArrivals, "function");
+    assert.equal(typeof migrationPayouts, "function");
+    assert.equal(typeof serviceArrivals, "function");
+    assert.deepEqual(arrivalsOf(new Map()), new Map());
   });
 
   it("is the same package on JSR, as @dusk/app-core, with the same entry points", () => {
@@ -119,6 +126,8 @@ describe("the package", () => {
       "package.json",
       "src/activity.d.ts",
       "src/activity.js",
+      "src/bridge.d.ts",
+      "src/bridge.js",
       "src/history.d.ts",
       "src/history.js",
       "src/shielded.d.ts",

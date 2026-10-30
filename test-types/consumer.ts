@@ -38,6 +38,34 @@ import {
 } from "@dusk-network/app-core/history";
 import { networks, type Route } from "@dusk-network/networks";
 import {
+  CLOCK_SLACK_MS,
+  CREDIT_WINDOW_MS,
+  DEPOSIT_HORIZON_MS,
+  ETH_BRIDGE_FINALIZED_TOPIC,
+  EXPLORER_PAGES,
+  HISTORY_PAGES,
+  LOG_WINDOW,
+  LOG_WINDOWS,
+  SERVICE_HORIZON_MS,
+  TRANSFER_TOPIC,
+  WAIT_MS,
+  arrivalsOf,
+  depositArrivals,
+  depositOf,
+  migrationPayoutOf,
+  migrationPayouts,
+  serviceArrivals,
+  serviceTransferOf,
+  type Arrival,
+  type BlockTimes,
+  type Deposit,
+  type MigrationPayout,
+  type NoPayout,
+  type Scan,
+  type ServiceTransferFacts,
+  type UnknownReason,
+} from "@dusk-network/app-core/bridge";
+import {
   DECOYS_PER_HEIGHT,
   HEIGHTS_PER_REQUEST,
   LEAF_BYTES,
@@ -268,3 +296,85 @@ const wrong: ActivityStatus = "submitted";
 // @ts-expect-error a send needs its hash
 const noHash: SentTransaction = { kind: "transfer" };
 void [wrong, noHash];
+
+// What happened on the other side of the bridge's routes.
+const blockTimes: BlockTimes = new Map<number, number>();
+const kept: ReadEntry = historyEntry({ blockHeight: 1, counterparty: null, direction: "out", hash: "ab", kind: "contract_call", memo: "", payer: true, value: "1" });
+const found: (Deposit & { amount: bigint }) | null = depositOf(kept, "x");
+const keptDeposit: Deposit | null = depositOf({ blockHeight: 1, counterparty: null, direction: "out", hash: "ab", kind: "contract_call", memo: "", payer: true, value: "1" });
+const deposits: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = depositArrivals({
+  archive,
+  blockTimes,
+  deposits: found ? [found] : [{ amount: 1n, at: null, hash: "ab", notBefore: 1n, scan: { basis: 1, from: "2", search: "" }, sender: null, to: "0xab" }],
+  explorerUrl: "https://explorer.example",
+  fetch,
+  maxPages: EXPLORER_PAGES,
+  maxWindows: LOG_WINDOWS,
+  network: 2,
+  now: 1,
+  rpcUrl: "https://rpc.example",
+  taken: new Set(["0xab"]),
+  timeoutMs: 8_000,
+  via: "rpc",
+  waitMs: WAIT_MS,
+  windowMs: CREDIT_WINDOW_MS,
+});
+const followed = deposits.then(({ arrivals }) => {
+  const one: Arrival | undefined = arrivals.get("ab");
+  // `/activity`'s input.
+  const forActivity: Map<string, { hash: string; at: number | null }> = arrivalsOf(arrivals);
+
+  if (one?.state === "arrived") {
+    const paid: [string, number | null, bigint, number | null] = [one.hash, one.at, one.amount, one.block];
+    void paid;
+  } else if (one?.state === "unknown") {
+    const why: UnknownReason = one.reason;
+    const next: Scan | undefined = one.scan;
+    const error: string | undefined = one.error;
+    void [why, next, error];
+  }
+
+  const input: ActivityInput["arrivals"] = forActivity;
+
+  void input;
+});
+const facts: ServiceTransferFacts | null = serviceTransferOf(kept, networks.mainnet);
+const out: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = serviceArrivals({
+  archive,
+  blockTimes,
+  fetch,
+  maxWindows: 2,
+  network: 1,
+  now: 1,
+  rpcUrl: "https://bsc.example",
+  taken: [],
+  transfers: facts?.to && !facts.problem ? [{ fee: facts.fee, hash: facts.hash, notBefore: 1n, route: facts.route, scan: null }] : [],
+  waitMs: 1,
+});
+const sentOut: [bigint, bigint | null] | null = facts ? [facts.sent, facts.amount] : null;
+const out2 = out.then(({ arrivals }) => {
+  const one = arrivals.get("ab");
+  const why: NoPayout | undefined = one?.state === "unknown" ? one.problem : undefined;
+  const seen: ReadonlyArray<{ hash: string; block: string; at: number; sender: string | null }> | undefined = one?.state === "waiting" ? one.scan?.seen : undefined;
+
+  void [why, seen];
+});
+const payout: MigrationPayout | null = migrationPayoutOf(kept, 1);
+const migrations: Promise<{ payouts: Map<string, Arrival>; unlisted: MigrationPayout[]; requests: number }> = migrationPayouts({
+  entries: [kept],
+  migrations: [{ amount: "1", at: 1, hash: "0xab", route: "bsc-to-dusk" }],
+  network: networks.mainnet,
+  now: 1,
+  taken: [],
+  waitMs: 1,
+});
+const byMemo: Promise<unknown> = migrationPayouts({ account: "x", archive, migrations: [], network: 1 });
+const bridgeNumbers: number[] = [CLOCK_SLACK_MS, CREDIT_WINDOW_MS, WAIT_MS, EXPLORER_PAGES, LOG_WINDOW, LOG_WINDOWS, DEPOSIT_HORIZON_MS, SERVICE_HORIZON_MS, HISTORY_PAGES];
+const topics: string[] = [TRANSFER_TOPIC, ETH_BRIDGE_FINALIZED_TOPIC];
+void [keptDeposit, followed, out, out2, sentOut, payout, migrations, byMemo, bridgeNumbers, topics];
+// @ts-expect-error a deposit is followed on the explorer or the RPC
+depositArrivals({ deposits: [], network: 2, via: "adapter" });
+// @ts-expect-error a transfer out needs the archive: each transfer is read from the chain
+serviceArrivals({ network: 1, transfers: [] });
+// @ts-expect-error a migration names its route
+migrationPayouts({ entries: [], migrations: [{ amount: 1n, hash: "0xab" }], network: 1 });

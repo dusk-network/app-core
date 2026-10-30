@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `/bridge`: `depositArrivals`, `migrationPayouts` and `serviceArrivals`, where a deposit to DuskEVM, a migration and a transfer out to BNB Smart Chain arrived, each credit paying one transfer, in order
+
 ## [0.1.0]
 
 ### Added
