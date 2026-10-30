@@ -406,7 +406,8 @@ describe("the decoys of a shielded history", () => {
 
   it("are kept beside the history kept before, which still shows while the new one is worked out", async () => {
     const w = wallet({ leaves: treeLeaves({ distinct: true }) });
-    const first = await w.read();
+    // Drawn from fixed sequences, so the count below doesn't depend on chance.
+    const first = await w.read({ random: seq(1) });
     const before = structuredClone(w.kept.record);
 
     // A note at another height: more decoys, kept with the old history
@@ -417,7 +418,7 @@ describe("the decoys of a shielded history", () => {
     w.node.before = () => {
       held ??= structuredClone(w.kept.record);
     };
-    await w.read({ notes: () => [...receivedNotes(), { leaf: L492, nullifier: new Uint8Array(32).fill(9), spent: false }] });
+    await w.read({ notes: () => [...receivedNotes(), { leaf: L492, nullifier: new Uint8Array(32).fill(9), spent: false }], random: seq(2) });
     assert.deepEqual({ entries: held.entries, fingerprint: held.fingerprint }, { entries: first.entries, fingerprint: before.fingerprint });
     assert.equal(held.decoys.length, 12);
     assert.deepEqual(before.decoys.filter((/** @type {number} */ h) => !held.decoys.includes(h)), []);
