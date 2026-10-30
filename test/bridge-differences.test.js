@@ -33,6 +33,19 @@ const second = (/** @type {number} */ n) => (1_792_980_000 + n) * 1000;
 const emptyArchive = () => fakeArchive({ accounts: {}, details: {}, finalized: 10_000_000 }).archiveClient();
 
 /**
+ * The archive, the sender's history listing `deposits` to RECIPIENT, as it
+ * does once their blocks are final, with their calls.
+ *
+ * @param {...any} deposits
+ */
+const listing = (...deposits) =>
+  fakeArchive({
+    accounts: { [SENDER]: { receiver: [], sender: deposits.map((d) => depositEntry({ hash: d.hash, height: d.height, sender: SENDER, value: d.amount })) } },
+    details: Object.fromEntries(deposits.map((d) => [d.hash, details(Math.floor(d.at / 1000), { deposit: { amountLux: d.amount, to: RECIPIENT } })])),
+    finalized: 10_000_000,
+  }).archiveClient();
+
+/**
  * Transfers of two DUSK naming RECIPIENT to testnet's route account, as the
  * archive gives them: each one's transaction, and the account's history.
  *
@@ -122,7 +135,7 @@ describe("where the apps followed deposits differently, on DuskEVM's RPC", () =>
   it("a credit from before the deposit's block isn't its own, though it is after where the search starts (BR took the first one there)", async () => {
     // Five minutes before the deposit: another, older deposit's.
     const chain = fakeChain({ head: 2_000, logs: [credit(1, 700), credit(2, 1_100)] });
-    const { arrivals } = await depositArrivals({ archive: emptyArchive(), deposits: [sent("ab", second(1_000))], fetch: chain.fetch, network: 2, now: second(2_000), via: "rpc" });
+    const { arrivals } = await depositArrivals({ archive: listing(sent("ab", second(1_000))), deposits: [sent("ab", second(1_000))], fetch: chain.fetch, network: 2, now: second(2_000), via: "rpc" });
 
     like(arrivals.get(dusk("ab")), { hash: evmHash(2), state: "arrived" });
   });
@@ -162,14 +175,14 @@ describe("where the apps searched an EVM chain's logs differently", () => {
     const timeAt = (/** @type {bigint} */ n) => Math.floor(n >= 900_000n ? H - (1_000_000 - Number(n)) : H - 100_000 - (900_000 - Number(n)) * 0.25);
     const at = timeAt(800_000n) * 1000;
     const chain = fakeChain({ head: 1_000_000, logs: [credit(7, 800_100)], timeAt });
-    const { arrivals } = await depositArrivals({ archive: emptyArchive(), deposits: [sent(at)], fetch: chain.fetch, network: 2, now: H * 1000, via: "rpc" });
+    const { arrivals } = await depositArrivals({ archive: listing(sent(at)), deposits: [sent(at)], fetch: chain.fetch, network: 2, now: H * 1000, via: "rpc" });
 
     like(arrivals.get(dusk("ab")), { hash: evmHash(7), state: "arrived" });
   });
 
   it("an RPC that won't search 5,000 blocks at once is asked a quarter as many (WW's search failed)", async () => {
     const chain = fakeChain({ head: 2_000, logs: [credit(7, 1_100)], maxRange: 1_000n });
-    const { arrivals } = await depositArrivals({ archive: emptyArchive(), deposits: [sent(second(999), { notBefore: 1_000 })], fetch: chain.fetch, network: 2, now: second(2_000), via: "rpc" });
+    const { arrivals } = await depositArrivals({ archive: listing(sent(second(999))), deposits: [sent(second(999), { notBefore: 1_000 })], fetch: chain.fetch, network: 2, now: second(2_000), via: "rpc" });
 
     like(arrivals.get(dusk("ab")), { hash: evmHash(7), state: "arrived" });
     assert.deepEqual(chain.ranges().slice(0, 3), [[1_000n, 2_000n], [1_000n, 2_000n], [1_000n, 1_311n]]);

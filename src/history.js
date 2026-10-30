@@ -816,7 +816,7 @@ function nextWindow(window, count) {
  * @param {RangeOptions} options
  * @returns {Promise<{ entries: HistoryEntry[], complete: boolean, requests: number }>}
  */
-export async function historyRange(archive, { account, from = 0, to, direction = "both", pages = 1 }) {
+export async function historyRange(archive, { account, from = 0, to, direction = "both", pages = 1, page: first = 1 }) {
   /** @type {Record<string, ReadonlyArray<"in" | "out">>} */
   const ASKED = { both: ["out", "in"], in: ["in"], out: ["out"] };
   const aliases = Object.hasOwn(ASKED, direction) ? ASKED[direction] : null;
@@ -827,8 +827,9 @@ export async function historyRange(archive, { account, from = 0, to, direction =
   const entries = [];
   let complete = false;
   let requests = 0;
+  const start = Math.max(1, Math.floor(Number(first)) || 1);
 
-  for (let page = 1; page <= Math.max(1, Math.floor(pages)) && !complete; page += 1) {
+  for (let page = start; page < start + Math.max(1, Math.floor(pages)) && !complete; page += 1) {
     requests += 1;
 
     const data = await archive.query(rangeQuery(account, { aliases, from, page, to }));

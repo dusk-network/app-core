@@ -85,7 +85,7 @@ export declare const DEPOSIT_HORIZON_MS: 7200000;
 /** Equal transfers out sent within this of each other are paid in their order, or 4 times the route's usual time: 12 hours, in milliseconds. */
 export declare const SERVICE_HORIZON_MS: 43200000;
 
-/** Pages of a sender's history read for its earlier equal deposits. */
+/** Pages of its account's history one call reads for a transfer's earlier equal ones; a longer history is read on in the next call, from its `scan`. */
 export declare const HISTORY_PAGES: 4;
 
 /** `Transfer(address,address,uint256)`: the DUSK token's transfer that pays a transfer out. */
@@ -95,14 +95,36 @@ export declare const TRANSFER_TOPIC: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f1
 export declare const ETH_BRIDGE_FINALIZED_TOPIC: "0x31b2166ff604fc5672ea5df08a78081d2bc6d746cadce880747f3643d819e83d";
 
 /**
+ * How far a transfer's own history is read: what it was read for (`of`),
+ * all of it from `lo` up to the transfer's block once `lo` is set, the
+ * range read next (`next`: its first block, its last and the page it
+ * carries on from), and the transfers found in it that could be equal to
+ * it.
+ */
+export type HistoryScan = {
+  of: string;
+  lo: number | null;
+  next: { from: number; to: number; page: number } | null;
+  found: ReadonlyArray<{ hash: string; height: number }>;
+};
+
+/**
  * Where a search stopped: the block the next one starts at, the time of the
  * transfer it began from, the logs it searched for (`search`), and the
  * credits it found before (`seen`), which the next one counts again. A
  * search for other logs, as for another sender or amount, starts afresh.
- * Kept by the app with the credits it was made with, and passed back as it
- * is.
+ * With the archive, how far the transfer's own history is read
+ * (`history`): a history longer than one call reads is read on from there,
+ * before any search. Kept by the app with the credits it was made with,
+ * and passed back as it is.
  */
-export type Scan = { from: string; basis: number; search: string; seen?: ReadonlyArray<{ hash: string; block: string; at: number; sender: string | null }> };
+export type Scan = {
+  from?: string;
+  basis?: number;
+  search?: string;
+  seen?: ReadonlyArray<{ hash: string; block: string; at: number; sender: string | null }>;
+  history?: HistoryScan;
+};
 
 /**
  * Why a transfer's credit is unknown:
@@ -190,7 +212,9 @@ export type DepositArrivalOptions = {
   /**
    * `/history`'s archive, for "rpc": each sender's equal deposits in the
    * hours before its own are read from its history, those given but not
-   * looked for too, and paid first.
+   * looked for too, and paid first. Each deposit reads its own hours, once
+   * the archive lists it there, `HISTORY_PAGES` pages a call: a deposit
+   * whose history is read on in the next call waits, with its `scan`.
    * Without it, or for a deposit without its sender and height, its credit
    * is a deposit's only as where they can't be told apart.
    */
@@ -279,9 +303,12 @@ export type ServiceArrivalOptions = {
  * route's account received in the hours before that named the same address,
  * in any case, and pay out the same are paid first: its history lists them,
  * and their own transactions say what each received (one given but not
- * looked for pays out what its own fee leaves). One that can't be
- * read, or a history cut short, leaves the order unclear: unsure. Throws a
- * TypeError without an archive, and for a network there's no file for.
+ * looked for pays out what its own fee leaves). One that can't be read
+ * leaves the order unclear: unsure. Each transfer reads its own hours of
+ * that history, once the archive lists it there, `HISTORY_PAGES` pages a
+ * call: one whose history is read on in the next call waits, with its
+ * `scan`. Throws a TypeError without an archive, and for a network there's
+ * no file for.
  */
 export declare function serviceArrivals(options: ServiceArrivalOptions): Promise<{ arrivals: Map<string, Arrival>; requests: number }>;
 

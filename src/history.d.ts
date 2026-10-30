@@ -373,6 +373,8 @@ export type RangeOptions = {
   direction?: "in" | "out" | "both";
   /** The most pages to read, 1 by default. */
   pages?: number;
+  /** The first page to read, 1 by default: a read of the same range carries on where an earlier one stopped. */
+  page?: number;
 };
 
 /**

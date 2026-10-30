@@ -254,12 +254,19 @@ describe("historyRange", () => {
     assert.deepEqual(result.entries.map((e) => e.blockHeight), [...result.entries.map((e) => e.blockHeight)].sort((x, y) => x - y));
   });
 
-  it("stops at its page limit, not complete", async () => {
+  it("stops at its page limit, not complete, and carries on from the page after", async () => {
     const node = fakeArchive();
     const result = await historyRange(node.archiveClient(), { account: B, direction: "out", pages: 1, to: 4_700_000 });
 
     assert.deepEqual([result.complete, result.requests, result.entries.length], [false, 1, 50]);
     assert.match(node.log[0].query, /toBlock: 4700000/);
+
+    const rest = await historyRange(node.archiveClient(), { account: B, direction: "out", page: 2, pages: 4, to: 4_700_000 });
+    const whole = await historyRange(node.archiveClient(), { account: B, direction: "out", pages: 8, to: 4_700_000 });
+
+    assert.match(node.log[1].query, /maxCount: 50, pageCount: 2\)/);
+    assert.equal(rest.complete, true);
+    assert.deepEqual([...result.entries, ...rest.entries].map((e) => e.hash), whole.entries.map((e) => e.hash));
   });
 
   it("reads both directions by default, each entry once", async () => {
