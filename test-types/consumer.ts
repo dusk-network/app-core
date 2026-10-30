@@ -37,6 +37,32 @@ import {
   type RefusalStore,
 } from "@dusk-network/app-core/history";
 import { networks, type Route } from "@dusk-network/networks";
+import {
+  DECOYS_PER_HEIGHT,
+  HEIGHTS_PER_REQUEST,
+  LEAF_BYTES,
+  LEAF_HEIGHT_OFFSET,
+  LEAF_POS_OFFSET,
+  NOTE_BYTES,
+  createLeafHeightTap,
+  fetchShieldedBlocks,
+  leafInfo,
+  noteTreeHeights,
+  pickHeights,
+  readNoteHeights,
+  shieldedEntries,
+  shieldedHistory,
+  type LeafHeightTap,
+  type NoteTree,
+  type OwnedNote,
+  type ShieldedBlock,
+  type ShieldedEntry,
+  type ShieldedHistory,
+  type ShieldedRecord,
+  type ShieldedStore,
+  type TreeHeights,
+  type TreeHeightsStore,
+} from "@dusk-network/app-core/shielded";
 
 const url: string = historyArchiveUrl({ archiveUrl: "", chainIdOf: () => 2, nodeUrl: "https://testnet.nodes.dusk.network" });
 const refusals: RefusalStore = { get: async () => null, put: async () => {} };
@@ -126,3 +152,60 @@ historyRange(archive, { account: "x", direction: "self" });
 createArchive({ fetch });
 // @ts-expect-error a history needs a store
 createHistory({ account: "x", archive });
+
+// The shielded history, over an app's own stores and note tree.
+let shieldedRecord: ShieldedRecord | null = null;
+const shieldedStore: ShieldedStore = {
+  get: () => shieldedRecord,
+  put: async (next) => {
+    shieldedRecord = next;
+  },
+};
+let keptHeights: TreeHeights | null = null;
+const treeHeights: TreeHeightsStore = {
+  get: async () => keptHeights,
+  put: (next) => {
+    keptHeights = next;
+  },
+};
+const tree: NoteTree = { leaves: async (from: bigint) => new Response(new Uint8Array(Number(from))), size: () => 6n };
+const owned: OwnedNote = { leaf: new Uint8Array(LEAF_BYTES), nullifier: new Uint8Array(32), spent: false };
+const shielded: Promise<ShieldedHistory> = shieldedHistory({
+  archive,
+  isCurrent: () => true,
+  notes: async () => [owned],
+  random: () => 1,
+  store: shieldedStore,
+  synced: true,
+  tree,
+  treeHeights,
+  valueOf: async () => 1n,
+});
+const shown = shielded.then(({ entries, pending }) => {
+  const first: ShieldedEntry | undefined = entries[0];
+  const moved: string | undefined = first?.value;
+  const paid: string | null | undefined = first?.fee;
+  const when: number | null | undefined = first?.timestamp;
+  const failed: string | undefined = first?.error;
+  const did: EntryKind | undefined = first?.kind;
+  const ok: boolean | undefined = first?.success;
+  const more: boolean = pending;
+
+  void [moved, paid, when, failed, did, ok, more];
+});
+const tap: LeafHeightTap = createLeafHeightTap({ from: 0n });
+const tapped: ReadableStream<Uint8Array> | undefined = new Response(new Uint8Array(LEAF_BYTES)).body?.pipeThrough(tap.stream());
+const tapHeights: number[] | null = tap.heights(1n);
+const heightsKept: Promise<number[] | null> = noteTreeHeights(tree, treeHeights, { isCurrent: () => true });
+const heightsRead: Promise<number[] | null> = readNoteHeights({ leaves: async () => null }, 6n, { from: 0, isCurrent: () => true });
+const picked: { decoys: number[]; heights: number[] } = pickHeights([1, 2, 3], [2], { keep: [1], perHeight: DECOYS_PER_HEIGHT, random: () => 1 });
+const blocks: Promise<Map<number, ShieldedBlock>> = fetchShieldedBlocks(archive, [1, 2], { isCurrent: () => true });
+const position: { height: number; pos: bigint } = leafInfo(owned.leaf);
+const made: ShieldedEntry[] = shieldedEntries({ blocks: new Map(), notes: [{ ...owned, value: 1n }] });
+const layout: number[] = [LEAF_BYTES, NOTE_BYTES, LEAF_POS_OFFSET, LEAF_HEIGHT_OFFSET, HEIGHTS_PER_REQUEST];
+void [shown, tapped, tapHeights, heightsKept, heightsRead, picked, blocks, position, made, layout];
+// @ts-expect-error a shielded history needs to know whether the notes are all found
+shieldedHistory({ archive, notes: () => [], store: shieldedStore, tree, treeHeights, valueOf: () => 1n });
+// @ts-expect-error an entry's amounts are text, as kept
+const lux: bigint = made[0].value;
+void lux;

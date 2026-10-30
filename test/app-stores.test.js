@@ -1,5 +1,6 @@
 // How each app's kept history reads through the package as it is kept now:
 // sketches of the stores the apps pass, over their stored shapes, in memory.
+// The public history first, then the shielded one.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -8,7 +9,9 @@ import { networks } from "@dusk-network/networks";
 import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 
 import { FINALITY_MARGIN, createHistory, parseHistoryEntry } from "../src/history.js";
-import { fakeArchive, fixture, like, readFixture } from "./fixtures/helpers.js";
+import { shieldedHistory } from "../src/shielded.js";
+import { StaleError, fakeArchive, fixture, like, readFixture } from "./fixtures/helpers.js";
+import { GROWN, MADE_LEAF_0, MADE_LEAF_1, SHIELD, UNSHIELD, blocksNode, noteTree, sentNotes, treeLeaves, valueOf } from "./fixtures/shielded.js";
 
 const deposit = readFixture("duskevm-deposit-history.json");
 const bridgeCalls = readFixture("bridge-calls-testnet.json");
@@ -303,5 +306,158 @@ describe("the bridge site's kept history", () => {
     // What the site keeps of its own stays.
     like(after.entries[h(3)], { routeId: "ethereum-to-dusk", sender: "0xabc" });
     assert.equal(node.detailQueries().length, 1);
+  });
+});
+
+// Both wallets keep a profile's shielded history as one record, by profile
+// and network: the notes it was worked out from, the decoys, and its rows
+// as they show them (`amount`, `feePaid`, `status`, `privacy`, `source`),
+// with the network's tree heights beside it. Their stores read the rows as
+// entries and keep entries as rows, and pass over a history they can't keep
+// unless the wallet was reset since.
+describe("the wallets' kept shielded history", () => {
+  /** @param {import("../src/shielded.js").ShieldedEntry} e */
+  const toRow = (e) => ({
+    amount: e.direction === "self" ? undefined : e.value,
+    blockHeight: e.blockHeight,
+    direction: e.direction,
+    error: e.error,
+    feePaid: e.fee ?? undefined,
+    hash: e.hash,
+    kind: e.kind,
+    privacy: "shielded",
+    source: "shielded",
+    status: e.success ? "executed" : "failed",
+    timestamp: e.timestamp ?? undefined,
+  });
+  /** @param {any} row @returns {import("../src/shielded.js").ShieldedEntry} */
+  const toEntry = (row) => ({
+    blockHeight: row.blockHeight,
+    direction: row.direction,
+    ...(row.error ? { error: row.error } : {}),
+    fee: row.feePaid ?? null,
+    hash: row.hash,
+    kind: row.kind,
+    success: row.status !== "failed",
+    timestamp: row.timestamp ?? null,
+    value: row.amount ?? "0",
+  });
+
+  // The rows the wallets keep for the profile that made the unshield.
+  const ROWS = [
+    {
+      amount: "2000000000",
+      blockHeight: 3861643,
+      direction: "in",
+      error: undefined,
+      feePaid: undefined,
+      hash: SHIELD,
+      kind: "shield",
+      privacy: "shielded",
+      source: "shielded",
+      status: "executed",
+      timestamp: 1_784_723_688_000,
+    },
+    {
+      amount: String(10_500_000_000n - 1_012_000_000n - 12_429_102n),
+      blockHeight: 3602438,
+      direction: "out",
+      error: undefined,
+      feePaid: "12429102",
+      hash: UNSHIELD,
+      kind: "unshield",
+      privacy: "shielded",
+      source: "shielded",
+      status: "executed",
+      timestamp: 1_782_131_528_000,
+    },
+    // The notes it spent, as it received them.
+    ...[
+      { amount: "500000000", blockHeight: 226951, hash: MADE_LEAF_1, timestamp: 1_747_065_974_000 },
+      { amount: "10000000000", blockHeight: 184423, hash: MADE_LEAF_0, timestamp: 1_746_640_694_000 },
+    ].map((row) => ({ ...row, direction: "in", error: undefined, feePaid: undefined, kind: "shield", privacy: "shielded", source: "shielded", status: "executed" })),
+  ];
+  const KEY = "testnet::profile";
+
+  /**
+   * A wallet's two stores over its records, as IndexedDB keeps them, bound
+   * to the reset count when they're made.
+   *
+   * @param {{ records: Map<string, any>, pools: Map<string, any>, resets: number }} db
+   */
+  function walletStores(db) {
+    const resets = db.resets;
+
+    return {
+      /** @type {import("../src/shielded.js").ShieldedStore} */
+      store: {
+        get: () => {
+          const kept = db.records.get(KEY);
+
+          return kept ? { ...structuredClone(kept), entries: kept.entries.map(toEntry) } : null;
+        },
+        put: async (record) => {
+          try {
+            if (db.resets !== resets) throw new StaleError();
+            if (db.full && record.entries.length) throw new Error("The store is full");
+            db.records.set(KEY, { ...structuredClone(record), at: 1, entries: record.entries.map(toRow), ownerKey: KEY });
+          } catch (error) {
+            // Asked again next time, unless the wallet was reset since.
+            if (error instanceof StaleError) throw error;
+          }
+        },
+      },
+      /** @type {import("../src/shielded.js").TreeHeightsStore} */
+      treeHeights: {
+        get: () => db.pools.get("testnet") ?? null,
+        put: (kept) => void db.pools.set("testnet", { ...kept, at: 1, network: "testnet" }),
+      },
+    };
+  }
+
+  /** @param {any} db */
+  const options = (db) => ({
+    ...walletStores(db),
+    archive: blocksNode().client,
+    notes: sentNotes,
+    synced: true,
+    tree: noteTree(treeLeaves()).tree,
+    valueOf,
+  });
+
+  it("reads a history kept before as its entries, asking nothing", async () => {
+    const db = { full: false, pools: new Map(), records: new Map([[KEY, { at: 1, decoys: [234329, 234369, GROWN, 3577762], entries: ROWS, fingerprint: "0s,1s,493,494,495", ownerKey: KEY }]]), resets: 0 };
+    const node = blocksNode();
+    const { entries, pending } = await shieldedHistory({ ...options(db), archive: node.client });
+
+    assert.equal(pending, false);
+    assert.equal(node.queries.length, 0);
+    assert.deepEqual(entries.map(toRow), ROWS);
+  });
+
+  it("keeps what it works out as the rows the wallets keep", async () => {
+    const db = { full: false, pools: new Map(), records: new Map(), resets: 0 };
+
+    await shieldedHistory(options(db));
+    like(db.records.get(KEY), { entries: ROWS, fingerprint: "0s,1s,493,494,495", ownerKey: KEY });
+    like(db.pools.get("testnet"), { network: "testnet", notes: 496 });
+  });
+
+  it("shows a history its store couldn't keep, and keeps nothing of one the wallet was reset under", async () => {
+    const full = { full: true, pools: new Map(), records: new Map(), resets: 0 };
+
+    assert.deepEqual((await shieldedHistory(options(full))).entries.map(toRow), ROWS);
+    assert.deepEqual(full.records.get(KEY).entries, []);
+
+    const reset = { full: false, pools: new Map(), records: new Map(), resets: 0 };
+    const stores = options(reset);
+    const node = blocksNode();
+
+    node.before = () => {
+      reset.resets += 1;
+      reset.records.clear();
+    };
+    await assert.rejects(shieldedHistory({ ...stores, archive: node.client }), StaleError);
+    assert.equal(reset.records.size, 0);
   });
 });
