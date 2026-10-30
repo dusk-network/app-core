@@ -221,9 +221,13 @@ function historyScanOf(value) {
   const found = read.found.flatMap((/** @type {any} */ each) => {
     const hash = duskHashOf(each?.hash);
     const height = heightOf(each?.height);
+    const value = each?.value;
 
-    return hash && height !== null ? [{ hash, height }] : [];
+    return hash && height !== null && typeof value === "string" && /^\d{1,20}$/.test(value) ? [{ hash, height, value }] : [];
   });
+
+  // One left out could be equal: it's read afresh.
+  if (found.length !== read.found.length) return null;
 
   return { found, lo, next: /** @type {HistoryScan["next"]} */ (next), of: read.of };
 }
@@ -1089,7 +1093,7 @@ async function detailsOf(archive, hashes, { args = false, network }, counter) {
  *
  * @param {Archive} archive
  * @param {ReadonlyArray<Reading>} items
- * @param {{ account: string, direction: "in" | "out", horizonMs: number, reach: number, pages: number, keep: (entry: HistoryEntry) => boolean, of: (item: Reading) => string, peersOf: (found: ReadonlyArray<{ hash: string, height: number }>) => Promise<{ peers: Queued[], unread: ReadonlyArray<{ hash: string, height: number }> }> }} read
+ * @param {{ account: string, direction: "in" | "out", horizonMs: number, reach: number, pages: number, keep: (entry: HistoryEntry) => boolean, of: (item: Reading) => string, peersOf: (found: HistoryScan["found"]) => Promise<{ peers: Queued[], unread: ReadonlyArray<{ hash: string, height: number }> }> }} read
  * @param {{ requests: number }} counter
  */
 async function readHistories(archive, items, { account, direction, horizonMs, keep, of, pages, peersOf, reach }, counter) {
@@ -1120,13 +1124,13 @@ async function readHistories(archive, items, { account, direction, horizonMs, ke
       while (state.next && walk.left > 0) {
         const next = /** @type {NonNullable<HistoryScan["next"]>} */ (state.next);
         const range = await historyRange(archive, { account, direction, from: next.from, page: next.page, pages: walk.left, to: next.to });
-        const found = /** @type {{ hash: string, height: number }[]} */ (state.found);
+        const found = /** @type {HistoryScan["found"][number][]} */ (state.found);
 
         counter.requests += range.requests;
         walk.left -= range.requests;
 
         for (const entry of range.entries) {
-          if (keep(entry) && !found.some((each) => each.hash === entry.hash)) found.push({ hash: entry.hash, height: entry.blockHeight });
+          if (keep(entry) && !found.some((each) => each.hash === entry.hash)) found.push({ hash: entry.hash, height: entry.blockHeight, value: String(entry.value) });
         }
 
         if (!range.complete) {
@@ -1190,16 +1194,16 @@ async function readHistories(archive, items, { account, direction, horizonMs, ke
  * Of the deposits a sender's history lists, those equal to the group's
  * (`to`, `amount`), from their calls: each with the block the app gave it
  * its credit can't be before; and those whose call or time the archive
- * doesn't give, which could be any deposit of up to what they paid. `calls`
- * keeps each call read.
+ * doesn't give, which could be any deposit of up to what they paid, but
+ * for one the app gave: its own facts tell. `calls` keeps each call read.
  *
  * @param {Archive} archive
  * @param {Network} net
  * @param {ReadonlyArray<{ hash: string, height: number }>} found
- * @param {{ amount: bigint, to: string, bounds: ReadonlyMap<string, bigint | null>, calls: Map<string, any> }} group
+ * @param {{ amount: bigint, to: string, bounds: ReadonlyMap<string, bigint | null>, calls: Map<string, any>, supplied: ReadonlyMap<string, DepositItem> }} group
  * @param {{ requests: number }} counter
  */
-async function depositPeers(archive, net, found, { amount, bounds, calls, to }, counter) {
+async function depositPeers(archive, net, found, { amount, bounds, calls, supplied, to }, counter) {
   const missing = found.flatMap((entry) => (calls.has(entry.hash) ? [] : [entry.hash]));
   const read = await detailsOf(archive, missing, { args: true, network: net }, counter);
 
@@ -1217,11 +1221,15 @@ async function depositPeers(archive, net, found, { amount, bounds, calls, to }, 
     // Failed, or a call that isn't a deposit: no DUSK left for DuskEVM.
     if (call?.success === false || bridged === null || (bridged && bridged.kind !== "deposit")) continue;
 
-    const at = msOf(call?.timestamp);
-    const paid = luxOf(bridged?.amount);
-    const recipient = addressOf(bridged?.to);
+    const own = supplied.get(entry.hash);
+    let at = msOf(call?.timestamp);
+    let paid = luxOf(bridged?.amount);
+    let recipient = addressOf(bridged?.to);
 
-    if (!call || at === null || paid === null || !recipient) unread.push(entry);
+    // One the app gave whose call can't be read: its own facts.
+    if (own && (!call || at === null || paid === null || !recipient)) ({ amount: paid, at, to: recipient } = own);
+
+    if (at === null || paid === null || !recipient) unread.push(entry);
     else if (recipient === to && paid === amount) peers.push({ at, given: false, hash: entry.hash, notBefore: bounds.get(entry.hash) ?? null, scan: null });
   }
 
@@ -1619,8 +1627,9 @@ async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows
   }
 
   // The block each deposit given can't be credited before, the app's own,
-  // and the deposits' calls, read once.
+  // the deposits given, and the deposits' calls, read once.
   const bounds = new Map(list.map((item) => [item.hash, item.notBefore]));
+  const supplied = new Map(list.map((item) => [item.hash, item]));
   /** @type {Map<string, any>} */
   const calls = new Map();
   const contract = duskEvmContracts(net)?.bridge;
@@ -1653,7 +1662,7 @@ async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows
             keep: (entry) => entry.counterparty === contract && entry.value >= amount,
             of: (item) => `${sender}:${item.height}:${amount}`,
             pages: HISTORY_PAGES,
-            peersOf: (found) => depositPeers(/** @type {Archive} */ (archive), net, found, { amount, bounds, calls, to }, read.counter),
+            peersOf: (found) => depositPeers(/** @type {Archive} */ (archive), net, found, { amount, bounds, calls, supplied, to }, read.counter),
             reach: Math.ceil((3 * DEPOSIT_HORIZON_MS) / DUSK_BLOCK_MS),
           },
           read.counter
@@ -1817,9 +1826,11 @@ export async function serviceArrivals({
     const { net: payout, route, to } = items[0];
     const horizonMs = horizonOf(route);
     const fees = new Set(items.map((item) => item.fee));
+    const least = payout + [...fees].reduce((a, fee) => (fee < a ? fee : a));
     // Each transfer's own hours of the route's account's history: every
     // transfer that named the same address, in any case, and could be paid
-    // before, the app's no longer looked for among them.
+    // before, the app's no longer looked for among them. Of those, the ones
+    // that could pay out as much under the group's fees, or under their own.
     /** @type {Awaited<ReturnType<typeof readHistories>>} */
     let history;
 
@@ -1834,7 +1845,13 @@ export async function serviceArrivals({
           keep: (entry) => entry.kind === "transfer" && entry.direction === "in" && entry.memo.toLowerCase() === to && entry.value >= payout,
           of: (item) => `${route.account}:${item.height}:${to}:${payout}`,
           pages: HISTORY_PAGES,
-          peersOf: (found) => servicePeers(archive, found, { bounds, facts, feeOf, fees, payout, route, to }, read.counter),
+          peersOf: (found) =>
+            servicePeers(
+              archive,
+              found.filter((entry) => BigInt(entry.value) >= least || feeOf.has(entry.hash)),
+              { bounds, facts, feeOf, fees, payout, route, to },
+              read.counter
+            ),
           reach: Math.ceil((3 * horizonMs) / DUSK_BLOCK_MS),
         },
         read.counter

@@ -110,6 +110,32 @@ describe("deposits to DuskEVM, on its RPC with the sender's history", () => {
     like((await depositArrivals({ ...options, deposits: [{ ...d1, scan: first.scan }] })).arrivals.get(dusk("d1")), { state: "waiting" });
   });
 
+  it("tells an earlier deposit the app gave apart by its own facts, where its call can't be read", async () => {
+    // An earlier deposit of twice as much to the same address, whose call the archive doesn't give.
+    const node = fakeArchive({
+      accounts: {
+        [SENDER]: {
+          receiver: [],
+          sender: [depositEntry({ hash: dusk("d1"), height: 5_000, sender: SENDER, value: 2n * TENTH }), depositEntry({ hash: dusk("d2"), height: 5_005, sender: SENDER, value: TENTH })],
+        },
+      },
+      details: { [dusk("d2")]: asDeposit(1_792_980_150) },
+      finalized: 10_000,
+    });
+    const chain = fakeChain({ head: 2_000, logs: [bridgeFinalized({ block: 300, from: FROM, hash: evmHash(1), to: RECIPIENT, wei: 2n * TENTH * DUSK }), credit(2, 310)] });
+    const { arrivals } = await depositArrivals({
+      archive: node.archiveClient(),
+      deposits: [sent("d1", second(100), { amount: 2n * TENTH, height: 5_000 }), sent("d2", second(150), { height: 5_005 })],
+      fetch: chain.fetch,
+      network: 2,
+      now: second(2_000),
+      via: "rpc",
+    });
+
+    like(arrivals.get(dusk("d1")), { hash: evmHash(1), state: "arrived" });
+    like(arrivals.get(dusk("d2")), { hash: evmHash(2), state: "arrived" });
+  });
+
   it("reads further down while a run of equal deposits reaches the bottom of what it read: the run's first takes the first credit", async () => {
     // Five equal deposits 100 minutes apart, from another device: the last one's own hours hold the four before it but the first.
     const heights = [10_000, 10_600, 11_200, 11_800, 12_400];
@@ -213,6 +239,25 @@ describe("transfers out to another chain, with the route's account's history", (
 
     like(after.arrivals.get(dusk("e1")), { reason: "unsure", state: "unknown" });
     like(after.arrivals.get(dusk("e2")), { hash: evmHash("0b"), state: "arrived" });
+  });
+
+  it("an earlier transfer that can't be read but paid too little to pay out as much under the route's fee leaves it as it is", async () => {
+    // One and a half DUSK naming the same address, just before: one DUSK's fee leaves less than the payout.
+    const node = archiveOf(
+      [moonlight({ hash: dusk("ef"), height: 900, memo: RECIPIENT, receiver: ROUTE.account, sender: SENDER, value: (3n * DUSK) / 2n }), received("e1", 1_000)],
+      [{ byte: "e1", height: 1_000, seconds: 1_792_980_100 }]
+    );
+    const chain = fakeChain({ head: 300_000, logs: [paid("0a", 1_500)] });
+    const { arrivals } = await serviceArrivals({
+      archive: node.archiveClient(),
+      fetch: chain.fetch,
+      network: net,
+      now: second(300_000),
+      transfers: [{ hash: dusk("e1"), route: ROUTE.id }],
+      waitMs: Infinity,
+    });
+
+    like(arrivals.get(dusk("e1")), { hash: evmHash("0a"), state: "arrived" });
   });
 
   it("a recent one searched with an old equal one is searched from its own block once the old one arrived", async () => {

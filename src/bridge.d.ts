@@ -99,13 +99,13 @@ export declare const ETH_BRIDGE_FINALIZED_TOPIC: "0x31b2166ff604fc5672ea5df08a78
  * all of it from `lo` up to the transfer's block once `lo` is set, the
  * range read next (`next`: its first block, its last and the page it
  * carries on from), and the transfers found in it that could be equal to
- * it.
+ * it, each with what it paid, in lux (`value`).
  */
 export type HistoryScan = {
   of: string;
   lo: number | null;
   next: { from: number; to: number; page: number } | null;
-  found: ReadonlyArray<{ hash: string; height: number }>;
+  found: ReadonlyArray<{ hash: string; height: number; value: string }>;
 };
 
 /**
