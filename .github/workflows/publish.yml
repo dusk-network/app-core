@@ -1,0 +1,81 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+  # To publish an existing tag, run this on the tag ("Use workflow from": the
+  # tag), so that provenance names the tagged commit. A tag given as an input
+  # would publish from the default branch's commit instead.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # GitHub-hosted, unlike the repo's other jobs, which run on core: npm's
+    # trusted publishing and provenance don't accept self-hosted runners.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # the GitHub release
+      id-token: write # JSR and npm authenticate this repository through OIDC
+    steps:
+      - name: Run only on a release tag
+        if: github.ref_type != 'tag'
+        run: |
+          echo "Run this on a release tag, not ${GITHUB_REF}"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Check the tag matches package.json and jsr.json
+        run: node scripts/check-versions.js "$GITHUB_REF_NAME"
+
+      - name: Take the release notes from CHANGELOG.md
+        run: node scripts/release-notes.js "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+
+      - name: Test
+        run: |
+          npm ci
+          npm test
+
+      # Each registry is skipped when it already has the version, so a failed
+      # run can be run again.
+      - name: Publish @dusk/app-core to JSR
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if curl -sfo /dev/null "https://jsr.io/@dusk/app-core/${version}_meta.json"; then
+            echo "JSR already has @dusk/app-core@${version}"
+          else
+            npx --yes jsr@0.14.3 publish
+          fi
+
+      # npm trusts this workflow (trusted publishing), so no token is needed.
+      - name: Publish @dusk-network/app-core to npm
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if npm view "@dusk-network/app-core@${version}" version >/dev/null 2>&1; then
+            echo "npm already has @dusk-network/app-core@${version}"
+          else
+            npm publish --provenance --access public
+          fi
+
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
+        with:
+          body_path: ${{ runner.temp }}/notes.md
+          generate_release_notes: true

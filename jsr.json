@@ -1,0 +1,9 @@
+{
+  "name": "@dusk/app-core",
+  "version": "0.1.0",
+  "license": "MPL-2.0",
+  "exports": {},
+  "publish": {
+    "include": ["CHANGELOG.md", "LICENSE", "README.md", "src"]
+  }
+}

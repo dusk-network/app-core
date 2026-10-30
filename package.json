@@ -1,0 +1,25 @@
+{
+  "name": "@dusk-network/app-core",
+  "version": "0.1.0",
+  "description": "Shared logic for the Dusk apps: public and shielded history, activity rows, bridge arrivals and DuskEVM withdrawals.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dusk-network/app-core.git"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=20.10"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check:versions": "node scripts/check-versions.js"
+  }
+}
