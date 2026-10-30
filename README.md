@@ -31,8 +31,9 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
 | `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); and the arrivals as `/activity` takes them (`arrivalsOf`) |
+| `@dusk-network/app-core/duskevm-withdrawals` | A DuskEVM withdrawal's life, signing aside: its start on DuskEVM (`withdrawalCall`), finding an address's withdrawals (`syncWithdrawals`, `explorerWithdrawals`, `withdrawalsByNonce`), and on Dusk where each is, its proof and its claim, ready for the app's wallet to sign (`createWithdrawals`) |
 
-Every entry point has its `.d.ts`. The one runtime dependency is `@dusk-network/networks`.
+Every entry point has its `.d.ts`. The one runtime dependency is `@dusk-network/networks`. `/duskevm-withdrawals` also takes [viem](https://viem.sh) (`^2.55.2`), an optional peer: an app installs it to use that entry, and no other entry imports it.
 
 ## History
 
@@ -209,6 +210,51 @@ arrivalsOf(arrivals); // Map { hash => { hash: "0x029e…", at: 1793080333000 } 
 A result is facts: `arrived`, with the other side's transaction, its block's time, the lux it paid and its block; `waiting`; or `unknown`, with why: `unsure` (a credit could be another's), `late` (none came in its window), `beyond` (the explorer's pages don't reach it), `searching` (carry on from `scan`), `expired`, `no-route`, `no-payout` or `error`. The words are the app's.
 
 `activityRows` of `/activity` takes the deposits that arrived as its `arrivals`: `arrivalsOf` gives them by the deposit's hash, the DuskEVM transaction that paid it and when, and the deposit's row says where it arrived. Its `claims` are DuskEVM withdrawals', which this entry point doesn't read.
+
+## DuskEVM withdrawals
+
+```js
+import { createWithdrawals, withdrawalCall } from "@dusk-network/app-core/duskevm-withdrawals";
+
+// The start, for the app's EVM wallet to send on DuskEVM.
+const start = withdrawalCall(chainId, { amountWei, sender: evmAddress, to: duskAccount }); // { to, data, value }
+
+const withdrawals = createWithdrawals({
+  network: chainId,
+  nodeUrl,
+  fetch: createMulticallFetch({ nodeUrl, multicallId }), // the reads one task starts go as one query
+  drivers: { optimismPortal: () => loadDriver(portalDriver), disputeGameFactory: () => loadDriver(factoryDriver) },
+  duskEvm: publicClient, // a viem client, or { url, fetch }
+});
+
+const status = await withdrawals.status(txHash, { submitter: account, proofGame });
+// { stage: "proven_waiting", reason: "game-in-progress", readyAt: 1793589639n, readyAtExact: false, facts: { amountWei, recipient, … }, … }
+
+const { call, claim } = await withdrawals.prepareProof(txHash, { submitter: account });
+// claim: when it can be claimed if proved now; call: { contractId, fnName, fnArgs, deposit: 0n, gasLimit, decoded }
+const claimCall = await withdrawals.claimCall(txHash, { submitter: account }); // once `status` says "ready_to_finalize"
+```
+
+- Only DUSK withdrawals on the bridge's route count, as Dusk's L1 bridge pays them out (`decodeWithdrawal` of `@dusk-network/networks/duskevm`): to Dusk's messenger, relaying DuskEVM's bridge to Dusk's, paying a Dusk account, or a contract only whole lux at the address DuskEVM gives it, and no one past a u64 of lux. Anything else is refused, for its status, its proof and its claim (`WithdrawalError`, `code: "not-a-withdrawal"`).
+- `stage` is where the withdrawal is for the account whose proof counts (`submitter`, a Dusk account or its Portal address; its recipient's account when none is given): "waiting_for_output", "ready_to_prove", "proven_waiting", "ready_to_finalize" or "finalized". `reason` says why it waits. A claim date is worked out as the Portal checks a claim (`claimFrom`), counted from Dusk's latest block, and is exact once the proof's game has resolved; `readyAt` is absent when the game can't be read now, so the date known so far stands. A claim is ready once the Portal takes it, its game has resolved for the defender, and its date has come: never while the game, the Portal's blacklist or the anchor state registry's word on it can't be read, nor on the Portal's own check alone, which may take just the proof and its game. A proof whose game the Portal refuses (blacklisted, retired, no longer respected, or won by the challenger) can't be claimed, whatever that check says (`proofRejected`, "proof-rejected"). `provenByOther` says another account holds a proof that stands, which this one can't claim with.
+- `proofGame`, the game the last status found the proof against, puts that game's reads in the same query as the Portal's: a check is one query.
+- A proof goes against a game that covers the withdrawal and has already resolved for its proposal, where the anchor state registry calls it proper and respected and it came after the respected game type last changed, so its claim date is exact when it's made; otherwise against the newest game that covers it, among the newest 64 (`gameSearchDepth`), that the Portal takes a proof against: a game the Portal blacklisted, the registry calls improper or not respected, or the challenger won is passed over for an older one, as is one whose standing can't be read. A proof isn't prepared for a claimed withdrawal, nor over a proof of the account's that stands: it would cost its fee for nothing. One the Portal refuses is made again against another game it takes.
+- `prepareProof` and `claimCall` refuse what would do nothing or can't be made: "claimed", "proven", "no-proof", "not-ready" (with the status), and "gas" for a withdrawal whose own gas takes the limit over the app's bound (`gasLimitUpper`, 1,000,000,000 by default). The gas limit is 50M and the withdrawal's own gas, at least 1M; the price is the app's.
+- A call is encoded by the Portal's data driver the app loaded, as the network's file names and pins it, and read back before it's handed over: its arguments must say exactly the withdrawal, the game, the output root proof and the proof's nodes they were built from, as Dusk Wallet reads them (`decoded`), or it's refused ("bad-call"). It sends no DUSK along; the app signs `fnArgs` as given, with no amount and no one paid but the account itself.
+- `prepareProof` gives `at`, when it was prepared: an app that shows a proof's claim date sends that proof, for as long as it chooses.
+- `claims(hashes, { submitter })` reads when the withdrawals an account proved can be claimed, by their hashes: claimed, ready, a date, none, or to prove again. Its map is `/activity`'s `claims`.
+- `timing()` is how long a withdrawal takes: the Portal's two delays, and how often outputs come.
+
+### Finding withdrawals
+
+- `syncWithdrawals({ address, duskEvm, network, state })` reads an address's withdrawals from the bridge's own `ETHBridgeInitiated` events, the newest final blocks first, a window of 100,000 blocks at a time (narrower where the RPC asks for it), 8 requests a run. It gives the app the state to keep, and the next run carries on below and reads only what is new above. Under a final head lower than the last run's, what it covered and found above it is dropped, and read again.
+- `explorerWithdrawals({ address, network, fetch })` lists the address's own calls of the bridge on DuskEVM's explorer, each with the explorer's word for it (`explorerStage`), and `withdrawalsByNonce({ nonces, network, fetch })` finds the DuskEVM transactions of withdrawals known by the nonces their proofs and claims on Dusk carry.
+
+### Reads and caches
+
+- The Portal and the dispute game factory are read with the app's drivers; each game's hub and the anchor state registry raw. Reads go to the node's contracts through the app's `fetch` (its Multicall for Dusk batcher), sent again twice at most when the node answers 429, 502, 503 or 504; a refusal carries the contract's own words. `maxBatch` is how many reads one query holds (32 by default), each game checked taking 4: its status, the Portal's blacklist, and the registry's two answers.
+- What a deployment doesn't change is read once: each game's hub, each game type's hub, each hub's clock limit. `cache`, a `Map` of text by default, is where they're kept: an app can keep them across sessions.
+- Dusk's latest block comes from `latestBlock`, or the node's GraphQL. Without it, a proved withdrawal's status fails: its date can't be worked out, and no claim is built.
 
 ## License
 

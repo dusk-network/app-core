@@ -378,3 +378,94 @@ depositArrivals({ deposits: [], network: 2, via: "adapter" });
 serviceArrivals({ network: 1, transfers: [] });
 // @ts-expect-error a migration names its route
 migrationPayouts({ entries: [], migrations: [{ amount: 1n, hash: "0xab" }], network: 1 });
+
+// `/duskevm-withdrawals`: a withdrawal's life, signing aside.
+import {
+  EXPLORER_ITEMS,
+  GAME_SEARCH_DEPTH,
+  GAS_LIMIT_UPPER,
+  MAX_BATCH,
+  STAGE,
+  WITHDRAWAL_MIN_GAS_LIMIT,
+  WithdrawalError,
+  createWithdrawals,
+  explorerStage,
+  explorerWithdrawals,
+  parseWithdrawalReceipt,
+  syncWithdrawals,
+  withdrawalCall,
+  withdrawalsByNonce,
+  type DataDriver,
+  type ExplorerWithdrawal,
+  type FoundWithdrawal,
+  type PortalCall,
+  type PreparedProof,
+  type ReceiptWithdrawal,
+  type WaitReason,
+  type WithdrawalClaim,
+  type WithdrawalScan,
+  type WithdrawalStage,
+  type WithdrawalStatus,
+  type WithdrawalTiming,
+  type Withdrawals,
+} from "@dusk-network/app-core/duskevm-withdrawals";
+import { createPublicClient, http } from "viem";
+
+const driver: DataDriver = { decodeOutputFn: (_fn, bytes) => bytes.length, encodeInputFn: (_fn, json) => new TextEncoder().encode(json) };
+// DuskEVM's RPC as a viem client, or a URL and fetch.
+const client = createPublicClient({ transport: http("https://rpc.testnet.evm.dusk.network") });
+const withdrawals: Withdrawals = createWithdrawals({
+  cache: new Map<string, string>(),
+  drivers: { disputeGameFactory: async () => driver, optimismPortal: Promise.resolve(driver) },
+  duskEvm: client,
+  fetch,
+  gameSearchDepth: 64,
+  latestBlock: async () => ({ height: 1n, timestamp: 2n }),
+  maxBatch: 64,
+  network: 2,
+  nodeUrl: "https://testnet.nodes.dusk.network",
+});
+const byUrl: Withdrawals = createWithdrawals({ drivers: { disputeGameFactory: driver, optimismPortal: driver }, duskEvm: { fetch, url: "https://rpc.example" }, network: networks.testnet, nodeUrl: "https://x" });
+const statusRead: Promise<WithdrawalStatus> = withdrawals.status("0x00", { proofGame: null, submitter: "0x2c" });
+const prepared: Promise<PreparedProof> = withdrawals.prepareProof("0x00", { gasLimitUpper: GAS_LIMIT_UPPER, submitter: "0x2c" });
+const claimed: Promise<PortalCall> = withdrawals.claimCall("0x00", { submitter: "0x2c" });
+const claimsRead: Promise<Map<string, WithdrawalClaim>> = withdrawals.claims(["0x8e"], { submitter: "0x2c" });
+const timed: Promise<WithdrawalTiming> = byUrl.timing();
+const received: Promise<ReceiptWithdrawal> = byUrl.receipt("0x00");
+void (async () => {
+  const s = await statusRead;
+  const stage: WithdrawalStage = s.stage;
+  const reason: WaitReason | null = s.reason;
+  const readyAt: bigint | null | undefined = s.readyAt;
+  const pays: string = s.facts.recipient.kind === "account" ? s.facts.recipient.account : s.facts.recipient.contractId;
+  const { call, claim, proof } = await prepared;
+  const fnArgs: Uint8Array = call.fnArgs;
+  const deposit: 0n = call.deposit;
+  const index: bigint = proof.disputeGameIndex;
+  const at: number | null | undefined = claim?.at;
+  const decodedHash: `0x${string}` = (await claimed).decoded.hash;
+  // As `/activity` takes `claims`.
+  const forActivity: ActivityInput["claims"] = await claimsRead;
+  void [stage, reason, readyAt, pays, fnArgs, deposit, index, at, decodedHash, forActivity, timed, received];
+})();
+try {
+  parseWithdrawalReceipt(2, null);
+} catch (error) {
+  if (error instanceof WithdrawalError) {
+    const why: "not-found" | string = error.code;
+    const was: WithdrawalStatus | null = error.status;
+    void [why, was];
+  }
+}
+const start: { to: `0x${string}`; data: `0x${string}`; value: bigint } = withdrawalCall(2, { amountWei: 10n ** 18n, minGasLimit: WITHDRAWAL_MIN_GAS_LIMIT, sender: "0x00", to: "x" });
+const scan: Promise<{ found: FoundWithdrawal[]; requests: number; state: WithdrawalScan }> = syncWithdrawals({ address: "0x00", duskEvm: client, network: 2 });
+const listed: Promise<ExplorerWithdrawal[]> = explorerWithdrawals({ address: "0x00", maxItems: EXPLORER_ITEMS, network: 2 });
+const byNonce: Promise<Map<string, ExplorerWithdrawal>> = withdrawalsByNonce({ network: 2, nonces: [1n] });
+const stageOf: WithdrawalStage | null = explorerStage("Relayed");
+const named: "finalized" = STAGE.FINALIZED;
+void [start, scan, listed, byNonce, stageOf, named, GAME_SEARCH_DEPTH, MAX_BATCH];
+// @ts-expect-error a claim sends no DUSK along
+const sendsDusk: PortalCall["deposit"] = 1n;
+// @ts-expect-error a proof is for one account
+void withdrawals.prepareProof("0x00", {});
+void sendsDusk;

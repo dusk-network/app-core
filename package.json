@@ -25,6 +25,10 @@
       "types": "./src/bridge.d.ts",
       "default": "./src/bridge.js"
     },
+    "./duskevm-withdrawals": {
+      "types": "./src/duskevm-withdrawals.d.ts",
+      "default": "./src/duskevm-withdrawals.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -39,10 +43,23 @@
     "typecheck": "npx --yes --package=typescript@5.9.3 -- tsc -p test-types",
     "check:versions": "node scripts/check-versions.js",
     "check:jsr": "npx --yes jsr@0.14.3 publish --dry-run --allow-dirty",
+    "fetch:drivers": "node scripts/fetch-drivers.js",
     "smoke:history": "node scripts/smoke-history.js",
-    "smoke:bridge": "node scripts/smoke-bridge.js"
+    "smoke:bridge": "node scripts/smoke-bridge.js",
+    "smoke:withdrawals": "node scripts/smoke-withdrawals.js"
   },
   "dependencies": {
     "@dusk-network/networks": "0.3.0"
+  },
+  "peerDependencies": {
+    "viem": "^2.55.2"
+  },
+  "peerDependenciesMeta": {
+    "viem": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "viem": "2.55.2"
   }
 }

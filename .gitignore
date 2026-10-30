@@ -1,3 +1,5 @@
 node_modules/
 *.tgz
 .DS_Store
+# Fetched by scripts/fetch-drivers.js and checked against the network file.
+test/fixtures/drivers/

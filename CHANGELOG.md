@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `/duskevm-withdrawals`: a DuskEVM withdrawal's start, finding it again, its status and claim date, and its proof's and claim's calls, checked before they're handed over to sign
+
 ## [0.2.0]
 
 ### Added
