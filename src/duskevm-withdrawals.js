@@ -971,13 +971,24 @@ function createReads({ cache, contracts, drivers, fetch, nodeUrl }) {
   const gameKey = (proxy) => `hub:${contracts.disputeGameFactory}:${proxy.toLowerCase()}`;
 
   /**
-   * The hub a game is on, as the Portal reads it: the factory names it.
+   * The hub a game is on, as the Portal reads it: the factory names it, as
+   * it was the game type's when the game was made. A type's hub can change
+   * since; its games stay where they were. None, and nothing kept, for a
+   * game the factory didn't make.
    *
    * @param {string} proxy
    * @returns {Promise<string>}
    */
   const hubOfGame = (proxy) =>
-    known(cache, inflight, gameKey(proxy), () => factory("gameContractId", addressBytes(proxy)).then(contractIdHex));
+    known(cache, inflight, gameKey(proxy), () =>
+      factory("gameContractId", addressBytes(proxy)).then((value) => {
+        const hubId = contractIdHex(value);
+
+        if (/^0+$/.test(hubId)) throw new Error("The factory names no hub for the game");
+
+        return hubId;
+      })
+    );
 
   /**
    * A game's hub, if it was read before: a check can then read the game in
@@ -1189,16 +1200,18 @@ export function createWithdrawals(options) {
       : [true, true];
 
   /**
-   * A game's standing, its reads started together so they go in one query:
-   * its status on `hubId`, none where its hub isn't known.
+   * A game's standing: its status on its own hub, which the factory names
+   * (a type's hub answers for a game it doesn't hold as in progress), with
+   * the Portal's blacklist and the registry's two answers. Those don't wait
+   * for the hub: they go in one query with it, or with the status once the
+   * hub was read.
    *
-   * @param {string | null} hubId
    * @param {string} proxy
    * @returns {Promise<Standing>}
    */
-  const standingOf = (hubId, proxy) =>
+  const standingOf = (proxy) =>
     Promise.all([
-      hubId ? hub(hubId)("statusForGame", addressBytes(proxy)).then(Number, () => null) : null,
+      reads.hubOfGame(proxy).then((hubId) => hub(hubId)("statusForGame", addressBytes(proxy))).then(Number, () => null),
       portal("disputeGameBlacklist", addressBytes(proxy)).then(Boolean, () => null),
       ...registryReads(proxy).map((read) => Promise.resolve(read).catch(() => null)),
     ]).then(([status, blacklisted, proper, respected]) => ({ blacklisted, proper, respected, status }));
@@ -1246,16 +1259,17 @@ export function createWithdrawals(options) {
   /**
    * The first of a page of games that covers the withdrawal, whose root
    * claim is its output's, and that the Portal takes a proof against, with
-   * its proof. The page's metadata goes in one query.
+   * its proof, and whether any covered it. The page's metadata goes in one
+   * query.
    *
    * @param {any[]} games
    * @param {ReceiptWithdrawal} withdrawal
-   * @param {number} gameType
-   * @returns {Promise<{ proof: OutputProof | null, lastError: Error | null }>}
+   * @returns {Promise<{ proof: OutputProof | null, lastError: Error | null, covered: boolean }>}
    */
-  async function proofInGames(games, withdrawal, gameType) {
+  async function proofInGames(games, withdrawal) {
     /** @type {Error | null} */
     let lastError = null;
+    let covered = false;
     const indexes = games.map((game) => bigOf(tupleValue(game, "index", 0)));
     const metadata = await Promise.all(indexes.map((index) => settle(factory("gameMetadataAtIndex", u256Bytes(index)))));
 
@@ -1270,12 +1284,14 @@ export function createWithdrawals(options) {
 
         if (l2BlockNumber < withdrawal.blockNumber) continue;
 
+        covered = true;
+
         const proof = await outputProof(withdrawal.withdrawalHash, l2BlockNumber);
 
         if (proof.outputRoot.toLowerCase() !== rootClaim) continue;
 
         const disputeGameProxy = addressHex(tupleValue(await factory("gameAtIndex", u256Bytes(index)), "gameProxy", 2));
-        const standing = await standingOf(await reads.hubOfType(gameType), disputeGameProxy);
+        const standing = await standingOf(disputeGameProxy);
 
         // Not one blacklisted, retired, no longer respected, or won by the
         // challenger: the Portal takes no proof against it. Nor one whose
@@ -1287,13 +1303,13 @@ export function createWithdrawals(options) {
           continue;
         }
 
-        return { lastError, proof: { ...proof, disputeGameIndex: index, disputeGameProxy, l2BlockNumber } };
+        return { covered, lastError, proof: { ...proof, disputeGameIndex: index, disputeGameProxy, l2BlockNumber } };
       } catch (error) {
         lastError = asError(error);
       }
     }
 
-    return { lastError, proof: null };
+    return { covered, lastError, proof: null };
   }
 
   /**
@@ -1308,17 +1324,19 @@ export function createWithdrawals(options) {
     let remaining = searchDepth;
     /** @type {Error | null} */
     let lastError = null;
+    let covered = false;
 
     while (remaining > 0n) {
       const games = await factory("findLatestGames", [gameType, u256Bytes(from), u256Bytes(remaining > SCAN_PAGE ? SCAN_PAGE : remaining)]);
 
       if (!Array.isArray(games) || !games.length) break;
 
-      const found = await proofInGames(games, withdrawal, gameType);
+      const found = await proofInGames(games, withdrawal);
 
       if (found.proof) return found;
 
       lastError = found.lastError ?? lastError;
+      covered ||= found.covered;
 
       const oldest = bigOf(tupleValue(games[games.length - 1], "index", 0));
 
@@ -1328,25 +1346,25 @@ export function createWithdrawals(options) {
       remaining -= BigInt(games.length);
     }
 
-    return { lastError, proof: null };
+    return { covered, lastError, proof: null };
   }
 
   /**
    * The first of `games` that covers the withdrawal, has resolved for its
    * proposal, and that the Portal would take a proof against, with the
-   * withdrawal's proof against it. Each game's status, the Portal's
-   * blacklist and the registry's two answers go to the node a query at a
-   * time, newest first, until one passes. `stop` when DuskEVM no longer
-   * gives a block's proof: an older game's won't come either.
+   * withdrawal's proof against it. Each game's standing (`standingOf`) goes
+   * to the node a batch at a time, newest first, until one passes. `stop`
+   * when DuskEVM no longer gives a block's proof: an older game's won't
+   * come either.
    *
    * @param {ReturnType<typeof searchedGame>[]} games
-   * @param {{ hubId: string, rules: GameRules, withdrawal: ReceiptWithdrawal }} search
+   * @param {{ rules: GameRules, withdrawal: ReceiptWithdrawal }} search
    * @returns {Promise<{ proof?: OutputProof, stop?: boolean }>}
    */
-  async function resolvedIn(games, { hubId, rules, withdrawal }) {
+  async function resolvedIn(games, { rules, withdrawal }) {
     for (let from = 0; from < games.length; from += perQuery) {
       const batch = games.slice(from, from + perQuery);
-      const checked = await Promise.all(batch.map((game) => standingOf(hubId, game.proxy).then((standing) => ({ ...game, ...standing }))));
+      const checked = await Promise.all(batch.map((game) => standingOf(game.proxy).then((standing) => ({ ...game, ...standing }))));
 
       for (const game of checked.filter((each) => isEligibleGame(each, rules) && isTaken(each))) {
         try {
@@ -1382,8 +1400,9 @@ export function createWithdrawals(options) {
     /** @param {bigint} from */
     const page = async (from) =>
       /** @type {any[]} */ (await factory("findLatestGames", [gameType, u256Bytes(from), u256Bytes(BigInt(RESOLVED_PAGE))])).map(searchedGame);
-    // In one query: the type's hub, the newest games, and when the respected
-    // game type last changed. Games created then or before are retired.
+    // In one query: the type's hub, whose clock says which games are old
+    // enough to have resolved, the newest games, and when the respected game
+    // type last changed. Games created then or before are retired.
     const [hubId, newest, updatedAt] = await Promise.all([
       reads.hubOfType(gameType),
       page(gameCount - 1n),
@@ -1410,7 +1429,7 @@ export function createWithdrawals(options) {
 
       const found = await resolvedIn(
         old.filter((game) => isCandidateGame(game, rules)),
-        { hubId, rules, withdrawal }
+        { rules, withdrawal }
       );
 
       if (found.proof || found.stop) return found.proof ?? null;
@@ -1428,22 +1447,45 @@ export function createWithdrawals(options) {
    * there is one.
    *
    * @param {{ snapshot: Snapshot, withdrawal: ReceiptWithdrawal, tip?: DuskTip | null }} search
-   * @returns {Promise<{ proof: OutputProof | null, reason: WaitReason | null, error: Error | null }>}
+   * @returns {Promise<{ proof: OutputProof | null, reason: WaitReason | null, error: Error | null, covered: boolean }>}
    */
   async function findProof({ snapshot, tip = null, withdrawal }) {
     const { gameCount, gameType } = snapshot;
 
-    if (gameCount === 0n) return { error: null, proof: null, reason: "no-games" };
+    if (gameCount === 0n) return { covered: false, error: null, proof: null, reason: "no-games" };
 
     if (tip) {
       const resolved = await resolvedProof({ gameCount, gameType, tip, withdrawal }).catch(() => null);
 
-      if (resolved) return { error: null, proof: resolved, reason: null };
+      if (resolved) return { covered: true, error: null, proof: resolved, reason: null };
     }
 
     const found = await scanGames({ gameType, start: gameCount - 1n, withdrawal });
 
-    return found.proof ? { error: null, proof: found.proof, reason: null } : { error: found.lastError, proof: null, reason: "no-output" };
+    return found.proof
+      ? { covered: true, error: null, proof: found.proof, reason: null }
+      : { covered: found.covered, error: found.lastError, proof: null, reason: "no-output" };
+  }
+
+  /**
+   * The game a status says a proof would go against now: the newest the
+   * Portal takes, among the newest `searchDepth`; where none of those
+   * covering the withdrawal is one (`covered`: a proof went against one),
+   * one that has resolved, as `prepareProof` finds it. A status then offers
+   * a proof wherever one can be prepared.
+   *
+   * @param {{ snapshot: Snapshot, withdrawal: ReceiptWithdrawal, tip?: Promise<DuskTip> | DuskTip | null, covered?: boolean }} search
+   */
+  async function provableProof({ covered = false, snapshot, tip = null, withdrawal }) {
+    const found = await findProof({ snapshot, withdrawal });
+
+    if (found.proof || snapshot.gameCount === 0n || !(covered || found.covered)) return found;
+
+    const resolved = await Promise.resolve(tip ?? latestBlock())
+      .then((at) => resolvedProof({ gameCount: snapshot.gameCount, gameType: snapshot.gameType, tip: at, withdrawal }))
+      .catch(() => null);
+
+    return resolved ? { covered: true, error: null, proof: resolved, reason: null } : found;
   }
 
   /**
@@ -1519,9 +1561,8 @@ export function createWithdrawals(options) {
    * @param {`0x${string}`} withdrawalHash
    * @param {`0x${string}` | null} own
    * @param {bigint} count
-   * @param {number} gameType
    */
-  async function provenByOther(withdrawalHash, own, count, gameType) {
+  async function provenByOther(withdrawalHash, own, count) {
     const n = Number(count > OTHER_PROOFS ? OTHER_PROOFS : count);
 
     if (n === 0) return false;
@@ -1535,10 +1576,7 @@ export function createWithdrawals(options) {
 
     if (!submitters.length) return false;
 
-    const [hubId, proofs] = await Promise.all([
-      reads.hubOfType(gameType).catch(() => null),
-      Promise.all(submitters.map((address) => portal("provenWithdrawals", [id, addressBytes(address)]))),
-    ]);
+    const proofs = await Promise.all(submitters.map((address) => portal("provenWithdrawals", [id, addressBytes(address)])));
     const standing = proofs
       .map((proof, index) => ({
         address: submitters[index],
@@ -1554,7 +1592,7 @@ export function createWithdrawals(options) {
             () => "ready",
             (error) => asError(error).message
           ),
-          standingOf(hubId, proxy),
+          standingOf(proxy),
         ])
       )
     );
@@ -1577,7 +1615,7 @@ export function createWithdrawals(options) {
    * @returns {Promise<WithdrawalStatus>}
    */
   async function unproven(base, snapshot) {
-    const found = await findProof({ snapshot, withdrawal: base });
+    const found = await provableProof({ snapshot, tip: snapshot.tip, withdrawal: base });
 
     if (!found.proof) {
       return { ...base, ...(found.error ? { error: found.error } : {}), reason: found.reason, stage: STAGE.WAITING_FOR_OUTPUT };
@@ -1587,21 +1625,22 @@ export function createWithdrawals(options) {
       ...base,
       disputeGameIndex: found.proof.disputeGameIndex,
       proofL2BlockNumber: found.proof.l2BlockNumber,
-      provenByOther: await provenByOther(base.withdrawalHash, base.proofSubmitter, snapshot.proofSubmitterCount, snapshot.gameType),
+      provenByOther: await provenByOther(base.withdrawalHash, base.proofSubmitter, snapshot.proofSubmitterCount),
       stage: STAGE.READY_TO_PROVE,
     };
   }
 
   /**
    * A proof the Portal won't take: proved again against another game it
-   * takes, where there is one.
+   * takes, where there is one, as `prepareProof` would find it.
    *
    * @param {WithdrawalStatus} base
    * @param {Snapshot} snapshot
    * @param {string} proxy The game of the proof refused
+   * @param {DuskTip} tip
    */
-  async function replacement(base, snapshot, proxy) {
-    const found = await findProof({ snapshot, withdrawal: base });
+  async function replacement(base, snapshot, proxy, tip) {
+    const found = await provableProof({ covered: true, snapshot, tip, withdrawal: base });
 
     if (found.proof && found.proof.disputeGameProxy !== proxy) {
       return {
@@ -1674,7 +1713,7 @@ export function createWithdrawals(options) {
     // A proof whose game the Portal refuses is made again, whatever the
     // Portal's own check says: it may take just the proof and its game.
     if (isRefused(standing)) {
-      return { ...record, claimOverdue: false, readyAt: null, readyAtExact: false, ...(await replacement(base, snapshot, proxy)) };
+      return { ...record, claimOverdue: false, readyAt: null, readyAtExact: false, ...(await replacement(base, snapshot, proxy, tip)) };
     }
 
     // Nothing is ready, nor dated, before all of that is read.
@@ -1808,9 +1847,12 @@ export function createWithdrawals(options) {
 
     // A proof of a claimed withdrawal, or one this account has already,
     // costs its fee for nothing. Only a proof the Portal rejected is made
-    // again.
+    // again, where its status found a game to make it against.
+    /** @type {WithdrawalStatus | null} */
+    let current = null;
+
     if (snapshot.finalized || (snapshot.proven.timestamp !== 0n && snapshot.proven.disputeGameProxy !== ZERO_ADDRESS)) {
-      const current = await statusOf(withdrawal, owner, snapshot);
+      current = await statusOf(withdrawal, owner, snapshot);
 
       if (current.stage === STAGE.FINALIZED) throw new WithdrawalError("claimed", undefined, { status: current });
       if (current.stage !== STAGE.READY_TO_PROVE) throw new WithdrawalError("proven", undefined, { status: current });
@@ -1820,6 +1862,8 @@ export function createWithdrawals(options) {
     const found = await findProof({ snapshot, tip, withdrawal });
 
     if (!found.proof) throw new WithdrawalError("no-proof", undefined, { cause: found.error ?? undefined, reason: found.reason });
+    // Never again against the game the Portal refuses the account's proof against.
+    if (current && found.proof.disputeGameProxy === snapshot.proven.disputeGameProxy) throw new WithdrawalError("proven", undefined, { status: current });
 
     const [claim, call] = await Promise.all([
       claimIfProvedNow(snapshot, found.proof, tip),

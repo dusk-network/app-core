@@ -393,9 +393,10 @@ const jsonBytes = (value) =>
   );
 
 /**
- * @typedef {Record<string, (args: any) => unknown>} Handlers
- *   A contract's answers, by function: the arguments in, the answer out; a
- *   handler that throws is a refusal, its message the contract's.
+ * @typedef {Record<string, (args: any, contractId: string) => unknown>} Handlers
+ *   A contract's answers, by function: the arguments in, and the contract
+ *   asked (which hub, for a hub's), the answer out; a handler that throws
+ *   is a refusal, its message the contract's.
  */
 
 /**
@@ -411,7 +412,7 @@ const jsonBytes = (value) =>
 export function fakeChain({ dgf = {}, drivers = { disputeGameFactory: jsonDriver(), optimismPortal: jsonDriver() }, hub = {}, l2 = {}, portal = {}, registry = {}, tip = TIP }) {
   /** @type {string[][]} */
   const queries = [];
-  /** @type {{ contract: string, fn: string, args: any }[]} */
+  /** @type {{ contract: string, fn: string, args: any, id: string }[]} */
   const calls = [];
   /** @type {string[]} */
   const hubs = [];
@@ -436,14 +437,14 @@ export function fakeChain({ dgf = {}, drivers = { disputeGameFactory: jsonDriver
 
     if (id !== PORTAL && id !== FACTORY && id !== REGISTRY) hubs.push(id);
 
-    calls.push({ args, contract: id === PORTAL ? "portal" : id === FACTORY ? "dgf" : id === REGISTRY ? "registry" : "hub", fn });
+    calls.push({ args, contract: id === PORTAL ? "portal" : id === FACTORY ? "dgf" : id === REGISTRY ? "registry" : "hub", fn, id });
 
     const handler = table[fn];
 
     if (!handler) return new Response(`${fn} isn't answered here`, { status: 500 });
 
     try {
-      const value = await handler(args);
+      const value = await handler(args, id);
 
       if (!raw) return new Response(jsonBytes(value));
       if (value instanceof Uint8Array) return new Response(value);

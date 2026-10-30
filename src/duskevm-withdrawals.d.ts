@@ -124,7 +124,8 @@ export declare const STAGE: Readonly<{
 /**
  * Why a withdrawal waits, or must be proved again:
  * - "no-games": no dispute game has been proposed yet;
- * - "no-output": no game covers it yet (`error` says what couldn't be read while looking, if anything);
+ * - "no-output": no game the Portal takes a proof against covers it yet (`error` says what couldn't be read while
+ *   looking, if anything);
  * - "proof-rejected": the account's proof can't be claimed, as the Portal refuses its game (blacklisted, retired, no
  *   longer respected, or won by the challenger), whatever its own check says: it's ready to prove again against
  *   another game the Portal takes, or waits for one;
@@ -231,8 +232,9 @@ export type WithdrawalStatus = ReceiptWithdrawal & {
   provenByOther?: boolean;
   /**
    * For "ready_to_prove": the game a proof would go against now, the newest
-   * that covers it and that the Portal takes a proof against, and the
-   * DuskEVM block it covers.
+   * that covers it and that the Portal takes a proof against, else one
+   * that has resolved, as `prepareProof` finds it; and the DuskEVM block it
+   * covers.
    */
   disputeGameIndex?: bigint;
   proofL2BlockNumber?: bigint;

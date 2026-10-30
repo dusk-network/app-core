@@ -11,7 +11,7 @@ import { encodeAbiParameters, keccak256, toRlp } from "viem";
 
 import { WithdrawalError, createWithdrawals, syncWithdrawals } from "../src/duskevm-withdrawals.js";
 import { like } from "./fixtures/helpers.js";
-import { DRIVERS_MISSING, LOG_1008, TESTNET, TIP, TX, bytes, fakeChain, hexOf, indexOfProxy, jsonDriver, pinnedDriver, receiptOf, u256, withdrawalsOn } from "./fixtures/withdrawals.js";
+import { DRIVERS_MISSING, HUB, LOG_1008, TESTNET, TIP, TX, bytes, fakeChain, hexOf, indexOfProxy, jsonDriver, pinnedDriver, receiptOf, u256, withdrawalsOn } from "./fixtures/withdrawals.js";
 
 const SUBMITTER = `0x${"2c".repeat(20)}`;
 const PROVEN_GAME = Array(20).fill(0x1e);
@@ -45,11 +45,18 @@ const withDriver = { skip: portal ? false : DRIVERS_MISSING };
  * indexes 0 up, the newest last: each covers the withdrawal with its
  * output's root, and says what `games` says. The account (0x2c…) proved it
  * against `proven`'s game when given (its proof made at `provenAt`);
- * another account (0x3d…) against `other`'s, when given.
+ * another account (0x3d…) against `other`'s, when given. Every game is on
+ * hub d5…, which the factory names for it; with `moved`, the game type's
+ * hub is now e7…, which holds none of them and answers for a game it
+ * doesn't hold as a hub does: in progress, never made; the factory names
+ * no hub for the games `hubless` lists. `depth` is how many of the newest
+ * games a proof is looked for among. With `provenIndex`, the account's
+ * proof went against that game of `games`.
  *
- * @param {{ games?: Game[], proven?: Game | null, other?: Game | null, provenAt?: bigint, check?: () => unknown, tip?: any, registry?: boolean, finality?: number }} options
+ * @param {{ games?: Game[], proven?: Game | null, other?: Game | null, provenAt?: bigint, check?: () => unknown, tip?: any, registry?: boolean, finality?: number, moved?: boolean, depth?: number, hubless?: number[], provenIndex?: number }} options
  */
-function chainOf({ check = () => undefined, finality = 302_400, games = [], other = null, proven = null, provenAt = 45_252_320n, registry = true, tip = TIP }) {
+function chainOf({ check = () => undefined, depth, finality = 302_400, games = [], hubless = [], moved = false, other = null, proven = null, provenAt = 45_252_320n, provenIndex, registry = true, tip = TIP }) {
+  const provenGame = provenIndex === undefined ? PROVEN_GAME : [...Array(18).fill(0x9a), provenIndex >> 8, provenIndex & 0xff];
   /** @param {number[]} address */
   const gameOf = (address) => (hexOf(address) === hexOf(PROVEN_GAME) ? proven : hexOf(address) === hexOf(OTHER_GAME) ? other : games[indexOfProxy(address)]);
   const submitters = [...(proven ? [SUBMITTER] : []), ...(other ? [OTHER] : [])];
@@ -73,14 +80,16 @@ function chainOf({ check = () => undefined, finality = 302_400, games = [], othe
           return { ["extra_data"]: u256(SENT), index: u256(i), metadata: [0, 0, 0, 8, ...u256(created(i)).slice(24), ...proxyOf(i)], ["root_claim"]: ROOT, timestamp: Number(created(i)) };
         }),
       gameAtIndex: (/** @type {number[]} */ index) => ({ gameProxy: proxyOf(indexOf(index)) }),
-      gameContractId: () => Array(32).fill(0xd5),
+      gameContractId: (/** @type {number[]} */ a) => Array(32).fill(hexOf(a).startsWith("0x9a") && hubless.includes(indexOfProxy(a)) ? 0 : 0xd5),
       gameCount: () => u256(games.length),
       gameMetadataAtIndex: () => ({ extraData: [], l2SequenceNumber: u256(SENT), rootClaim: ROOT }),
-      virtualGameHubId: () => Array(32).fill(0xd5),
+      virtualGameHubId: () => Array(32).fill(moved ? 0xe7 : 0xd5),
     },
     drivers: { disputeGameFactory: jsonDriver(), optimismPortal: jsonDriver(portal) },
     hub: {
-      createdAtForGame: (/** @type {number[]} */ a) => {
+      createdAtForGame: (/** @type {number[]} */ a, /** @type {string} */ hubId) => {
+        if (hubId !== HUB) return 0n;
+
         const game = gameOf(a);
 
         if (!game || game.unreadable === "createdAt") throw new Error("The createdAt read failed");
@@ -89,8 +98,8 @@ function chainOf({ check = () => undefined, finality = 302_400, games = [], othe
         return game.createdAt ?? ([hexOf(PROVEN_GAME), hexOf(OTHER_GAME)].includes(hexOf(a)) ? 45_250_000n : created(indexOfProxy(a)));
       },
       maxClockDuration: () => 302_400n,
-      resolvedAtForGame: (/** @type {number[]} */ a) => read(a, "resolvedAt") ?? 0n,
-      statusForGame: (/** @type {number[]} */ a) => read(a, "status"),
+      resolvedAtForGame: (/** @type {number[]} */ a, /** @type {string} */ hubId) => (hubId === HUB ? (read(a, "resolvedAt") ?? 0n) : 0n),
+      statusForGame: (/** @type {number[]} */ a, /** @type {string} */ hubId) => (hubId === HUB ? read(a, "status") : GAME_STATUS.IN_PROGRESS),
     },
     l2: {
       eth_getBlockByNumber: () => BLOCK,
@@ -106,7 +115,7 @@ function chainOf({ check = () => undefined, finality = 302_400, games = [], othe
       proofMaturityDelaySeconds: () => u256(604_800),
       proofSubmitters: (/** @type {any[]} */ [, index]) => bytes(submitters[Number(BigInt(hexOf(index)))]),
       provenWithdrawals: (/** @type {any[]} */ [, who]) =>
-        proven && hexOf(who) === SUBMITTER ? [PROVEN_GAME, provenAt] : other && hexOf(who) === OTHER ? [OTHER_GAME, provenAt] : [Array(20).fill(0), 0],
+        proven && hexOf(who) === SUBMITTER ? [provenGame, provenAt] : other && hexOf(who) === OTHER ? [OTHER_GAME, provenAt] : [Array(20).fill(0), 0],
       respectedGameType: () => 8,
     },
     registry: registry
@@ -120,7 +129,7 @@ function chainOf({ check = () => undefined, finality = 302_400, games = [], othe
   });
   const network = registry ? TESTNET : withoutRegistry();
 
-  return { chain, proxyOf, withdrawals: createWithdrawals(withdrawalsOn(chain, { network })) };
+  return { chain, proxyOf, withdrawals: createWithdrawals(withdrawalsOn(chain, { network, ...(depth ? { gameSearchDepth: depth } : {}) })) };
 }
 
 /** Testnet, its anchor state registry unknown. */
@@ -387,5 +396,110 @@ describe("an address's withdrawals found above a final head that came back down 
     );
     assert.equal(again.state.entries[h(1)].blockNumber, 960);
     assert.equal(again.state.entries[h(2)].blockNumber, 500);
+  });
+});
+
+describe("a game whose type's hub moved after it was made (review 2, finding 1)", () => {
+  // The factory names each game's own hub, d5…; the type's hub is now e7…,
+  // which holds none of these games and calls each one in progress.
+  /** @param {ReturnType<typeof chainOf>["chain"]} chain */
+  const statusHubs = (chain) => [...new Set(chain.callsOf("statusForGame").map(({ id }) => id))];
+
+  it("is read on its own hub before a proof goes against it: one the challenger won is passed over", withDriver, async () => {
+    const games = [OPEN, { status: GAME_STATUS.CHALLENGER_WINS }];
+    const { chain, withdrawals } = chainOf({ games, moved: true });
+
+    assert.equal(portalTakesProof(games[1]), false, "the newest is a game the Portal refuses");
+    like(await withdrawals.status(TX, { submitter: SUBMITTER }), { disputeGameIndex: 0n, stage: "ready_to_prove" });
+    like((await withdrawals.prepareProof(TX, { submitter: SUBMITTER })).proof, { disputeGameIndex: 0n });
+    assert.deepEqual(statusHubs(chain), [HUB]);
+  });
+
+  it("is read on its own hub in the search for a resolved game", withDriver, async () => {
+    // Game 0 resolved long ago for the defender, on its own hub.
+    const resolved = { createdAt: NOW - 401_800n, resolvedAt: NOW - 90_000n, status: GAME_STATUS.DEFENDER_WINS };
+    const { chain, withdrawals } = chainOf({ games: [resolved, OPEN], moved: true });
+    const prepared = await withdrawals.prepareProof(TX, { submitter: SUBMITTER });
+
+    like(prepared.proof, { disputeGameIndex: 0n });
+    like(prepared.claim, { exact: true });
+    assert.deepEqual(statusHubs(chain), [HUB]);
+  });
+
+  it("isn't taken when the factory names no hub for it: its status can't be read", withDriver, async () => {
+    const { withdrawals } = chainOf({ games: [OPEN, OPEN], hubless: [1] });
+
+    like((await withdrawals.prepareProof(TX, { submitter: SUBMITTER })).proof, { disputeGameIndex: 0n });
+  });
+
+  it("is read on its own hub for another account's proof: one the challenger won doesn't stand, whatever the Portal's check says", async () => {
+    const refusing = () => {
+      throw new Error("OptimismPortal2: invalid dispute game");
+    };
+
+    for (const check of [() => undefined, refusing]) {
+      const { chain, withdrawals } = chainOf({ check, games: [OPEN], moved: true, other: { ...STANDING, status: GAME_STATUS.CHALLENGER_WINS } });
+
+      like(await withdrawals.status(TX, { submitter: SUBMITTER }), { provenByOther: false, stage: "ready_to_prove" });
+      assert.deepEqual(statusHubs(chain), [HUB]);
+    }
+  });
+});
+
+describe("a proof made again where the only game the Portal takes resolved before the newest (review 2, finding 2)", () => {
+  // Game 0 resolved long ago, and the Portal takes a proof against it; the
+  // newest two, all that's looked through with a search depth of 2, are
+  // blacklisted.
+  const games = [
+    { createdAt: NOW - 401_800n, resolvedAt: NOW - 90_000n, status: GAME_STATUS.DEFENDER_WINS },
+    { ...OPEN, blacklisted: true },
+    { ...OPEN, blacklisted: true },
+  ];
+
+  it("goes against that game for an account whose proof the Portal rejected, as for one that never proved", withDriver, async () => {
+    // Never proved: its proof goes against game 0.
+    like((await chainOf({ depth: 2, games }).withdrawals.prepareProof(TX, { submitter: SUBMITTER })).proof, { disputeGameIndex: 0n });
+
+    // Its proof went against a game the challenger won: it's made again against game 0.
+    const rejected = chainOf({ depth: 2, games, proven: { ...STANDING, status: GAME_STATUS.CHALLENGER_WINS } });
+
+    like((await rejected.withdrawals.prepareProof(TX, { submitter: SUBMITTER })).proof, { disputeGameIndex: 0n });
+    like(await rejected.withdrawals.status(TX, { submitter: SUBMITTER }), {
+      disputeGameIndex: 0n,
+      proofRejected: false,
+      reason: "proof-rejected",
+      stage: "ready_to_prove",
+    });
+  });
+
+  it("is offered by the status of an account that never proved: the apps offer a proof only from \"ready_to_prove\"", async () => {
+    like(await chainOf({ depth: 2, games }).withdrawals.status(TX, { submitter: SUBMITTER }), { disputeGameIndex: 0n, stage: "ready_to_prove" });
+  });
+
+  it("never goes against the game the Portal refused the account's proof against, though a later read takes it", withDriver, async () => {
+    // The proof went against game 0, resolved long ago: the registry calls it
+    // improper once, then proper. Its status offers a proof against game 1.
+    let asked = 0;
+    const flaky = {
+      createdAt: NOW - 401_800n,
+      get proper() {
+        asked += 1;
+
+        return asked > 1;
+      },
+      resolvedAt: NOW - 90_000n,
+      status: GAME_STATUS.DEFENDER_WINS,
+    };
+    const { withdrawals } = chainOf({ games: [flaky, OPEN], proven: flaky, provenIndex: 0 });
+
+    await refused(withdrawals.prepareProof(TX, { submitter: SUBMITTER }), "proven", { disputeGameIndex: 1n, stage: "ready_to_prove" });
+  });
+
+  it("waits, and none is prepared, when the Portal takes no game at all", async () => {
+    const none = [{ ...games[0], blacklisted: true }, games[1], games[2]];
+    const rejected = chainOf({ depth: 2, games: none, proven: { ...STANDING, status: GAME_STATUS.CHALLENGER_WINS } });
+
+    like(await rejected.withdrawals.status(TX, { submitter: SUBMITTER }), { proofRejected: true, reason: "proof-rejected", stage: "proven_waiting" });
+    await refused(rejected.withdrawals.prepareProof(TX, { submitter: SUBMITTER }), "proven", { proofRejected: true });
   });
 });
