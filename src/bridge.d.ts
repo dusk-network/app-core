@@ -301,8 +301,15 @@ export type Migration = {
 export type MigrationPayout = {
   /** The migration's transaction hash, from the memo, lower case. */
   hash: `0x${string}`;
-  route: string;
-  /** What it paid, in lux. */
+  /**
+   * Its route's ID; null where its payer pays out more than one route's
+   * migrations, as one account set for both chains does: its transfer
+   * doesn't say which.
+   */
+  route: string | null;
+  /** The Dusk account that paid it: its route's payout account. */
+  payer: string;
+  /** What it paid, in lux: a gas refund paid to the account with it aside. */
   amount: bigint;
   /** The payout's Dusk transaction. */
   payout: string;
@@ -332,9 +339,12 @@ export type MigrationPayoutOptions = {
  * Each migration's payout on Dusk, by the migration's hash (lower case), in
  * the order given; with `entries`, the payouts there of migrations not given
  * (`unlisted`: sent from another device, or before); and the requests it
- * took. Each payout pays one migration. A payout of the migration of another
- * amount leaves it unsure, not waiting: an entry's value holds any gas
- * refund paid to the account; the memo index gives each payout's own.
+ * took. Each payout pays one migration, of the route it was given with:
+ * from that route's payout account, even where that account pays out
+ * another route's too. A payout of the migration of another amount leaves
+ * it unsure, not waiting: the value of an entry an earlier version kept
+ * holds any gas refund paid to the account (`refund` tells it apart now);
+ * the memo index gives each payout's own.
  */
 export declare function migrationPayouts(
   options: MigrationPayoutOptions
@@ -348,6 +358,8 @@ export type HistoryLike = {
   kind: EntryKind;
   counterparty: string | null;
   value: bigint | string;
+  /** Of `value`, a gas refund paid to another account than the sender. */
+  refund?: bigint | string | null;
   memo: string;
   payer: boolean;
   timestamp?: number | null;
@@ -391,7 +403,9 @@ export declare function serviceTransferOf(entry: HistoryLike, network: NetworkRe
 /**
  * A payout of a migration, from its entry: a transfer the account received
  * from a migration route's payout account, with a transaction hash as the
- * memo. Null for any other entry, and on a route without its payout account.
+ * memo, of its value less any gas `refund` paid to the account with it. Its
+ * route is null where that account pays out more than one route. Null for
+ * any other entry, and on a route without its payout account.
  */
 export declare function migrationPayoutOf(entry: HistoryLike, network: NetworkRef): MigrationPayout | null;
 

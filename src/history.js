@@ -437,6 +437,8 @@ export function parseHistoryEntry(account, raw) {
 
   let inValue = 0n;
   let outValue = 0n;
+  // Of those, unspent gas paid to another account than its sender.
+  let refunded = 0n;
   /** @type {bigint | null} */
   let selfValue = null;
   let payer = false;
@@ -493,9 +495,11 @@ export function parseHistoryEntry(account, raw) {
 
         if (d.refund_info[0] === account) {
           inValue += refund;
+          refunded += refund;
           receivedFrom ??= d.sender;
         } else if (d.sender === account) {
           outValue += refund;
+          refunded += refund;
         }
       }
     } else if (topic === "convert") {
@@ -570,7 +574,7 @@ export function parseHistoryEntry(account, raw) {
     else counterparty = direction === "out" ? sentTo : receivedFrom;
   }
 
-  return { blockHeight, counterparty: counterparty || null, direction, hash, kind, memo, payer, value };
+  return { blockHeight, counterparty: counterparty || null, direction, hash, kind, memo, payer, value, ...(refunded ? { refund: refunded } : {}) };
 }
 
 /**
@@ -589,9 +593,10 @@ export function historyEntry(row, { network = null, pools } = {}) {
   const sozu = Boolean(
     net && row.contractId && row.fnName && isSozuCall(net, { contractId: row.contractId, fnName: row.fnName }, { pools: pools ?? [] })
   );
+  const { refund, ...fields } = row;
 
   return {
-    ...row,
+    ...fields,
     blockHash: row.blockHash,
     blockHeight: row.blockHeight,
     bridge: row.bridge,
@@ -615,6 +620,7 @@ export function historyEntry(row, { network = null, pools } = {}) {
     success: row.success ?? null,
     timestamp: row.timestamp ?? null,
     value: u64(row.value),
+    ...(refund === undefined ? {} : { refund: u64(refund) }),
   };
 }
 
@@ -629,7 +635,7 @@ export function historyEntry(row, { network = null, pools } = {}) {
 function keptOf(entry) {
   if (typeof entry?.value !== "bigint") return /** @type {KeptEntry} */ (entry);
 
-  const { route, sozu, ...rest } = /** @type {ReadEntry} */ (entry);
+  const { refund, route, sozu, ...rest } = /** @type {ReadEntry} */ (entry);
   const { gasPrice, gasSpent } = rest;
 
   return {
@@ -638,6 +644,7 @@ function keptOf(entry) {
     success: rest.success ?? undefined,
     timestamp: rest.detailsAt ? rest.timestamp : undefined,
     value: rest.value.toString(),
+    ...(refund === undefined ? {} : { refund: refund.toString() }),
   };
 }
 
@@ -977,7 +984,7 @@ export async function fetchTxNonce(archive, hash) {
  * @param {HistoryEntry} entry
  * @returns {KeptEntry}
  */
-const toKept = (entry) => ({ ...entry, value: entry.value.toString() });
+const toKept = ({ refund, ...entry }) => ({ ...entry, value: entry.value.toString(), ...(refund === undefined ? {} : { refund: refund.toString() }) });
 
 /**
  * @param {HistoryOptions} options

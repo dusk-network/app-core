@@ -108,9 +108,15 @@ export type HistoryEntry = {
   /**
    * What left or reached the account, in lux, fees aside. A gas refund the
    * transaction paid to another account than its sender is what left the
-   * sender, beside its fee, and what reached that account.
+   * sender, beside its fee, and what reached that account (`refund`).
    */
   value: bigint;
+  /**
+   * Of `value`, the unspent gas the transaction paid to another account
+   * than its sender, in lux; left out when there's none. An entry an
+   * earlier version kept has none, whatever its value holds.
+   */
+  refund?: bigint;
   /** The memo as text, or as 0x hex when it isn't text; "" for none. */
   memo: string;
   /** Whether the account paid the fee. */
@@ -160,9 +166,10 @@ export type EntryDetails = {
  * stores as JSON, with its details once read, and any fields the app keeps
  * beside them (as its hook's facts).
  */
-export type KeptEntry = Omit<HistoryEntry, "value"> &
+export type KeptEntry = Omit<HistoryEntry, "value" | "refund"> &
   Partial<EntryDetails> & {
     value: string;
+    refund?: string;
     [field: string]: unknown;
   };
 

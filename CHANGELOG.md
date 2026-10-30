@@ -8,6 +8,10 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 - `/duskevm-withdrawals`: a DuskEVM withdrawal's start, finding it again, its status and claim date, and its proof's and claim's calls, checked before they're handed over to sign
 
+### Fixed
+
+- `/bridge`: a migration is paid by its own route's payout account also where one account pays out both routes (a payout of one not listed then has a null `route`), and a payout read from an entry leaves out a gas refund paid with it, which `/history` entries now tell apart as `refund`
+
 ## [0.2.0]
 
 ### Added

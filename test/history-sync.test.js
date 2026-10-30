@@ -217,6 +217,25 @@ describe("a sync run", () => {
     assert.equal(store.rows().length, 4);
   });
 
+  it("keeps a gas refund paid to the account apart from its value, as text, and reads it back in lux", async () => {
+    const accounts = structuredClone(fixture.accounts);
+    const received = accounts[A].receiver.find((/** @type {any} */ e) => e.events.some((/** @type {any} */ ev) => ev.topic === "moonlight" && ev.data.receiver === A));
+    const event = received.events.find((/** @type {any} */ ev) => ev.topic === "moonlight" && ev.data.receiver === A);
+
+    event.data.refund_info = [A, "1500000"];
+
+    const { history, store } = setup(fakeArchive({ accounts }), A);
+
+    await history.sync();
+
+    const kept = store.rows().find((row) => row.hash === received.origin);
+
+    assert.deepEqual([kept.value, kept.refund], [String(BigInt(event.data.value) + 1_500_000n), "1500000"]);
+    // As a store that writes JSON keeps it.
+    assert.doesNotThrow(() => JSON.stringify(store.rows()));
+    like((await history.read({ limit: 50 })).entries.find((entry) => entry.hash === received.origin), { refund: 1_500_000n });
+  });
+
   it("hears each step it keeps", async () => {
     const node = fakeArchive();
     const { history } = setup(node, A);

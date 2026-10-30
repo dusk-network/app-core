@@ -73,6 +73,30 @@ describe("parseHistoryEntry", () => {
     like(parseHistoryEntry(B, sent), { direction: "out", value: before.value });
   });
 
+  it("tells the gas refund paid to another account apart from what the transaction moved, as kept and as read", () => {
+    const sent = structuredClone(
+      entriesOf(B, "out").find((e) =>
+        e.events.some((/** @type {any} */ ev) => ev.topic === "moonlight" && ev.data.receiver && ev.data.receiver !== A && ev.data.value !== "0")
+      )
+    );
+    const event = sent.events.find((/** @type {any} */ ev) => ev.topic === "moonlight");
+    const moved = BigInt(event.data.value);
+
+    // Paid to the receiver, as a payout could pay it: part of what reached it.
+    event.data.refund_info = [event.data.receiver, "1500000"];
+    const received = /** @type {NonNullable<ReturnType<typeof parseHistoryEntry>>} */ (parseHistoryEntry(event.data.receiver, sent));
+
+    assert.deepEqual([received.value, received.refund], [moved + 1_500_000n, 1_500_000n]);
+    like(historyEntry({ ...received, refund: "1500000", value: String(received.value) }), { refund: 1_500_000n, value: moved + 1_500_000n });
+    // Paid to a third account: part of what left the sender, and all that reached that account.
+    event.data.refund_info = [A, "1500000"];
+    assert.equal(parseHistoryEntry(B, sent)?.refund, 1_500_000n);
+    assert.equal(parseHistoryEntry(A, sent)?.refund, 1_500_000n);
+    // None: nothing to tell apart.
+    event.data.refund_info = null;
+    assert.equal("refund" in /** @type {object} */ (parseHistoryEntry(B, sent)), false);
+  });
+
   it("reads a shield as sent to the shielded address, and an unshield as received", () => {
     like(parse(B, 2517213), {
       counterparty: "3rTbMbu2ffd3kuUiq766HJBh3eYHpKbwZFZtXLFtadRMFw6dLqxAUr1n5PtAXfb3xnBhGssELCC64cxd4dSYyjEj",
