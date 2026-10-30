@@ -73,13 +73,38 @@ describe("migrations into Dusk", () => {
 
     // When it was sent isn't known from its payout: only when it was paid.
     assert.deepEqual(unlisted, [
-      { amount: 5n * DUSK, at: fromBsc.timestamp, block: 4_000_000, hash: `0x${"c3".repeat(32)}`, payout: dusk("bb"), route: "bsc-to-dusk" },
-      { amount: 5n * DUSK, at: null, block: 4_000_100, hash: `0x${"c4".repeat(32)}`, payout: dusk("bd"), route: "ethereum-to-dusk" },
+      { amount: 5n * DUSK, at: fromBsc.timestamp, block: 4_000_000, hash: `0x${"c3".repeat(32)}`, payer: BSC.payoutAccount, payout: dusk("bb"), route: "bsc-to-dusk" },
+      { amount: 5n * DUSK, at: null, block: 4_000_100, hash: `0x${"c4".repeat(32)}`, payer: ETHEREUM.payoutAccount, payout: dusk("bd"), route: "ethereum-to-dusk" },
     ]);
     assert.equal(migrationPayoutOf(spoof, 1), null);
     // Sent from the payout account, not received from it.
     assert.equal(migrationPayoutOf({ ...fromBsc, direction: "out" }, 1), null);
     assert.equal(migrationPayoutOf({ ...fromBsc, success: false }, 1), null);
+  });
+
+  it("are paid by an account that pays out both routes by the route each was sent on, and one not listed names no route", async () => {
+    // One account pays out both chains' migrations, as a deployment can set it.
+    const net = withRoutes(networks.mainnet, { migrations: { "ethereum-to-dusk": { payoutAccount: BSC.payoutAccount } } });
+    const sent = [{ amount: 5n * DUSK, at: Date.UTC(2026, 9, 27, 6, 20), hash: MIGRATION, route: "ethereum-to-dusk" }];
+    const payout = row({ counterparty: BSC.payoutAccount, memo: MIGRATION });
+    const elsewhere = row({ counterparty: BSC.payoutAccount, hash: dusk("bd"), memo: `0x${"c3".repeat(32)}` });
+    const paid = await migrationPayouts({ entries: [payout, elsewhere], migrations: sent, network: net, now: NOW });
+
+    assert.deepEqual(paid.payouts.get(MIGRATION), { amount: 5n * DUSK, at: payout.timestamp, block: payout.blockHeight, hash: payout.hash, state: "arrived" });
+    // Which chain a payout of a migration not listed is for, its transfer doesn't say.
+    assert.deepEqual(paid.unlisted.map(({ payer, route }) => [payer, route]), [[BSC.payoutAccount, null]]);
+    like(migrationPayoutOf(elsewhere, net), { payer: BSC.payoutAccount, route: null });
+
+    // From the archive's memo index too.
+    const node = fakeArchive({
+      accounts: {},
+      details: { [dusk("ef")]: { blockHash: "aa".repeat(32), blockTimestamp: 1_792_990_000, err: null, gasSpent: 1, tx: { callData: null, gasLimit: 1, gasPrice: 1 } } },
+      finalized: 10_000,
+      memos: { [MIGRATION]: [moonlight({ hash: dusk("ef"), height: 101, memo: MIGRATION, receiver: ACCOUNT, sender: BSC.payoutAccount, value: 5n * DUSK })] },
+    });
+    const found = await migrationPayouts({ account: ACCOUNT, archive: node.archiveClient(), migrations: sent, network: net, now: NOW });
+
+    like(found.payouts.get(MIGRATION), { amount: 5n * DUSK, hash: dusk("ef"), state: "arrived" });
   });
 
   describe("found by the archive's memo index, as a receipt shows one migration", () => {

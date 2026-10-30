@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import { networks } from "@dusk-network/networks";
 import { evmAddressOf } from "@dusk-network/networks/duskevm";
 
-import { depositArrivals, migrationPayouts, serviceArrivals, serviceTransferOf } from "../src/bridge.js";
+import { depositArrivals, migrationPayoutOf, migrationPayouts, serviceArrivals, serviceTransferOf } from "../src/bridge.js";
 import { bridgeFinalized, call, depositEntry, details, fakeChain, fakeExplorer, moonlight, tokenTransfer, transferTx, withRoutes } from "./fixtures/bridge.js";
 import { fakeArchive, like } from "./fixtures/helpers.js";
 
@@ -530,6 +530,14 @@ describe("migrations into Dusk", () => {
     const { payouts } = await migrationPayouts({ entries: [/** @type {any} */ (payout)], migrations: [migration], network: 1, now: 1_792_980_000_000 });
 
     like(payouts.get(HASH), { reason: "unsure", state: "unknown" });
+  });
+
+  it("are paid by the payout's own amount where its entry tells a gas refund to the account apart", async () => {
+    const payout = { blockHeight: 100, counterparty: PAYER, direction: "in", hash: dusk("ef"), kind: "transfer", memo: HASH, payer: false, refund: "500", success: true, timestamp: 1, value: String(3n * DUSK + 500n) };
+    const { payouts } = await migrationPayouts({ entries: [/** @type {any} */ (payout)], migrations: [migration], network: 1, now: 1_792_980_000_000 });
+
+    like(payouts.get(HASH), { amount: 3n * DUSK, hash: dusk("ef"), state: "arrived" });
+    like(migrationPayoutOf(/** @type {any} */ (payout), 1), { amount: 3n * DUSK, payout: dusk("ef") });
   });
 
   it("are paid by the payout's own amount, as its transaction gave it, a gas refund to the account aside", async () => {

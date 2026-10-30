@@ -360,6 +360,12 @@ const out2 = out.then(({ arrivals }) => {
   void [why, seen];
 });
 const payout: MigrationPayout | null = migrationPayoutOf(kept, 1);
+// Where one account pays out both routes, a payout doesn't say which: its payer does.
+const payoutRoute: string | null | undefined = payout?.route;
+const payoutPayer: string | undefined = payout?.payer;
+// A kept entry tells a gas refund apart as text, a read one as a bigint.
+const keptRefund: string | undefined = ({ blockHeight: 1, counterparty: null, direction: "in", hash: "ab", kind: "transfer", memo: "", payer: false, refund: "5", value: "6" } satisfies KeptEntry).refund;
+const readRefund: bigint | undefined = kept.refund;
 const migrations: Promise<{ payouts: Map<string, Arrival>; unlisted: MigrationPayout[]; requests: number }> = migrationPayouts({
   entries: [kept],
   migrations: [{ amount: "1", at: 1, hash: "0xab", route: "bsc-to-dusk" }],
@@ -371,7 +377,7 @@ const migrations: Promise<{ payouts: Map<string, Arrival>; unlisted: MigrationPa
 const byMemo: Promise<unknown> = migrationPayouts({ account: "x", archive, migrations: [], network: 1 });
 const bridgeNumbers: number[] = [CLOCK_SLACK_MS, CREDIT_WINDOW_MS, WAIT_MS, EXPLORER_PAGES, LOG_WINDOW, LOG_WINDOWS, DEPOSIT_HORIZON_MS, SERVICE_HORIZON_MS, HISTORY_PAGES];
 const topics: string[] = [TRANSFER_TOPIC, ETH_BRIDGE_FINALIZED_TOPIC];
-void [keptDeposit, followed, out, out2, sentOut, payout, migrations, byMemo, bridgeNumbers, topics];
+void [keptDeposit, followed, out, out2, sentOut, payout, payoutRoute, payoutPayer, keptRefund, readRefund, migrations, byMemo, bridgeNumbers, topics];
 // @ts-expect-error a deposit is followed on the explorer or the RPC
 depositArrivals({ deposits: [], network: 2, via: "adapter" });
 // @ts-expect-error a transfer out needs the archive: each transfer is read from the chain

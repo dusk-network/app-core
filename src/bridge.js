@@ -1726,6 +1726,17 @@ export async function serviceArrivals({
 // ---------------------------------------------------------------------------
 
 /**
+ * The migration routes an account pays out. More than one where a
+ * deployment has one account pay out both chains' migrations: then a
+ * payout of it doesn't say which route it is on.
+ *
+ * @param {Network} net
+ * @param {string} account
+ * @returns {Route[]}
+ */
+const paidOutBy = (net, account) => routes(net).filter((route) => route.kind === "migration" && Boolean(route.payoutAccount) && route.payoutAccount === account.trim());
+
+/**
  * The payouts of migrations a transfer the archive lists holds for
  * `account`, read from its own events: from a migration route's payout
  * account, with a transaction hash as the memo, each of its own amount, a
@@ -1744,12 +1755,12 @@ function payoutsIn(raw, account, net) {
 
   return (Array.isArray(raw?.events) ? raw.events : []).flatMap((/** @type {any} */ event) => {
     const data = event?.data;
-    const route = data && event.reverted !== true && event.topic === "moonlight" && String(event.target ?? "").toLowerCase() === TRANSFER_CONTRACT && data.receiver === account && typeof data.sender === "string" ? routeForAccount(net, data.sender, "in") : null;
+    const paying = data && event.reverted !== true && event.topic === "moonlight" && String(event.target ?? "").toLowerCase() === TRANSFER_CONTRACT && data.receiver === account && typeof data.sender === "string" ? paidOutBy(net, data.sender) : [];
     const memo = memoOf(data?.memo).trim().toLowerCase();
     const amount = luxOf(data?.value);
 
-    return route?.kind === "migration" && route.payoutAccount && EVM_HASH.test(memo) && amount !== null
-      ? [{ amount, at: null, block, hash: /** @type {`0x${string}`} */ (memo), payout, route: route.id }]
+    return paying.length && EVM_HASH.test(memo) && amount !== null
+      ? [{ amount, at: null, block, hash: /** @type {`0x${string}`} */ (memo), payer: data.sender.trim(), payout, route: paying.length === 1 ? paying[0].id : null }]
       : [];
   });
 }
@@ -1811,22 +1822,22 @@ export async function migrationPayouts({ network, migrations, entries, archive, 
   }
 
   // Each payout pays one migration: the migration its memo names, of the
-  // amount it paid, on the route whose payout account paid it.
+  // amount it paid, from its route's payout account.
   const byBlock = [...candidates].sort((a, b) => a.block - b.block || (a.payout < b.payout ? -1 : 1));
 
   for (const item of [...payable].sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))) {
     if (results.has(item.hash)) continue;
 
-    const named = byBlock.filter((each) => !used.has(each.payout) && each.hash === item.hash && each.route === item.route?.id);
+    const named = byBlock.filter((each) => !used.has(each.payout) && each.hash === item.hash && each.payer === item.route?.payoutAccount);
     const payout = named.find((each) => each.amount === item.amount);
 
     if (payout) {
       used.add(payout.payout);
       results.set(item.hash, { amount: payout.amount, at: payout.at, block: payout.block, hash: payout.payout, state: "arrived" });
     } else if (named.length) {
-      // Its payout, of another amount: an entry's value holds a gas refund
-      // paid to the account, which it doesn't tell apart, or another amount
-      // was paid. Not waiting: unsure.
+      // Its payout, of another amount: another amount was paid, or the value
+      // of an entry an earlier version kept holds a gas refund paid to the
+      // account. Not waiting: unsure.
       results.set(item.hash, { reason: "unsure", state: "unknown" });
     } else {
       results.set(item.hash, item.at !== null && now - item.at > waitMs ? { reason: "expired", state: "unknown" } : { state: "waiting" });
@@ -1900,17 +1911,27 @@ export function serviceTransferOf(entry, network) {
  */
 export function migrationPayoutOf(entry, network) {
   const net = networkOf(network);
-  const route = entry?.kind === "transfer" && entry.direction === "in" && typeof entry.counterparty === "string" ? routeForAccount(net, entry.counterparty, "in") : null;
+  const paying = entry?.kind === "transfer" && entry.direction === "in" && typeof entry.counterparty === "string" ? paidOutBy(net, entry.counterparty) : [];
   const { at, hash, height, value } = factsOf(entry);
+  // What the transfer paid: a gas refund paid to the account with it aside.
+  const refund = entry?.refund === undefined || entry.refund === null ? 0n : luxOf(entry.refund);
   const memo = String(entry?.memo ?? "")
     .trim()
     .toLowerCase();
 
-  if (!route || route.kind !== "migration" || !route.payoutAccount || entry.success === false || !hash || height === null || value === null || !EVM_HASH.test(memo)) {
+  if (!paying.length || entry.success === false || !hash || height === null || value === null || refund === null || refund > value || !EVM_HASH.test(memo)) {
     return null;
   }
 
-  return { amount: value, at, block: height, hash: /** @type {`0x${string}`} */ (memo), payout: hash, route: route.id };
+  return {
+    amount: value - refund,
+    at,
+    block: height,
+    hash: /** @type {`0x${string}`} */ (memo),
+    payer: /** @type {string} */ (entry.counterparty).trim(),
+    payout: hash,
+    route: paying.length === 1 ? paying[0].id : null,
+  };
 }
 
 /**
