@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./history"];
+const ENTRIES = ["./history", "./shielded"];
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 /** @param {string} file */
@@ -43,6 +43,12 @@ describe("the package", () => {
     assert.equal(typeof createHistory, "function");
     assert.equal(historyArchiveUrl({ nodeUrl: "https://testnet.nodes.dusk.network" }), "https://testnet.nodes.dusk.network");
     assert.equal(parseHistoryEntry("x", null), null);
+
+    const { createLeafHeightTap, shieldedEntries, shieldedHistory } = await import("@dusk-network/app-core/shielded");
+
+    assert.equal(typeof shieldedHistory, "function");
+    assert.equal(typeof createLeafHeightTap().stream, "function");
+    assert.deepEqual(shieldedEntries({ blocks: new Map(), notes: [] }), []);
   });
 
   it("is the same package on JSR, as @dusk/app-core, with the same entry points", () => {
@@ -86,12 +92,12 @@ describe("the package", () => {
       assert.doesNotMatch(code, /^await\b/m, entry);
       // Nor a lookbehind, which older Safari can't parse.
       assert.doesNotMatch(code, /\(\?<[=!]/, entry);
-      // Its imports are the networks' rules alone.
-      assert.deepEqual(
-        [...new Set([...code.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1].split("/").slice(0, 2).join("/")))],
-        ["@dusk-network/networks"],
-        entry
-      );
+      // Its imports are the networks' rules, and the package's own entry points.
+      const imports = [...new Set([...code.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]))];
+      const own = Object.values(pkg.exports).map((target) => (typeof target === "string" ? target : target.default).replace(/^\.\/src\//, "./"));
+
+      assert.ok(imports.length > 0, entry);
+      for (const from of imports) assert.ok(from.split("/").slice(0, 2).join("/") === "@dusk-network/networks" || own.includes(from), `${entry}: ${from}`);
     }
   });
 
@@ -107,6 +113,8 @@ describe("the package", () => {
       "package.json",
       "src/history.d.ts",
       "src/history.js",
+      "src/shielded.d.ts",
+      "src/shielded.js",
     ]);
   });
 });

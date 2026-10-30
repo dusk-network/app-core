@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "license": "MPL-2.0",
   "exports": {
-    "./history": "./src/history.js"
+    "./history": "./src/history.js",
+    "./shielded": "./src/shielded.js"
   },
   "publish": {
     "include": ["CHANGELOG.md", "LICENSE", "README.md", "src"]

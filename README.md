@@ -30,6 +30,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | Import | What it gives |
 |---|---|
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
+| `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 
 Every entry point has its `.d.ts`. The one runtime dependency is `@dusk-network/networks`.
 
@@ -101,6 +102,48 @@ const history = createHistory({
 - `archive.query(text)`: one GraphQL request, its integers past 2^53 kept as text. A request answered 429, 502, 503 or 504 is sent again, twice at most.
 
 An app with its own GraphQL client passes `query` instead of `fetch`: it takes the query's text and gives the answer's `data`, throwing with the node's message on errors.
+
+## Shielded history
+
+```js
+import { createArchive } from "@dusk-network/app-core/history";
+import { shieldedHistory } from "@dusk-network/app-core/shielded";
+
+const { entries, pending } = await shieldedHistory({
+  archive: createArchive({ url: nodeUrl, fetch, refusals }),
+  notes: () => syncedNotes(profile), // [{ leaf, nullifier, spent }], as the shielded sync keeps them
+  valueOf: (note) => noteValue(profile, note), // in lux, from the profile's keys
+  tree, // the node's note tree: { size(), leaves(from) }
+  store, // this profile's kept history
+  treeHeights, // the note tree's heights, kept for the network
+  synced: true, // the shielded sync has found every note
+  isCurrent: () => profile === currentProfile(),
+});
+// entries[0]: { hash, blockHeight, kind: "unshield", direction: "out", value: "9475570898", fee: "12429102", success: true, timestamp: 1782131528000 }
+```
+
+- Shielded transfers are off on Mainnet and Testnet, so a profile's shielded history is final: it is worked out once from its notes, and kept. The same notes again read the kept history and ask nothing. Until `synced`, a read gives what is kept, `pending`, and asks nothing.
+- A note's leaf holds the height it entered the note tree at, and the block there says which transaction made it and which of the profile's notes that transaction spent. Each of the profile's heights is asked for among four others that hold notes, drawn from the tree's heights. The decoys are kept, and read back, before any block is asked for, so a read that fails partway asks for the same heights next time. Without another height to ask among, nothing is asked.
+- The tree's heights are read once, in one stream of its leaves, and kept for the network; a later read takes only the leaves added since. A shielded sync that streams the tree from its first note can keep them on the way: it pipes its stream through `tap.stream()` of a `createLeafHeightTap()`, and once the stream is read, keeps `tap.heights(total)`, when there are any, as `{ heights, notes: Number(total) }`.
+- A history is kept only whole: once each note's block has the event that made it (a note of the genesis block aside) and lists each transaction that spent the profile's notes. Until then, as while the archive is still indexing a block, a read gives what is kept, `pending`, and the next one asks again, among the same decoys.
+- `isCurrent` is asked between every two steps, before each request and write, and once more after the history is kept: once the wallet, the profile or the node changed, the read asks and keeps nothing more and rejects. A node that answered without the archive is asked nothing for an hour, its tree included.
+- The blocks come 15 heights a request, through the archive of `/history`.
+
+An entry is facts, not text: `kind` (the kinds of `/history`), `direction` for the profile's notes ("in", "out", or "self" when what they spent came back but the fee), `value` and `fee` in lux as decimal strings (a fee only where the profile's notes paid it), `success` and `error`, and its block's `timestamp`. It stores as JSON as it is.
+
+### The stores and the tree
+
+The app keeps the history where it wants, under its own keys, and reads its notes, their values and the note tree through its own wallet library. Each method may return a value or a promise.
+
+| Option | Does |
+|---|---|
+| `store.get()` | The profile's kept history, `{ fingerprint, entries, decoys }`, or null. Reject when it can't be read: the read then asks nothing rather than draw new decoys. |
+| `store.put(record)` | Keeps it in place of the one kept. A put that rejects, as one bound to a wallet that has been reset since, rejects the read. A store that can't keep a history for want of room may pass over it: the read gives it anyway, and the next one works it out again among the same decoys. |
+| `treeHeights.get()`, `treeHeights.put({ heights, notes })` | The note tree's distinct heights from its first `notes` leaves, shared by the network's profiles. A put that fails is passed over. |
+| `tree.size()` | How many leaves the node's note tree has (the transfer contract's `num_notes`). |
+| `tree.leaves(from)` | Its leaves from position `from` on (`leaves_from_pos`): a stream of their bytes, or an answer whose body is one. |
+
+The app runs one read at a time per profile.
 
 ## License
 

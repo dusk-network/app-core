@@ -13,6 +13,10 @@
       "types": "./src/history.d.ts",
       "default": "./src/history.js"
     },
+    "./shielded": {
+      "types": "./src/shielded.d.ts",
+      "default": "./src/shielded.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
