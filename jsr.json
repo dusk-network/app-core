@@ -4,7 +4,8 @@
   "license": "MPL-2.0",
   "exports": {
     "./history": "./src/history.js",
-    "./shielded": "./src/shielded.js"
+    "./shielded": "./src/shielded.js",
+    "./activity": "./src/activity.js"
   },
   "publish": {
     "include": ["CHANGELOG.md", "LICENSE", "README.md", "src"]

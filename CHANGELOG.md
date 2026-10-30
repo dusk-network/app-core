@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/shielded`: `shieldedHistory`, a profile's shielded history from the notes its sync keeps, each block asked for among decoys kept before asking
+- `/activity`: `activityRows`, an account's rows from its public and shielded history and the wallet's own sends, as facts, and `settleSends`, for the sends the chain's rows now say all of
 
 ## [0.1.0]
 

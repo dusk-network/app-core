@@ -17,6 +17,10 @@
       "types": "./src/shielded.d.ts",
       "default": "./src/shielded.js"
     },
+    "./activity": {
+      "types": "./src/activity.d.ts",
+      "default": "./src/activity.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

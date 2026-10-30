@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./history", "./shielded"];
+const ENTRIES = ["./history", "./shielded", "./activity"];
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 /** @param {string} file */
@@ -49,6 +49,12 @@ describe("the package", () => {
     assert.equal(typeof shieldedHistory, "function");
     assert.equal(typeof createLeafHeightTap().stream, "function");
     assert.deepEqual(shieldedEntries({ blocks: new Map(), notes: [] }), []);
+
+    const { PENDING_MS, activityRows, settleSends } = await import("@dusk-network/app-core/activity");
+
+    assert.equal(PENDING_MS, 900_000);
+    assert.deepEqual(activityRows(), []);
+    assert.deepEqual(settleSends(), { drop: [], keep: [] });
   });
 
   it("is the same package on JSR, as @dusk/app-core, with the same entry points", () => {
@@ -111,6 +117,8 @@ describe("the package", () => {
       "LICENSE",
       "README.md",
       "package.json",
+      "src/activity.d.ts",
+      "src/activity.js",
       "src/history.d.ts",
       "src/history.js",
       "src/shielded.d.ts",
