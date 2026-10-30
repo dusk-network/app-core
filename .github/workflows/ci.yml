@@ -17,6 +17,12 @@ jobs:
         with:
           node-version: latest
       - run: npm ci
+      # The withdrawal tests run the network's data drivers, which git doesn't
+      # keep: fetched from their pinned URL, and checked against the hashes
+      # the network's file pins. A fetch that fails, or a driver that isn't
+      # the pinned one, fails the job.
+      - name: Fetch the data drivers
+        run: npm run fetch:drivers
       - run: npm run check:versions
       - run: npm test
       - run: npm run typecheck

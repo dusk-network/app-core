@@ -51,6 +51,7 @@ jobs:
       - name: Test
         run: |
           npm ci
+          npm run fetch:drivers
           npm test
           npm run typecheck
 

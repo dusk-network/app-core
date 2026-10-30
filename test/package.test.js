@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./history", "./shielded", "./activity", "./bridge"];
+const ENTRIES = ["./history", "./shielded", "./activity", "./bridge", "./duskevm-withdrawals"];
+/** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
+const VIEM_ENTRY = "./duskevm-withdrawals";
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 /** @param {string} file */
@@ -18,11 +20,24 @@ describe("the package", () => {
     assert.equal(pkg.type, "module");
     assert.equal(pkg.license, "MPL-2.0");
     assert.deepEqual(pkg.dependencies, { "@dusk-network/networks": "0.3.0" });
-    assert.equal(pkg.devDependencies, undefined);
 
     const lock = JSON.parse(source("package-lock.json"));
 
     assert.equal(lock.packages["node_modules/@dusk-network/networks"].version, "0.3.0");
+  });
+
+  it("takes viem as an optional peer, the range the apps use, and tests with its lowest version", () => {
+    assert.deepEqual(pkg.peerDependencies, { viem: "^2.55.2" });
+    assert.deepEqual(pkg.peerDependenciesMeta, { viem: { optional: true } });
+    assert.deepEqual(pkg.devDependencies, { viem: "2.55.2" });
+
+    const lock = JSON.parse(source("package-lock.json"));
+
+    assert.equal(lock.packages["node_modules/viem"].version, "2.55.2");
+    assert.equal(lock.packages["node_modules/viem"].dev, true);
+
+    // On JSR, the same range: without it JSR would take the version installed.
+    assert.deepEqual(JSON.parse(source("jsr.json")).imports, { viem: `npm:viem@${pkg.peerDependencies.viem}` });
   });
 
   it("exports each entry point with its types", async () => {
@@ -62,6 +77,13 @@ describe("the package", () => {
     assert.equal(typeof migrationPayouts, "function");
     assert.equal(typeof serviceArrivals, "function");
     assert.deepEqual(arrivalsOf(new Map()), new Map());
+
+    const { WithdrawalError, createWithdrawals, explorerStage, parseWithdrawalReceipt, withdrawalCall } = await import("@dusk-network/app-core/duskevm-withdrawals");
+
+    assert.equal(typeof createWithdrawals, "function");
+    assert.equal(typeof withdrawalCall, "function");
+    assert.equal(explorerStage("Relayed"), "finalized");
+    assert.throws(() => parseWithdrawalReceipt(2, null), WithdrawalError);
   });
 
   it("is the same package on JSR, as @dusk/app-core, with the same entry points", () => {
@@ -105,13 +127,28 @@ describe("the package", () => {
       assert.doesNotMatch(code, /^await\b/m, entry);
       // Nor a lookbehind, which older Safari can't parse.
       assert.doesNotMatch(code, /\(\?<[=!]/, entry);
-      // Its imports are the networks' rules, and the package's own entry points.
-      const imports = [...new Set([...code.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]))];
+      // Its imports are the networks' rules, the package's own entry points,
+      // and for DuskEVM's withdrawals viem, which no other entry point takes.
+      const imports = [...new Set([...code.matchAll(/^import\b[^;]*?\bfrom\s+"([^"]+)";/gm)].map((m) => m[1]))];
       const own = Object.values(pkg.exports).map((target) => (typeof target === "string" ? target : target.default).replace(/^\.\/src\//, "./"));
 
       assert.ok(imports.length > 0, entry);
-      for (const from of imports) assert.ok(from.split("/").slice(0, 2).join("/") === "@dusk-network/networks" || own.includes(from), `${entry}: ${from}`);
+      assert.equal(imports.length, [...code.matchAll(/^import\b/gm)].length, `${entry}: every import is read`);
+      for (const from of imports) {
+        assert.ok(
+          from.split("/").slice(0, 2).join("/") === "@dusk-network/networks" || own.includes(from) || (from === "viem" && entry === VIEM_ENTRY),
+          `${entry}: ${from}`
+        );
+      }
     }
+  });
+
+  it("keeps viem to DuskEVM's withdrawals, and the entries they import free of it", () => {
+    for (const entry of ENTRIES.filter((each) => each !== VIEM_ENTRY)) {
+      assert.doesNotMatch(source(pkg.exports[entry].default), /from\s+"viem"|import\s*\(\s*"viem"/, entry);
+    }
+
+    assert.match(source(pkg.exports[VIEM_ENTRY].default), /from "viem";/);
   });
 
   it("packs only the code, the types and the docs", () => {
@@ -128,6 +165,8 @@ describe("the package", () => {
       "src/activity.js",
       "src/bridge.d.ts",
       "src/bridge.js",
+      "src/duskevm-withdrawals.d.ts",
+      "src/duskevm-withdrawals.js",
       "src/history.d.ts",
       "src/history.js",
       "src/shielded.d.ts",
