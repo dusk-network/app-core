@@ -9,6 +9,10 @@
     "url": "git+https://github.com/dusk-network/app-core.git"
   },
   "exports": {
+    "./history": {
+      "types": "./src/history.d.ts",
+      "default": "./src/history.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -19,7 +23,13 @@
     "node": ">=20.10"
   },
   "scripts": {
-    "test": "node --test",
-    "check:versions": "node scripts/check-versions.js"
+    "test": "node --test test/*.test.js",
+    "typecheck": "npx --yes --package=typescript@5.9.3 -- tsc -p test-types",
+    "check:versions": "node scripts/check-versions.js",
+    "check:jsr": "npx --yes jsr@0.14.3 publish --dry-run --allow-dirty",
+    "smoke:history": "node scripts/smoke-history.js"
+  },
+  "dependencies": {
+    "@dusk-network/networks": "0.3.0"
   }
 }
