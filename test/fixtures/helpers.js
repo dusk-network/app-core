@@ -103,18 +103,23 @@ export function page(list, { fromBlock = 0, toBlock, maxCount, pageCount = 1 }) 
 
 /**
  * A node holding the recorded history, and `details` by hash, whose call
- * arguments (`callData.data`) it gives only to a query that asks for them.
- * Change `finalized` (its last finalized block), `genesis`, `down` (every
- * request fails), `archive` (false: a node without the archive's fields) or
+ * arguments (`callData.data`) it gives only to a query that asks for them,
+ * `transactions`, the transactions as `tx(hash) { … tx { memo json } }`
+ * gives them, by hash, and `memos`, the transfers its memo index lists by
+ * memo. Change
+ * `finalized` (its last finalized block), `genesis`, `down` (every request
+ * fails), `archive` (false: a node without the archive's fields) or
  * `before` (awaited with each query before its answer) as a test goes;
  * `log` keeps each query and its answer. `archiveClient()` is an archive
  * on it, by its `fetch`.
  *
- * @param {{ accounts?: Record<string, { sender: any[], receiver: any[] }>, details?: Record<string, any>, finalized?: number, genesis?: string, url?: string }} [options]
+ * @param {{ accounts?: Record<string, { sender: any[], receiver: any[] }>, details?: Record<string, any>, transactions?: Record<string, any>, memos?: Record<string, any[]>, finalized?: number, genesis?: string, url?: string }} [options]
  */
 export function fakeArchive({
   accounts = fixture.accounts,
   details = fixture.details,
+  transactions = {},
+  memos = {},
   finalized = fixture.head.last_finalized_block[0],
   genesis = fixture.head.genesis,
   url = fixture.nodeUrl,
@@ -176,12 +181,25 @@ export function fakeArchive({
         data[m[1]] = tx;
       }
 
+      // A transaction's height, time, outcome, memo and JSON.
+      for (const m of query.matchAll(/(\w+): tx\(hash: "([0-9a-f]{64})"\) \{ blockHeight blockTimestamp err tx \{ memo json \} \}/g)) {
+        data[m[1]] = structuredClone(transactions[m[2]] ?? null);
+      }
+
+      // The memo index: transfers whose memo is exactly the one asked; null for none.
+      for (const m of query.matchAll(/(\w+): transactionsByMemo\(memo: "([^"]*)"\) \{ json \}/g)) {
+        const list = (memos[m[2]] ?? []).filter((e) => e.block_height <= node.finalized);
+
+        data[m[1]] = list.length ? { json: structuredClone(list) } : null;
+      }
+
       node.log.push({ data, query });
 
       return { ok: true, status: 200, text: async () => JSON.stringify(data) };
     },
     historyQueries: () => node.log.filter((l) => l.query.includes("moonlightHistory")),
     detailQueries: () => node.log.filter((l) => l.query.includes("tx(hash:")),
+    memoQueries: () => node.log.filter((l) => l.query.includes("transactionsByMemo(")),
     /** @param {Partial<import("../../src/history.js").ArchiveOptions>} [options] */
     archiveClient: (options = {}) => createArchive({ fetch: node.fetch, url, ...options }),
   };

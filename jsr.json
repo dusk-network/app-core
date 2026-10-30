@@ -5,7 +5,8 @@
   "exports": {
     "./history": "./src/history.js",
     "./shielded": "./src/shielded.js",
-    "./activity": "./src/activity.js"
+    "./activity": "./src/activity.js",
+    "./bridge": "./src/bridge.js"
   },
   "publish": {
     "include": ["CHANGELOG.md", "LICENSE", "README.md", "src"]

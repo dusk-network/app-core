@@ -30,6 +30,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
+| `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); and the arrivals as `/activity` takes them (`arrivalsOf`) |
 
 Every entry point has its `.d.ts`. The one runtime dependency is `@dusk-network/networks`.
 
@@ -180,6 +181,34 @@ const { drop, keep } = settleSends({ public: entries, shielded, pending: sends }
 ```
 
 By default a send adds the name typed for its recipient, or a shielded send's recipient or memo, which the shielded history doesn't have; `keeps(send)` says what else does. A failed send that tried to move an amount is always kept: the chain's row says it moved nothing.
+
+## Bridge
+
+```js
+import { arrivalsOf, depositArrivals, depositOf } from "@dusk-network/app-core/bridge";
+
+const { arrivals } = await depositArrivals({
+  network: chainId,
+  deposits: entries.map((entry) => depositOf(entry, account)).filter(Boolean), // `/history`'s entries
+  taken: keptArrivals, // the DuskEVM transactions the app's other deposits arrived with
+  fetch,
+});
+// arrivals.get(hash): { state: "arrived", hash: "0x029e…", at: 1793080333000, amount: 500000000n, block: 3951755 }
+arrivalsOf(arrivals); // Map { hash => { hash: "0x029e…", at: 1793080333000 } }: `/activity`'s `arrivals`
+```
+
+- Each credit pays one transfer. Equal transfers (the same route, recipient and payout) are paid in the order they were sent: the oldest takes the first credit after it, from 2 minutes before its block, as the chains' clocks differ. The app passes the transfers it still waits for, and the credits its others arrived with (`taken`): none of those pays a waiting one, though an earlier transfer read from the chain takes its own back, as one given but not looked for does.
+- A transfer's time is its Dusk block's, never the device's clock. One without it yet isn't looked for. One sent more than a week ago (`waitMs`) is unknown, and isn't asked about.
+- A deposit is followed on DuskEVM's explorer (`via: "explorer"`, the default): the recipient's incoming calls, newest first, read once for all its deposits, back past the oldest, 5 pages at most. Those calls don't say who deposited, so a payment is a deposit's only when it can't be another's: within 2 minutes either side of its block, once those minutes are over, with no other payment of its amount there (a failed one counts) that isn't another given deposit's. Nothing is asked before then.
+- On DuskEVM's RPC (`via: "rpc"`), a deposit is found by DuskEVM's bridge event from its sender's DuskEVM address. With `/history`'s archive, each sender's equal deposits in the hours before its own are read from its history and paid first; a history too long to read, or a deposit there whose call can't be read, leaves the order unclear. Without it, the RPC's credits are taken as the explorer's are. A deposit given without its sender takes no credit from the sender of another equal one given.
+- A migration is paid by a transfer to the account from its route's payout account, with the migration's transaction hash as the memo, of exactly its amount: from the account's entries, or from the archive's memo index, which gives each payout's own amount. One from that account of another amount leaves it unsure, not waiting: an entry's value holds any gas refund paid to the account. With `entries`, the payouts there of migrations the app didn't list come too (`unlisted`).
+- A transfer out is read from the chain: what the route's account received, the address its memo gives as the route's bridge reads it (0x and 40 hex digits, any case, nothing around them), and its block. It arrives with the DUSK token's `Transfer` from its route's payout address to that address, of what the account received less the fee. The account's history lists every transfer that named the same address, in any case: equal ones in the hours before (a given one's by its own fee) are paid first, and one that can't be read, or a history cut short, leaves the order unclear. One that pays nothing out is `no-payout`, with its `problem`. `serviceTransferOf` gives what left the account (`sent`), and what the account received (`amount`) only where no gas was left to refund: an entry's value holds any refund paid to another account.
+- A route without its payout account or address in the network's file pays out nothing that can be told apart: `no-route`.
+- An RPC search starts at a block from before the transfer, estimated from the chain's pace and checked by its time, and reads 8 windows of 5,000 blocks at most, narrower where the RPC asks for it. A result that isn't arrived says where the next search starts, with what it searched for and the credits found so far (`scan`): the app keeps it with the arrivals it was made with, and passes both back. A search for another sender or amount starts afresh.
+
+A result is facts: `arrived`, with the other side's transaction, its block's time, the lux it paid and its block; `waiting`; or `unknown`, with why: `unsure` (a credit could be another's), `late` (none came in its window), `beyond` (the explorer's pages don't reach it), `searching` (carry on from `scan`), `expired`, `no-route`, `no-payout` or `error`. The words are the app's.
+
+`activityRows` of `/activity` takes the deposits that arrived as its `arrivals`: `arrivalsOf` gives them by the deposit's hash, the DuskEVM transaction that paid it and when, and the deposit's row says where it arrived. Its `claims` are DuskEVM withdrawals', which this entry point doesn't read.
 
 ## License
 

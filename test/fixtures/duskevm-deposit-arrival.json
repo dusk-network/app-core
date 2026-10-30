@@ -1,0 +1,90 @@
+{
+  "note": "Recorded on 2026-10-30: the deposit in duskevm-deposit-history.json arriving on DuskEVM Testnet, as its explorer's API lists the recipient's incoming calls (one page, the last), and as DuskEVM's RPC gives the L2 bridge's ETHBridgeFinalized log from the sender's DuskEVM address to the recipient",
+  "explorer": {
+    "url": "https://explorer.testnet.evm.dusk.network/api/v2/addresses/0xab84edffd745af9420ac74fec73121fbee9fc86f/internal-transactions?filter=to",
+    "body": {
+      "items": [
+        {
+          "block_number": 3951755,
+          "created_contract": null,
+          "error": null,
+          "from": {
+            "ens_domain_name": null,
+            "hash": "0x4200000000000000000000000000000000000010",
+            "implementations": [
+              {
+                "address_hash": "0xC0d3c0d3c0D3c0d3C0D3c0D3C0d3C0D3C0D30010",
+                "name": "L2StandardBridge"
+              }
+            ],
+            "is_contract": true,
+            "is_scam": false,
+            "is_verified": true,
+            "metadata": null,
+            "name": "Proxy",
+            "private_tags": [],
+            "proxy_type": "eip1967",
+            "public_tags": [],
+            "reputation": "ok",
+            "watchlist_names": []
+          },
+          "gas_limit": "363147",
+          "index": 6,
+          "success": true,
+          "timestamp": "2026-10-27T05:52:13.000000Z",
+          "to": {
+            "ens_domain_name": null,
+            "hash": "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F",
+            "implementations": [],
+            "is_contract": false,
+            "is_scam": false,
+            "is_verified": false,
+            "metadata": null,
+            "name": null,
+            "private_tags": [],
+            "proxy_type": null,
+            "public_tags": [],
+            "reputation": "ok",
+            "watchlist_names": []
+          },
+          "transaction_hash": "0x029e2c6ebfe60452800c97eaa2ac36f40039812679c9cee414ea6a8b1877d61b",
+          "transaction_index": 1,
+          "type": "call",
+          "value": "500000000000000000"
+        }
+      ],
+      "next_page_params": null
+    }
+  },
+  "rpc": {
+    "url": "https://rpc.testnet.evm.dusk.network",
+    "filter": {
+      "address": "0x4200000000000000000000000000000000000010",
+      "fromBlock": "0x3c4c86",
+      "toBlock": "0x3c4c90",
+      "topics": [
+        "0x31b2166ff604fc5672ea5df08a78081d2bc6d746cadce880747f3643d819e83d",
+        "0x00000000000000000000000069d527749c90620ee9ee7d17fd8d4dec74e3a9a8",
+        "0x000000000000000000000000ab84edffd745af9420ac74fec73121fbee9fc86f"
+      ]
+    },
+    "logs": [
+      {
+        "address": "0x4200000000000000000000000000000000000010",
+        "topics": [
+          "0x31b2166ff604fc5672ea5df08a78081d2bc6d746cadce880747f3643d819e83d",
+          "0x00000000000000000000000069d527749c90620ee9ee7d17fd8d4dec74e3a9a8",
+          "0x000000000000000000000000ab84edffd745af9420ac74fec73121fbee9fc86f"
+        ],
+        "data": "0x00000000000000000000000000000000000000000000000006f05b59d3b2000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000",
+        "blockHash": "0x340b90ea2f84f37a52022789db3b9812fc9f378c263ca76751d128d7fd9f0861",
+        "blockNumber": "0x3c4c8b",
+        "blockTimestamp": "0x6ae03c0d",
+        "transactionHash": "0x029e2c6ebfe60452800c97eaa2ac36f40039812679c9cee414ea6a8b1877d61b",
+        "transactionIndex": "0x1",
+        "logIndex": "0x1",
+        "removed": false
+      }
+    ]
+  }
+}

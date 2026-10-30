@@ -21,6 +21,10 @@
       "types": "./src/activity.d.ts",
       "default": "./src/activity.js"
     },
+    "./bridge": {
+      "types": "./src/bridge.d.ts",
+      "default": "./src/bridge.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -35,7 +39,8 @@
     "typecheck": "npx --yes --package=typescript@5.9.3 -- tsc -p test-types",
     "check:versions": "node scripts/check-versions.js",
     "check:jsr": "npx --yes jsr@0.14.3 publish --dry-run --allow-dirty",
-    "smoke:history": "node scripts/smoke-history.js"
+    "smoke:history": "node scripts/smoke-history.js",
+    "smoke:bridge": "node scripts/smoke-bridge.js"
   },
   "dependencies": {
     "@dusk-network/networks": "0.3.0"
