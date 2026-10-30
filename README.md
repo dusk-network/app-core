@@ -31,6 +31,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 |---|---|
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
+| `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
 
 Every entry point has its `.d.ts`. The one runtime dependency is `@dusk-network/networks`.
 
@@ -144,6 +145,43 @@ The app keeps the history where it wants, under its own keys, and reads its note
 | `tree.leaves(from)` | Its leaves from position `from` on (`leaves_from_pos`): a stream of their bytes, or an answer whose body is one. |
 
 The app runs one read at a time per profile.
+## Activity
+
+```js
+import { activityRows, settleSends } from "@dusk-network/app-core/activity";
+
+const { entries, state } = await history.read({ limit: 50 });
+const rows = activityRows({
+  public: entries, // `/history`'s read
+  shielded, // `/shielded`'s entries
+  pending: sends, // the wallet's own records of what it sent, settled ones too
+  account, // a send to it is to itself
+  profileIndex, // another profile's sends are left out
+  network: chainId, // DuskEVM's bridge, the routes to other chains, and Sozu
+  state, // a row without a time yet sorts by the time its height gives
+});
+// rows[0]: { hash, source: "public", kind: "transfer", category: "sent", direction: "out", value: 1_000_000_000n, fee: 1_849_580n, status: "executed", time, … }
+```
+
+- A transaction both the chain and the wallet know is the chain's once its outcome is: its outcome, amount, time and fee come from the chain's history, and the wallet's record adds what the chain doesn't say, as the name typed for the recipient or a shielded send's memo. Until then its amount is what the wallet sent. One the chain has is final, its outcome the one the wallet saw it end with, or `unknown` until its details come.
+- A send the chain's histories don't have yet is `pending`: for 15 minutes at most (`PENDING_MS`), unless the node has it in its queue, then `unknown`. One the node dropped is `unknown` and `dropped`. A send marked settled shows with the chain's row alone.
+- The shielded side of a shield or an unshield is the public row's, with the fee the shielded side paid.
+- `category` is the filter a row is under: "staking" (native and Sozu's), "bridge" (DuskEVM's bridge and the routes to other chains), "sent", "received", or "other" (a shield, an unshield, a transfer to the account itself).
+- A call to DuskEVM's bridge or Portal has `bridge`: what it did (`step`: "deposit", "withdrawal", "proof", "claim" or "call"), the amount its call names, a deposit's DuskEVM address and where it arrived there (`arrivals`), a withdrawal's hash, recipient and nonce, and whether a proof's withdrawal is claimed: by a claim of the same activity that went through, is on its way or is on chain, or as the app read it (`claims`).
+- A transfer with one of the bridge's accounts has its `route`, and a call of Sozu's pool `sozu`, "stake" or "unstake" (with the pools the hub named in `pools`).
+- `nameCall` is the app's hook for the name service, as the wallets read .dusk names with `@duskdomains/sdk/call-facts`: given a call's contract and function, and the entry or the send it is from, it says what the call does, and the name and the reservation it is for. A reservation has the name of a registration after it with the same reservation.
+
+A row is facts, not text: amounts in lux as bigints, `time`, `status`, `counterparty` and its verified name (`counterpartyName`, from `names`), the name typed for it (`toName`), and `sent` and `entry`, the wallet's record and the public entry, as given. The words are the app's.
+
+### Settling sends
+
+```js
+const { drop, keep } = settleSends({ public: entries, shielded, pending: sends });
+// drop: the hashes of the sends the chain's rows now say all of, to forget;
+// keep: the others the chain has the outcome of, marked settled, to keep for what they add.
+```
+
+By default a send adds the name typed for its recipient, or a shielded send's recipient or memo, which the shielded history doesn't have; `keeps(send)` says what else does. A failed send that tried to move an amount is always kept: the chain's row says it moved nothing.
 
 ## License
 

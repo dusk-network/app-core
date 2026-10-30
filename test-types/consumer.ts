@@ -209,3 +209,62 @@ shieldedHistory({ archive, notes: () => [], store: shieldedStore, tree, treeHeig
 // @ts-expect-error an entry's amounts are text, as kept
 const lux: bigint = made[0].value;
 void lux;
+
+// `/activity`: an account's rows from its histories and the wallet's sends.
+import {
+  PENDING_MS,
+  activityRows,
+  settleSends,
+  type ActivityBridge,
+  type ActivityCategory,
+  type ActivityInput,
+  type ActivityRow,
+  type ActivityStatus,
+  type BridgeStep,
+  type NameFacts,
+  type SentTransaction,
+} from "@dusk-network/app-core/activity";
+
+const sends: SentTransaction[] = [
+  { hash: "ab", kind: "transfer", amount: "5", to: "x", status: "submitted", submittedAt: 1, toName: "alice.dusk", origin: "https://app.example" },
+  { hash: "cd", kind: "contract_call", amount: 0n, deposit: 5n, contractId: "ef", fnName: "pay", bridge: { kind: "deposit", amount: "5", to: "0x00" } },
+];
+const shieldedRows: ShieldedEntry[] = [{ hash: "ab", blockHeight: 1, kind: "transfer", direction: "out", value: "5", fee: null, success: true, timestamp: null }];
+const nameCall: ActivityInput["nameCall"] = (call, kept): NameFacts | null =>
+  call.fnName === "register" ? { kind: "registration", name: typeof kept.registeredName === "string" ? kept.registeredName : null } : null;
+const activity: ActivityRow[] = activityRows({
+  account: "x",
+  address: null,
+  arrivals: new Map([["ab", { at: 1, hash: "0x29" }]]),
+  claims: new Map([["0x8e", { claimed: true, ready: false }]]),
+  nameCall,
+  names: new Map([["x", "alice.dusk"]]),
+  network: networks.testnet,
+  now: Date.now(),
+  pending: sends,
+  pools: new Set(["ab"]),
+  profileIndex: 0,
+  public: [entry],
+  shielded: shieldedRows,
+  state: { finalized: 10, headAt: 1 },
+});
+const first: ActivityRow | undefined = activity[0];
+const status: ActivityStatus | undefined = first?.status;
+const category: ActivityCategory | undefined = first?.category;
+const moved: bigint | undefined = first?.value;
+const paid: bigint | null | undefined = first?.fee;
+const bridged: ActivityBridge | null | undefined = first?.bridge;
+const step: BridgeStep | undefined = bridged?.step;
+const arrivedAt: number | null | undefined = bridged?.arrival?.at;
+const onRoute: Route | null | undefined = first?.route;
+const sozuStep: "stake" | "unstake" | null | undefined = first?.sozu;
+const reserved: string | null | undefined = first?.nameCall?.name;
+const record: SentTransaction | null | undefined = first?.sent;
+const { drop, keep }: { drop: string[]; keep: SentTransaction[] } = settleSends({ keeps: (s) => Boolean(s.toName), pending: sends, public: [entry], shielded: shieldedRows });
+const waits: number = PENDING_MS;
+void [status, category, moved, paid, step, arrivedAt, onRoute, sozuStep, reserved, record, drop, keep, waits, activityRows()];
+// @ts-expect-error a row's status is one of four
+const wrong: ActivityStatus = "submitted";
+// @ts-expect-error a send needs its hash
+const noHash: SentTransaction = { kind: "transfer" };
+void [wrong, noHash];
