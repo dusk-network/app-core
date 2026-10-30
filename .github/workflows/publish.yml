@@ -65,11 +65,8 @@ jobs:
             npx --yes jsr@0.14.3 publish
           fi
 
-      # npm trusts this workflow (trusted publishing) once the package exists.
+      # npm trusts this workflow (trusted publishing), so no token is needed.
       - name: Publish @dusk-network/app-core to npm
-        env:
-          # Only for the first publish, before npm trusts this workflow.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           if npm view "@dusk-network/app-core@${version}" version >/dev/null 2>&1; then
