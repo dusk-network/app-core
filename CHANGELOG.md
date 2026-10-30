@@ -2,13 +2,6 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-
-### Added
-
-- `/shielded`: `shieldedHistory`, a profile's shielded history from the notes its sync keeps, each block asked for among decoys kept before asking
-- `/activity`: `activityRows`, an account's rows from its public and shielded history and the wallet's own sends, as facts, and `settleSends`, for the sends the chain's rows now say all of
-
 ## [0.1.0]
 
 ### Added
@@ -21,4 +14,6 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/history`: `callFacts`, the app's own hook for the calls it reads
 - `/history`: `historyRange`, an account's entries between two heights, a page at a time
 - `/history`: `addCoverage`, `topGap` and `shownDownTo`, the heights a history covers
+- `/shielded`: `shieldedHistory`, a profile's shielded history from the notes its sync keeps, each block asked for among decoys kept before asking
+- `/activity`: `activityRows`, an account's rows from its public and shielded history and the wallet's own sends, as facts, and `settleSends`, for the sends the chain's rows now say all of
 - Published to npm as `@dusk-network/app-core` and to JSR as `@dusk/app-core`
