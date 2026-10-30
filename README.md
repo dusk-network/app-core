@@ -6,8 +6,6 @@ It has no framework and runs in a browser extension's service worker. Each part 
 
 Network data (endpoints, contracts, routes) comes from [`@dusk-network/networks`](https://github.com/dusk-network/networks).
 
-Nothing is published yet.
-
 ## Install
 
 From npm:
