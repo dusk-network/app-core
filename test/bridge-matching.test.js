@@ -9,7 +9,7 @@ import { networks } from "@dusk-network/networks";
 import { evmAddressOf } from "@dusk-network/networks/duskevm";
 
 import { depositArrivals, migrationPayouts, serviceArrivals, serviceTransferOf } from "../src/bridge.js";
-import { bridgeFinalized, depositEntry, details, fakeChain, moonlight, tokenTransfer, transferTx, withRoutes } from "./fixtures/bridge.js";
+import { bridgeFinalized, call, depositEntry, details, fakeChain, fakeExplorer, moonlight, tokenTransfer, transferTx, withRoutes } from "./fixtures/bridge.js";
 import { fakeArchive, like } from "./fixtures/helpers.js";
 
 const DUSK = 1_000_000_000n;
@@ -25,6 +25,27 @@ const dusk = (byte) => byte.repeat(64).slice(0, 64);
 const evmHash = (n) => `0x${String(n).repeat(64).slice(0, 64)}`;
 /** Block n of a chain made at second 1_792_980_000 + n, in milliseconds. */
 const second = (/** @type {number} */ n) => (1_792_980_000 + n) * 1000;
+
+describe("deposits to DuskEVM, on its explorer", () => {
+  it("one waited for too long still takes its payment first: a newer equal one doesn't (#20)", async () => {
+    // Two equal deposits 200 s apart, and one payment, 100 s after the older.
+    const older = { amount: TENTH, at: second(1_000), hash: dusk("a5"), to: RECIPIENT };
+    const newer = { ...older, at: second(1_200), hash: dusk("b5") };
+    const explorer = fakeExplorer([[call(evmHash(5), new Date(second(1_100)).toISOString(), { value: String(TENTH * DUSK) })]]);
+    // Waited for 1,000 seconds.
+    const options = { deposits: [older, newer], fetch: explorer.fetch, network: 2, waitMs: 1_000_000 };
+    const both = await depositArrivals({ ...options, now: second(1_900) });
+
+    like(both.arrivals.get(dusk("a5")), { hash: evmHash(5), state: "arrived" });
+    like(both.arrivals.get(dusk("b5")), { reason: "late", state: "unknown" });
+
+    // The older one is past its wait: the payment is still its, not the newer one's.
+    const after = await depositArrivals({ ...options, now: second(2_100) });
+
+    like(after.arrivals.get(dusk("a5")), { reason: "expired", state: "unknown" });
+    like(after.arrivals.get(dusk("b5")), { reason: "late", state: "unknown" });
+  });
+});
 
 describe("deposits to DuskEVM, on its RPC", () => {
   const FROM = evmAddressOf(SENDER);
@@ -85,6 +106,54 @@ describe("deposits to DuskEVM, on its RPC", () => {
       const { arrivals } = await depositArrivals({
         archive: node.archiveClient(),
         deposits: [d1, sent("d2", second(1_200))],
+        fetch: chain.fetch,
+        network: 2,
+        now: second(2_150),
+        via: "rpc",
+        waitMs: 1_000_000,
+      });
+
+      like(arrivals.get(dusk("d2")), { state: "waiting" });
+    }
+  });
+
+  it("without the sender's history, one waited for too long still takes its credit first: a newer equal one doesn't (#20)", async () => {
+    // Two equal deposits 200 s apart, and one credit, 100 s after the older; with their sender or without.
+    for (const fields of [{}, { sender: null }]) {
+      const chain = fakeChain({ head: 2_100, logs: [credit(5, 1_100)] });
+      const { arrivals } = await depositArrivals({
+        deposits: [sent("a5", second(1_000), fields), sent("b5", second(1_200), fields)],
+        fetch: chain.fetch,
+        network: 2,
+        now: second(2_100),
+        via: "rpc",
+        waitMs: 1_000_000,
+      });
+
+      like(arrivals.get(dusk("a5")), { reason: "expired", state: "unknown" });
+      like(arrivals.get(dusk("b5")), { reason: "late", state: "unknown" });
+    }
+  });
+
+  it("read back from the history, one no longer looked for keeps the block the app gave it its credit can't be before (#21)", async () => {
+    const node = fakeArchive({
+      accounts: {
+        [SENDER]: {
+          receiver: [],
+          sender: [depositEntry({ hash: dusk("d1"), height: 4_990, sender: SENDER, value: TENTH }), depositEntry({ hash: dusk("d2"), height: 5_000, sender: SENDER, value: TENTH })],
+        },
+      },
+      details: { [dusk("d1")]: asDeposit(1_792_981_000), [dusk("d2")]: asDeposit(1_792_981_200) },
+      finalized: 10_000,
+    });
+    // A credit from before the head the app read before sending the older one, though within the clock's slack of it; then its own.
+    const chain = fakeChain({ head: 2_150, logs: [credit(4, 950), credit(1, 1_100)] });
+
+    // Waited for 1,000 seconds, the older one is past it; or the app has no time for it.
+    for (const at of [second(1_000), null]) {
+      const { arrivals } = await depositArrivals({
+        archive: node.archiveClient(),
+        deposits: [sent("d1", at, { height: 4_990, notBefore: 1_000 }), sent("d2", second(1_200))],
         fetch: chain.fetch,
         network: 2,
         now: second(2_150),
@@ -305,6 +374,27 @@ describe("transfers out to another chain", () => {
 
     like(unread.arrivals.get(dusk("e1")), { reason: "unsure", state: "unknown" });
     like(unread.arrivals.get(dusk("d1")), { reason: "unsure", state: "unknown" });
+  });
+
+  it("read back from the account's history, one no longer looked for keeps the block the app gave it its payout can't be before (#21)", async () => {
+    const node = archiveOf([
+      { byte: "e1", height: 4_000, seconds: 1_792_981_000 },
+      { byte: "d1", height: 4_001, seconds: 1_792_981_200 },
+    ]);
+    // A payout from before the head the app read before sending the older one, though within the clock's slack of it; then its own.
+    const chain = fakeChain({ head: 2_150, logs: [paid("0e", 950), paid("0a", 1_100)] });
+    // Waited for 1,000 seconds: the older one is past it.
+    const { arrivals } = await serviceArrivals({
+      archive: node.archiveClient(),
+      fetch: chain.fetch,
+      network: net,
+      now: second(2_150),
+      transfers: [transfer("e1", 1_792_981_000, { notBefore: 1_000 }), transfer("d1", 1_792_981_200, { height: 4_001 })],
+      waitMs: 1_000_000,
+    });
+
+    like(arrivals.get(dusk("e1")), { reason: "expired", state: "unknown" });
+    like(arrivals.get(dusk("d1")), { state: "waiting" });
   });
 
   it("count one the app no longer looks for by the fee the app gave it", async () => {

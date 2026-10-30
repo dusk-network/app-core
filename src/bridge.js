@@ -503,6 +503,25 @@ function queueOf(given, read, horizonMs) {
 }
 
 /**
+ * A queue of equal transfers where the credits can't be told apart, with
+ * the ones the app gave but no longer looks for (waited for too long) whose
+ * windows touch theirs: those were sent first, and take their credits
+ * first.
+ *
+ * @param {ReadonlyArray<Queued>} given
+ * @param {ReadonlyArray<Queued>} past
+ * @param {number} windowMs
+ * @returns {Queued[]}
+ */
+function withPast(given, past, windowMs) {
+  const polled = new Set(given.map((item) => item.hash));
+
+  return clustersOf([...given, ...past].sort(byTime), windowMs)
+    .filter((cluster) => cluster.some((item) => polled.has(item.hash)))
+    .flat();
+}
+
+/**
  * The first transfer of the run of equal ones before `item`, each within
  * `horizonMs` of the next.
  *
@@ -1218,8 +1237,10 @@ export async function depositArrivals({
 
   const used = usedOf(taken, evmHashOf);
   const live = triage(list, results, { now, waitMs });
+  // Waited for too long: not looked for, though still before the newer ones.
+  const past = list.filter((item) => item.at !== null && now - item.at > waitMs);
   const bridge = evm.predeploys.l2StandardBridge.toLowerCase();
-  const rules = { now, results, used, windowMs };
+  const rules = { now, past, results, used, windowMs };
 
   if (via === "explorer") {
     await onExplorer(read, live, { ...rules, api: String(explorerUrl ?? evm.blockscoutApiUrl), bridge, maxPages });
@@ -1284,15 +1305,24 @@ async function explorerPayments(read, { api, bridge, maxPages, since, to }) {
 /**
  * Deposits followed on DuskEVM's explorer: each recipient's incoming calls
  * read once for all its deposits, and matched as where the credits can't be
- * told apart, as they don't say who deposited.
+ * told apart, as they don't say who deposited. Equal deposits past their
+ * wait just before them take their payments first, their results kept.
  *
  * @param {Reader} read
  * @param {DepositItem[]} live
- * @param {{ api: string, bridge: string, maxPages: number, now: number, results: Map<string, Arrival>, used: Set<string>, windowMs: number }} options
+ * @param {{ api: string, bridge: string, maxPages: number, now: number, past: DepositItem[], results: Map<string, Arrival>, used: Set<string>, windowMs: number }} options
  */
-async function onExplorer(read, live, { api, bridge, maxPages, now, results, used, windowMs }) {
+async function onExplorer(read, live, { api, bridge, maxPages, now, past, results, used, windowMs }) {
   for (const [to, items] of groupBy(live, (item) => item.to)) {
-    const groups = [...groupBy(items, (item) => item.amount.toString()).values()].map((group) => ({ queue: group.map(queued).sort(byTime), wei: group[0].amount * WEI_PER_LUX }));
+    const polled = new Set(items.map((item) => item.hash));
+    const groups = [...groupBy(items, (item) => item.amount.toString()).values()].map((group) => ({
+      queue: withPast(
+        group.map(queued),
+        past.filter((item) => item.to === to && item.amount === group[0].amount).map(queued),
+        windowMs
+      ),
+      wei: group[0].amount * WEI_PER_LUX,
+    }));
 
     // Nothing can be told apart before a window is over: nothing is asked.
     if (groups.every(({ queue }) => allOpen(queue, windowMs, now))) {
@@ -1304,7 +1334,7 @@ async function onExplorer(read, live, { api, bridge, maxPages, now, results, use
     let page;
 
     try {
-      page = await explorerPayments(read, { api, bridge, maxPages, since: Math.min(...items.map((item) => /** @type {number} */ (item.at))) - windowMs, to });
+      page = await explorerPayments(read, { api, bridge, maxPages, since: Math.min(...groups.flatMap(({ queue }) => queue.map((item) => item.at))) - windowMs, to });
     } catch (error) {
       for (const item of items) results.set(item.hash, { error: messageOf(error), reason: "error", state: "unknown" });
       continue;
@@ -1323,7 +1353,7 @@ async function onExplorer(read, live, { api, bridge, maxPages, now, results, use
         { guarded: true, now, slackMs: windowMs, used, windowMs }
       );
 
-      for (const item of queue) {
+      for (const item of queue.filter((each) => polled.has(each.hash))) {
         const credit = assigned.get(item.hash);
         const verdict = verdicts.get(item.hash);
 
@@ -1342,13 +1372,14 @@ async function onExplorer(read, live, { api, bridge, maxPages, now, results, use
  * Deposits followed on DuskEVM's RPC, by the bridge's events from each
  * sender's DuskEVM address: a group of equal deposits from one sender at a
  * time, with the sender's equal deposits shortly before, from its history,
- * when there's an archive.
+ * when there's an archive; without it, with the equal ones given that are
+ * past their wait just before them.
  *
  * @param {Reader} read
  * @param {DepositItem[]} live
- * @param {{ archive: Archive | undefined, blockTimes: BlockTimes | undefined, bridge: string, list: DepositItem[], maxWindows: number, net: Network, now: number, results: Map<string, Arrival>, url: string, used: Set<string>, windowMs: number }} options
+ * @param {{ archive: Archive | undefined, blockTimes: BlockTimes | undefined, bridge: string, list: DepositItem[], maxWindows: number, net: Network, now: number, past: DepositItem[], results: Map<string, Arrival>, url: string, used: Set<string>, windowMs: number }} options
  */
-async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows, net, now, results, url, used, windowMs }) {
+async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows, net, now, past, results, url, used, windowMs }) {
   /** @type {Map<string, Awaited<ReturnType<typeof senderDeposits>> & { bottom: number, top: number, topAt: number }>} */
   const histories = new Map();
 
@@ -1407,6 +1438,9 @@ async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows
     if (rest.length) unknown.push({ items: rest, rivals: aliases.get(key) ?? new Set() });
   }
 
+  // The block each deposit given can't be credited before, the app's own.
+  const bounds = new Map(list.map((item) => [item.hash, item.notBefore]));
+
   for (const { items, rivals } of [...known, ...unknown]) {
     const { amount, sender, to } = items[0];
     const history = sender === null ? undefined : histories.get(sender);
@@ -1415,9 +1449,15 @@ async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows
     const alike = vouched
       ? /** @type {NonNullable<typeof history>} */ (history).deposits
           .filter((deposit) => deposit.to === to && deposit.amount === amount)
-          .map((deposit) => ({ at: deposit.at, given: false, hash: deposit.hash, notBefore: null, scan: null }))
+          .map((deposit) => ({ at: deposit.at, given: false, hash: deposit.hash, notBefore: bounds.get(deposit.hash) ?? null, scan: null }))
       : [];
-    const queue = vouched ? queueOf(given, alike, DEPOSIT_HORIZON_MS) : given;
+    const queue = vouched
+      ? queueOf(given, alike, DEPOSIT_HORIZON_MS)
+      : withPast(
+          given,
+          past.filter((item) => item.to === to && item.amount === amount && item.sender === sender).map(queued),
+          windowMs
+        );
     /** @type {Set<string>} */
     const unsure = new Set();
 
@@ -1586,8 +1626,10 @@ export async function serviceArrivals({
 
   const groups = [...groupBy(live.filter((item) => histories.has(item.route.id)), (item) => `${item.route.id}:${item.to}:${item.net}`).values()];
   const polled = new Set(groups.flat().map((item) => item.hash));
-  // The fee of each transfer the app gave, those no longer looked for too.
+  // The fee of each transfer the app gave, those no longer looked for too,
+  // and the block its payout can't be before.
   const feeOf = new Map(routed.map((item) => [item.hash, item.fee ?? /** @type {Route & { kind: "service" }} */ (item.route).feeLux]));
+  const bounds = new Map(routed.map((item) => [item.hash, item.notBefore]));
   // Each group's others: what the account received, at least as much as the
   // group's transfers, naming the same address, and the app's transfers no
   // longer looked for. What each paid whom, its memo and its time come from
@@ -1633,7 +1675,7 @@ export async function serviceArrivals({
         const own = feeOf.get(entry.hash);
 
         if (own === undefined ? [...fees].some((fee) => value - fee === payout) : value - own === payout) {
-          alike.push({ at: facts.at, given: false, hash: entry.hash, notBefore: null, scan: null });
+          alike.push({ at: facts.at, given: false, hash: entry.hash, notBefore: bounds.get(entry.hash) ?? null, scan: null });
         }
       }
     }
