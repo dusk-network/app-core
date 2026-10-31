@@ -134,6 +134,33 @@ describe("how wide an RPC search's windows are", () => {
     assert.ok(chain.ranges().length <= 6, `${chain.ranges().length} log searches`);
   });
 
+  it("are kept in the scan of a deposit waiting for its sender's history, and of one whose search failed", async () => {
+    // The sender's history: 201 other transfers before the deposit, more than one call reads; and an RPC that doesn't answer.
+    const OTHER = "26JfWKvhYdVY71bdSPVLNJ51Buy4GjimCT7zcsoxNQtydDbdoH2AwZaH8W7rjcAc9riAu39Vw9Lx1w7yrkBgotSjWmUdkSyQuaTKDZWVCKp9g1GxiEnnksv3W3onToB5NsNi";
+    const busy = Array.from({ length: 201 }, (_, i) => moonlight({ hash: (0xb0000 + i).toString(16).padStart(64, "0"), height: 9_000 + i, receiver: OTHER, sender: SENDER, value: 1 }));
+    const archive = fakeArchive({
+      accounts: { [SENDER]: { receiver: [], sender: [...busy, depositEntry({ hash: dusk("ab"), height: 10_000, sender: SENDER, value: TENTH })] } },
+      details: { [dusk("ab")]: details(1_792_982_000, { deposit: { amountLux: TENTH, to: RECIPIENT } }) },
+      finalized: 20_000,
+    }).archiveClient();
+    const down = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const deposit = sent("ab", second(2_000), { height: 10_000 });
+    // Where a search stopped, its windows narrowed to what the RPC takes.
+    const kept = { basis: deposit.at, from: "2500", refused: 1_001, search: "kept", seen: [], size: 1_000, start: "1990" };
+    const ask = async (/** @type {any} */ scan) => /** @type {any} */ ((await depositArrivals({ archive, deposits: [{ ...deposit, scan }], fetch: down, network: 2, now: second(3_000), via: "rpc" })).arrivals.get(deposit.hash));
+    const waiting = await ask(kept);
+
+    like(waiting, { state: "waiting" });
+    like(waiting.scan, { refused: 1_001, size: 1_000 });
+
+    const failed = await ask(waiting.scan);
+
+    like(failed, { reason: "error", state: "unknown" });
+    like(failed.scan, { refused: 1_001, size: 1_000 });
+  });
+
   it("are asked again narrower where the RPC doesn't answer one grown past 5,000 blocks in time, rather than failing", async () => {
     // An RPC that takes too long over more than 20,000 blocks.
     const chain = fakeChain({ head: 202_000, logs: [credit(7, 152_000)] });

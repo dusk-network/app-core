@@ -1555,7 +1555,8 @@ async function depositPeers(archive, net, found, { amount, bounds, calls, suppli
 }
 
 /**
- * Where a scan's search stopped, without its history.
+ * Where a scan's search stopped, with the width of its windows, without its
+ * history.
  *
  * @param {Scan | null | undefined} scan
  * @returns {Scan}
@@ -1568,6 +1569,8 @@ function searchOf(scan) {
 
   if (scan.start !== undefined) out.start = scan.start;
   if (scan.recheck !== undefined) out.recheck = scan.recheck;
+  if (scan.size !== undefined) out.size = scan.size;
+  if (scan.refused !== undefined) out.refused = scan.refused;
 
   return out;
 }
