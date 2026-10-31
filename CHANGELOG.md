@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `/duskevm-withdrawals`: a withdrawal's receipt is kept in `cache` once its DuskEVM block is final, and read once
+
 ## [0.4.0]
 
 ### Added

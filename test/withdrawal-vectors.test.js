@@ -121,6 +121,58 @@ describe("testnet's withdrawals, built as the apps build them", { skip: drivers.
     });
   }
 
+  describe("from receipts kept once final", () => {
+    // DuskEVM's finalized block at the newest withdrawal's block: each
+    // receipt is final, that one at the finalized block itself.
+    const FINALIZED = "0x2f265d";
+
+    /** A session whose DuskEVM gives its finalized block too, and says what it was asked. */
+    const session = () => {
+      /** @type {string[]} */
+      const asked = [];
+      const client = {
+        /** @param {{ method: string, params: unknown[] }} request */
+        request: async ({ method, params }) => {
+          asked.push(method === "eth_getTransactionReceipt" ? `${method} ${params[0]}` : method);
+
+          return method === "eth_getBlockByNumber" && params[0] === "finalized" ? { number: FINALIZED } : duskEvm.request({ method, params });
+        },
+      };
+
+      return { asked, withdrawals: createWithdrawals({ drivers, duskEvm: client, fetch: /** @type {any} */ (recordedNode), maxBatch: 64, network: 2, nodeUrl: NODE }) };
+    };
+
+    for (const vector of fixture.vectors) {
+      it(`${vector.name}: the same status, proof and claim, its receipt read once`, async () => {
+        const { asked, withdrawals } = session();
+        const first = await withdrawals.status(vector.tx, { submitter: vector.submitter });
+        const again = await withdrawals.status(vector.tx, { submitter: vector.submitter });
+
+        assert.deepEqual(recorded(again), recorded(first));
+        assert.equal(first.stage, vector.status.webWallet.stage);
+
+        if (vector.prove) {
+          const { call } = await withdrawals.prepareProof(vector.tx, { submitter: vector.prove.submitter });
+
+          assert.equal(`0x${hex(call.fnArgs)}`, vector.prove.webWallet);
+          assert.equal(String(call.gasLimit), vector.prove.gasLimit);
+        }
+
+        if (vector.claim) {
+          const call = await withdrawals.claimCall(vector.tx, { submitter: vector.claim.submitter });
+
+          assert.equal(`0x${hex(call.fnArgs)}`, vector.claim.webWallet);
+          assert.equal(String(call.gasLimit), vector.claim.gasLimit);
+        }
+
+        assert.deepEqual(
+          asked.filter((read) => read.startsWith("eth_getTransactionReceipt")),
+          [`eth_getTransactionReceipt ${vector.tx}`]
+        );
+      });
+    }
+  });
+
   it("pays the 1,008 DUSK to 213qXN…, as the proof and the claim say", async () => {
     const [vector] = fixture.vectors;
     const proof = await withdrawals().prepareProof(vector.tx, { submitter: vector.prove.submitter });

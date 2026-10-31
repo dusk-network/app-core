@@ -258,7 +258,7 @@ const claimCall = await withdrawals.claimCall(txHash, { submitter: account }); /
 ### Reads and caches
 
 - The Portal and the dispute game factory are read with the app's drivers; each game's hub and the anchor state registry raw. Reads go to the node's contracts through the app's `fetch` (its Multicall for Dusk batcher), sent again twice at most when the node answers 429, 502, 503 or 504; a refusal carries the contract's own words. `maxBatch` is how many reads one query holds (32 by default), each game checked taking 4: its status, the Portal's blacklist, and the registry's two answers. A game's status is read on its own hub, which the factory names: a game type's hub can change, and the games made before stay where they were.
-- What a deployment doesn't change is read once: each game's hub, each game type's hub, each hub's clock limit. `cache`, a `Map` of text by default, is where they're kept: an app can keep them across sessions.
+- What a deployment doesn't change is read once: each game's hub, each game type's hub, each hub's clock limit, and a withdrawal's receipt once its DuskEVM block is final. A receipt is read after DuskEVM's finalized block, one read for the receipts read at the same time, and kept when its block is at or under that one; one that isn't final yet, or isn't a withdrawal's, is read again each time. `cache`, a `Map` of text by default, is where they're kept: an app can keep them across sessions.
 - Dusk's latest block comes from `latestBlock`, or the node's GraphQL. Without it, a proved withdrawal's status fails: its date can't be worked out, and no claim is built.
 
 ## License

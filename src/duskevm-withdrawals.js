@@ -773,6 +773,20 @@ function evmRpc(client, net) {
   };
 }
 
+/**
+ * A block number as DuskEVM's RPC gives it, a hex quantity, or as a whole
+ * number; null for anything else.
+ *
+ * @param {unknown} value
+ * @returns {bigint | null}
+ */
+function blockNumberOf(value) {
+  if (typeof value === "bigint") return value >= 0n ? value : null;
+  if (typeof value === "number") return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
+
+  return typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value) ? BigInt(value) : null;
+}
+
 // ---------------------------------------------------------------------------
 // The bridge's contracts on Dusk
 // ---------------------------------------------------------------------------
@@ -1223,13 +1237,137 @@ export function createWithdrawals(options) {
     ]).then(([status, blacklisted, proper, respected]) => ({ blacklisted, proper, respected, status }));
 
   /**
+   * Where a final receipt is kept: by the network, its Portal and the
+   * transaction's hash, so another network's or deployment's stays apart.
+   *
+   * @param {string} hash - 0x and 64 lower-case hex digits
+   */
+  const receiptKey = (hash) => `receipt:${net.chainId}:${contracts.portal}:${hash}`;
+
+  /** @type {Promise<bigint | null> | null} */
+  let finalizing = null;
+
+  /**
+   * DuskEVM's finalized block's height, or null where it can't be read;
+   * the receipts read at the same time share one read.
+   *
+   * @returns {Promise<bigint | null>}
+   */
+  function finalizedHeight() {
+    if (!finalizing) {
+      const reading = Promise.resolve()
+        .then(() => rpc("eth_getBlockByNumber", ["finalized", false]))
+        .then(
+          (block) => blockNumberOf(block?.number),
+          () => null
+        );
+
+      finalizing = reading;
+      reading.then(() => {
+        if (finalizing === reading) finalizing = null;
+      });
+    }
+
+    return finalizing;
+  }
+
+  /** @type {Map<string, Promise<any>>} */
+  const receiptReads = new Map();
+
+  /**
+   * The withdrawal a kept receipt records, as when it was kept; null when
+   * none is kept, or what is kept isn't this transaction's withdrawal.
+   *
+   * @param {string} hash
+   * @returns {ReceiptWithdrawal | null}
+   */
+  function keptReceipt(hash) {
+    try {
+      const text = cache.get(receiptKey(hash));
+
+      if (typeof text !== "string" || !text) return null;
+
+      const withdrawal = parseWithdrawalReceipt(net, JSON.parse(text));
+
+      return withdrawal.transactionHash === hash ? withdrawal : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Keeps a receipt that can't change any more: a withdrawal's, of this
+   * transaction, in a block at or under `final`, the finalized height read
+   * before the receipt was. A failed or missing receipt, or one that isn't
+   * a withdrawal's, isn't kept. Kept as the RPC gave it, once its text
+   * reads back as the same withdrawal.
+   *
+   * @param {string} hash
+   * @param {any} raw
+   * @param {bigint} final
+   */
+  function keepIfFinal(hash, raw, final) {
+    try {
+      const withdrawal = parseWithdrawalReceipt(net, raw);
+      const block = blockNumberOf(raw?.blockNumber);
+
+      if (block === null || block !== withdrawal.blockNumber || block > final || withdrawal.transactionHash !== hash) return;
+
+      const text = JSON.stringify(raw);
+      const again = parseWithdrawalReceipt(net, JSON.parse(text));
+
+      if (again.withdrawalHash !== withdrawal.withdrawalHash || again.blockNumber !== block || again.transactionHash !== hash) return;
+
+      cache.set(receiptKey(hash), text);
+    } catch {
+      // Not kept: it's read again next time.
+    }
+  }
+
+  /**
+   * A transaction's receipt as DuskEVM gives it, read after DuskEVM's
+   * finalized block: a receipt read once its block is final is the final
+   * chain's, and is kept. The callers asking for one receipt at the same
+   * time share one read.
+   *
+   * @param {string} hash
+   * @returns {Promise<any>}
+   */
+  function readReceipt(hash) {
+    let reading = receiptReads.get(hash);
+
+    if (!reading) {
+      reading = (async () => {
+        const final = await finalizedHeight();
+        const raw = await rpc("eth_getTransactionReceipt", [hash]);
+
+        if (final !== null) keepIfFinal(hash, raw, final);
+
+        return raw;
+      })();
+      receiptReads.set(hash, reading);
+      reading.then(
+        () => receiptReads.delete(hash),
+        () => receiptReads.delete(hash)
+      );
+    }
+
+    return reading;
+  }
+
+  /**
+   * A transaction's withdrawal, from its receipt: the one kept once its
+   * block was final, else the one DuskEVM gives now.
+   *
    * @param {string} txHash
    * @returns {Promise<ReceiptWithdrawal>}
    */
   async function receipt(txHash) {
     if (typeof txHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new WithdrawalError("bad-hash");
 
-    return parseWithdrawalReceipt(net, await rpc("eth_getTransactionReceipt", [txHash.toLowerCase()]));
+    const hash = txHash.toLowerCase();
+
+    return keptReceipt(hash) ?? parseWithdrawalReceipt(net, await readReceipt(hash));
   }
 
   /**

@@ -244,7 +244,7 @@ describe("a withdrawal's status, as the web wallet read it", () => {
     });
   });
 
-  it("reads the game on Dusk, on its own hub, which the factory names, and asks DuskEVM for the receipt alone", async () => {
+  it("reads the game on Dusk, on its own hub, which the factory names, and asks DuskEVM for its finalized block and the receipt alone", async () => {
     const { chain, withdrawals } = walletSetup({ check: invalidGame });
 
     await withdrawals.status(TX, { submitter: SUBMITTER });
@@ -257,7 +257,7 @@ describe("a withdrawal's status, as the web wallet read it", () => {
     assert.deepEqual(new Set(chain.hubs), new Set([HUB]));
     assert.deepEqual(
       chain.rpc.map(({ method }) => method),
-      ["eth_getTransactionReceipt"]
+      ["eth_getBlockByNumber", "eth_getTransactionReceipt"]
     );
   });
 
