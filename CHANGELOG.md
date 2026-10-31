@@ -18,6 +18,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 - `/shielded`: a conversion is a shield or an unshield as its event says, also for a profile that only got its change
 - `/shielded`: two notes a block made for one shielded address go to a transaction each, rather than both to the first
+- `/activity`: a gas refund from another account's call to DuskEVM's bridge is a received transfer, rather than a bridge withdrawal
 
 ## [0.3.2]
 

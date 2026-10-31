@@ -248,7 +248,10 @@ export type ActivityRow = {
   route: Route | null;
   /** A call of Sozu's pool (`isSozuCall`): whether it staked or unstaked. */
   sozu: "stake" | "unstake" | null;
-  /** A call to DuskEVM's bridge or Portal. */
+  /**
+   * A call to DuskEVM's bridge or Portal; for what came in, only when the
+   * bridge paid it, not a gas refund from another account's call to it.
+   */
   bridge: ActivityBridge | null;
   /**
    * A call of the name service, as the app's hook reads it; a reservation

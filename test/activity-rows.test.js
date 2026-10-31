@@ -638,6 +638,25 @@ describe("a call to DuskEVM's bridge", () => {
     like(rowsOf({ public: [claim] })[0].bridge, { amount: 1_008_000_000_000n, nonce, step: "claim" });
   });
 
+  it("is a received transfer for an account another one's call paid its gas refund", async () => {
+    // Recorded on Testnet: a deposit of 0.5 DUSK to DuskEVM; here its unspent gas goes to A.
+    const deposit = readFixture("duskevm-deposit-history.json");
+    const raw = structuredClone(deposit.entry);
+
+    raw.events.find((/** @type {any} */ e) => e.topic === "moonlight").data.refund_info = [A, "1500000"];
+
+    const node = fakeArchive({ accounts: { [A]: { receiver: [raw], sender: [] } }, details: { ...fixture.details, ...deposit.details }, finalized: raw.block_height + 100 });
+    const history = createHistory({ account: A, archive: node.archiveClient(), network: 2, store: memoryDatabase().storeFor("refund") });
+
+    await history.sync();
+
+    const { entries } = await history.read();
+
+    // The history says what the call was; the row, that the bridge paid A nothing.
+    like(entries[0], { bridge: { amount: "500000000", kind: "deposit", to: deposit.recipient }, contractId: BRIDGE });
+    like(rowsOf({ account: A, public: entries })[0], { bridge: null, category: "received", counterparty: deposit.account, direction: "in", value: 1_500_000n });
+  });
+
   it("is a withdrawal for the account it paid", () => {
     const paid = entryOf({ bridge: null, counterparty: "14eeb3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9", direction: "in", kind: "transfer", payer: false, value: "500000000" });
 

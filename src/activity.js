@@ -570,7 +570,12 @@ export function activityRows({
             : null;
     const sozuCall = Boolean(c?.sozu) || Boolean(net && isSozuCall(net, { contractId, fnName }, { pools: poolList }));
     const call = c?.bridge ?? s?.bridge ?? null;
-    const touchesBridge = Boolean(call) || Boolean(net && [contractId, counterparty].some((id) => isBridgeContract(/** @type {Network} */ (net), id)));
+    // What came in is the bridge's only when the bridge paid it: a gas
+    // refund from another account's call to it is a transfer from that account.
+    const touchesBridge =
+      direction === "in"
+        ? Boolean(net && isBridgeContract(net, counterparty))
+        : Boolean(call) || Boolean(net && [contractId, counterparty].some((id) => isBridgeContract(/** @type {Network} */ (net), id)));
     const bridge = touchesBridge ? bridgeOf({ call, direction, fnName, value }) : null;
 
     /** @type {ActivityRow["nameCall"]} */
