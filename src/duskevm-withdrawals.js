@@ -1028,14 +1028,21 @@ function createReads({ cache, contracts, drivers, fetch, nodeUrl }) {
   };
 
   /**
-   * The hub that holds a game type's games.
+   * The hub that holds a game type's games. None, and nothing kept, for a
+   * type the factory names no hub for yet.
    *
    * @param {number} gameType
    * @returns {Promise<string>}
    */
   const hubOfType = (gameType) =>
     known(cache, inflight, `type:${contracts.disputeGameFactory}:${gameType}`, () =>
-      factory("virtualGameHubId", gameType).then(contractIdHex)
+      factory("virtualGameHubId", gameType).then((value) => {
+        const hubId = contractIdHex(value);
+
+        if (/^0+$/.test(hubId)) throw new Error("The factory names no hub for the game type");
+
+        return hubId;
+      })
     );
 
   /**

@@ -280,6 +280,33 @@ describe("deposits to DuskEVM, on its RPC with the sender's history", () => {
     assert.equal(notFinal.cache.size, 0);
   });
 
+  it("asks again for an earlier deposit's call whose arguments the archive gave cut short, though its block is final, and finds the arrival once they're whole (review)", async () => {
+    const history = { [SENDER]: { receiver: [], sender: [depositEntry({ hash: dusk("e1"), height: 4_990, sender: SENDER, value: TENTH }), depositEntry({ hash: dusk("d1"), height: 5_000, sender: SENDER, value: TENTH })] } };
+    const whole = { ...asDeposit(1_792_980_100), blockHeight: 4_990 };
+    const cut = structuredClone(whole);
+
+    cut.tx.callData.data = cut.tx.callData.data.slice(0, 40);
+
+    /** @type {Record<string, any>} */
+    const calls = { [dusk("e1")]: cut };
+    const node = fakeArchive({ accounts: history, details: calls, finalized: 10_000 });
+    // The earlier one's credit, then its own.
+    const chain = fakeChain({ head: 2_000, logs: [credit(1, 1_900), credit(2, 1_950)] });
+    const cache = new Map();
+    const options = { archive: node.archiveClient(), cache, fetch: chain.fetch, network: 2, now: second(2_000), via: /** @type {const} */ ("rpc") };
+    const d1 = sent("d1", second(200), { height: 5_000 });
+    const first = /** @type {any} */ ((await depositArrivals({ ...options, deposits: [d1] })).arrivals.get(dusk("d1")));
+
+    // The earlier one could be equal: unsure.
+    like(first, { reason: "unsure", state: "unknown" });
+
+    // Its arguments come whole now: it's equal, and took the first credit.
+    calls[dusk("e1")] = whole;
+    like((await depositArrivals({ ...options, deposits: [{ ...d1, scan: first.scan }] })).arrivals.get(dusk("d1")), { hash: evmHash(2), state: "arrived" });
+    // Kept once whole, and only then.
+    assert.deepEqual([...cache.values()].map((text) => JSON.parse(text).tx.tx.callData.data), [whole.tx.callData.data]);
+  });
+
   it("reads further down while a run of equal deposits reaches the bottom of what it read: the run's first takes the first credit", async () => {
     // Five equal deposits 100 minutes apart, from another device: the last one's own hours hold the four before it but the first.
     const heights = [10_000, 10_600, 11_200, 11_800, 12_400];

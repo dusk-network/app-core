@@ -1052,25 +1052,38 @@ function callOf(net, raw) {
 const failedTx = (raw) => raw?.err !== null && raw?.err !== undefined && raw?.err !== "";
 
 /**
- * Whether a deposit's call says all a match reads of it: its block, its
- * time, and, where it went through, its contract, function and arguments.
- * One that doesn't is asked for again: the archive may give it all later.
+ * A transaction's block height, as the archive gives it; null for none.
  *
  * @param {any} raw
  */
-function wholeCall(raw) {
-  const call = raw?.tx?.callData;
-  const height = /^\d+$/.test(String(raw?.blockHeight)) ? heightOf(Number(raw.blockHeight)) : null;
+const heightIn = (raw) => (/^\d+$/.test(String(raw?.blockHeight)) ? heightOf(Number(raw.blockHeight)) : null);
 
-  return height !== null && Number(raw?.blockTimestamp) > 0 && (failedTx(raw) || (typeof call?.contractId === "string" && typeof call?.fnName === "string" && typeof call?.data === "string"));
+/**
+ * Whether a deposit's call, as `callOf` reads it, says all a match reads of
+ * it: its time, and that it failed, that it's another call of DuskEVM's
+ * bridge or Portal than a deposit, or a deposit's amount and DuskEVM
+ * address. One that doesn't, as one whose arguments the archive gave cut
+ * short, is asked for again: the archive may give it whole later.
+ *
+ * @param {ReturnType<typeof callOf>} call
+ */
+function decided(call) {
+  if (!call || call.timestamp === null) return false;
+  if (!call.success) return true;
+  // Not a call of the bridge's contracts, as the network names them.
+  if (call.bridge === undefined) return false;
+  if (call.bridge === null) return call.fnName !== undefined && call.fnName !== BRIDGE_FUNCTIONS.deposit;
+
+  return call.bridge.kind !== "deposit" || (luxOf(call.bridge.amount) !== null && addressOf(call.bridge.to) !== "");
 }
 
 /**
  * The calls of deposits a sender's history lists, by hash, as `callOf` reads
  * them: a batch a request, with the last finalized block. One that can't
- * change any more, whole and in a block at or under that one, is kept in the
- * app's `cache`, by the network, its bridge and the transaction's hash, and
- * isn't asked for again; others are asked for each time.
+ * change any more, in a block at or under that one, and that says all a
+ * match reads of it (`decided`), is kept in the app's `cache`, by the
+ * network, its bridge and the transaction's hash, and isn't asked for
+ * again; others are asked for each time.
  *
  * @param {Archive} archive
  * @param {Network} net
@@ -1110,7 +1123,9 @@ async function depositCalls(archive, net, hashes, cache, counter) {
 
       out.set(hash, call);
 
-      if (cache && wholeCall(raw) && Number.isSafeInteger(finalized) && Number(raw.blockHeight) <= finalized) {
+      const height = heightIn(raw);
+
+      if (cache && height !== null && Number.isSafeInteger(finalized) && height <= finalized && decided(call)) {
         try {
           cache.set(keyOf(hash), JSON.stringify({ hash, tx: raw }));
         } catch {
@@ -1125,7 +1140,8 @@ async function depositCalls(archive, net, hashes, cache, counter) {
 
 /**
  * A deposit's call kept in the app's cache, as `callOf` reads it; null where
- * none is kept, or what is kept isn't this transaction's whole call.
+ * none is kept, or what is kept isn't this transaction's call, in a block,
+ * saying all a match reads of it.
  *
  * @param {Network} net
  * @param {FactCache} cache
@@ -1139,8 +1155,9 @@ function keptCall(net, cache, key, hash) {
     if (typeof text !== "string" || !text) return null;
 
     const kept = JSON.parse(text);
+    const call = kept?.hash === hash && heightIn(kept.tx) !== null ? callOf(net, kept.tx) : null;
 
-    return kept?.hash === hash && wholeCall(kept.tx) ? callOf(net, kept.tx) : null;
+    return decided(call) ? call : null;
   } catch {
     return null;
   }

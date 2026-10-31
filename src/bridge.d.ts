@@ -290,7 +290,10 @@ export type DepositArrivalOptions = {
   /**
    * Where the calls of the deposits a sender's history lists are kept, for
    * "rpc" with the archive: each is kept once its block is final and its
-   * answer says all a match reads of it, and isn't asked for again.
+   * answer says all a match reads of it (that it failed, that it's another
+   * call than a deposit, or a deposit's amount and DuskEVM address), and
+   * isn't asked for again. One whose arguments come cut short is asked for
+   * again.
    */
   cache?: FactCache;
   /** The clock, in milliseconds. */
