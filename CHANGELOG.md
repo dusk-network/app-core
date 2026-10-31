@@ -13,7 +13,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Fixed
 
 - `/bridge`: on the RPC, a deposit with its sender is followed as without the archive while the archive can't be read, and is an `error` only when the RPC can't be read either
-- `/duskevm-withdrawals`: where the RPC has no finalized block, `syncWithdrawals` reads the last 1,800 blocks under the head it takes as final again on the next run, rather than counting them covered
+- `/duskevm-withdrawals`: where the RPC has no finalized block, `syncWithdrawals` reads the blocks it read within 1,800 under the head it takes as final again on a later run, rather than once
 
 ## [0.4.1]
 

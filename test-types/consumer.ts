@@ -526,11 +526,13 @@ const start: { to: `0x${string}`; data: `0x${string}`; value: bigint } = withdra
 const scan: Promise<{ found: FoundWithdrawal[]; requests: number; state: WithdrawalScan }> = syncWithdrawals({ address: "0x00", duskEvm: client, network: 2 });
 // Its passes over the final blocks again: where the one under way is, and when the next begins.
 const passes = scan.then(({ state }) => [state.recheck?.from, state.recheck?.at] satisfies [number | null | undefined, number | undefined]);
+// The blocks to read again, where the RPC has no finalized block.
+const reread = scan.then(({ state }) => state.open satisfies number[][] | undefined);
 const listed: Promise<ExplorerWithdrawal[]> = explorerWithdrawals({ address: "0x00", maxItems: EXPLORER_ITEMS, network: 2 });
 const byNonce: Promise<Map<string, ExplorerWithdrawal>> = withdrawalsByNonce({ network: 2, nonces: [1n] });
 const stageOf: WithdrawalStage | null = explorerStage("Relayed");
 const named: "finalized" = STAGE.FINALIZED;
-void [start, scan, passes, listed, byNonce, stageOf, named, GAME_SEARCH_DEPTH, MAX_BATCH];
+void [start, scan, passes, reread, listed, byNonce, stageOf, named, GAME_SEARCH_DEPTH, MAX_BATCH];
 // @ts-expect-error a claim sends no DUSK along
 const sendsDusk: PortalCall["deposit"] = 1n;
 // @ts-expect-error a proof is for one account

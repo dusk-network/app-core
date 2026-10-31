@@ -92,8 +92,8 @@ export declare const L2_RUN_REQUESTS: 8;
 
 /**
  * DuskEVM blocks under the head counted as final where the RPC has no
- * "finalized" block: about an hour. As many under that head again stay
- * open, and the next run reads them again.
+ * "finalized" block: about an hour. The blocks a run reads within that
+ * margin under it are read again once they're under a later run's.
  */
 export declare const UNFINALIZED_MARGIN: 1800;
 
@@ -465,11 +465,15 @@ export type FoundWithdrawal = {
 
 /** Where `syncWithdrawals` got to, kept by the app and passed back as it is. */
 export type WithdrawalScan = {
-  /**
-   * The final blocks covered, as ranges, highest first: where the RPC has no
-   * finalized block, up to `UNFINALIZED_MARGIN` blocks under `target`.
-   */
+  /** The final blocks covered, as ranges, highest first. */
   covered: number[][];
+  /**
+   * Where the RPC has no finalized block: the blocks covered within
+   * `UNFINALIZED_MARGIN` under the head a run read them under, as ranges,
+   * highest first, the newest 16, read again once they're under a later
+   * run's margin. Older ones are left to the passes over all the blocks.
+   */
+  open?: number[][];
   /** What was found, by hash. */
   entries: Record<string, FoundWithdrawal>;
   /** The final head the last run read under. */
@@ -497,9 +501,13 @@ export type WithdrawalScan = {
  * be read, only once the final head has moved), and carries on below; under
  * a final head lower than the last run's, what was covered and found above
  * it is dropped, and read again. Where the RPC has no finalized block, the
- * final head is the latest less `UNFINALIZED_MARGIN`, and as many blocks
- * under it stay open: the next run reads them again, so a deeper reorg
- * there is found. Once all the final blocks are
+ * final head is the latest less `UNFINALIZED_MARGIN`, and the blocks a run
+ * reads within that margin under it are read again once they're under a
+ * later run's (`open`): among the newest blocks a run reads again, or, once
+ * all the final blocks are covered, before the passes over them, with the
+ * requests a run has left. A deeper reorg there is found, and older blocks
+ * are read as they would be without it.
+ * Once all the final blocks are
  * covered, they're read again from the newest down, a pass at a time with
  * the requests a run has left: the first an hour later, each after as long
  * again as it has been since. A withdrawal is found once: one read again

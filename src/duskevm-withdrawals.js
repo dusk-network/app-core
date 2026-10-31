@@ -133,6 +133,10 @@ const NONCE_COUNT = (1n << 240n) - 1n;
 // since.
 const L2_OVERLAP = 50_000;
 const L2_RECHECK_MS = 60 * 60_000;
+// The ranges of blocks read only under a head the RPC didn't call final that
+// a sync keeps to read again, the newest: older ones are left to its passes
+// over all the blocks.
+const L2_OPEN_RANGES = 16;
 // Answers a read is sent again for, a quarter second, then half a second later.
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const ATTEMPTS = 3;
@@ -2231,24 +2235,25 @@ const tooWide = (error) => /range|limit|too many|exceed/i.test(asError(error).me
 
 /**
  * The highest DuskEVM block that can't be reorged away, the requests it
- * took, and how many blocks under it the next run reads again (`open`):
- * none under the RPC's finalized block. Where the RPC has none, the head is
- * the latest less a margin, and the margin's blocks under it are read
- * again, as a deeper reorg could still change them.
+ * took, and the margin under it within which the blocks a run reads are
+ * read again on a later one: none under the RPC's finalized block. Where
+ * the RPC has none, the head is the latest less a margin, and the blocks
+ * read within the margin under it are read again, as a deeper reorg could
+ * still change them.
  *
  * @param {(method: string, params?: unknown[]) => Promise<any>} rpc
- * @returns {Promise<{ head: number, open: number, requests: number }>}
+ * @returns {Promise<{ head: number, margin: number, requests: number }>}
  */
 async function finalHead(rpc) {
   try {
     const block = await rpc("eth_getBlockByNumber", ["finalized", false]);
 
-    if (block?.number) return { head: Number(BigInt(block.number)), open: 0, requests: 1 };
+    if (block?.number) return { head: Number(BigInt(block.number)), margin: 0, requests: 1 };
   } catch {
     // An RPC without "finalized": the latest block, less a margin.
   }
 
-  return { head: Math.max(0, Number(BigInt(await rpc("eth_blockNumber", []))) - UNFINALIZED_MARGIN), open: UNFINALIZED_MARGIN, requests: 2 };
+  return { head: Math.max(0, Number(BigInt(await rpc("eth_blockNumber", []))) - UNFINALIZED_MARGIN), margin: UNFINALIZED_MARGIN, requests: 2 };
 }
 
 /**
@@ -2271,6 +2276,39 @@ function recheckOf(value, target) {
 }
 
 /**
+ * The blocks a state kept as read only under a head the RPC didn't call
+ * final, as far as they're still covered, as ranges, highest first; none
+ * for anything else.
+ *
+ * @param {unknown} value
+ * @param {number[][]} covered
+ * @returns {number[][]}
+ */
+function openOf(value, covered) {
+  const kept = Array.isArray(value) ? value.filter((range) => Array.isArray(range) && Number.isSafeInteger(range[0]) && Number.isSafeInteger(range[1]) && range[0] <= range[1]) : [];
+  /** @type {number[][]} */
+  let out = [];
+
+  for (const [a, b] of kept) {
+    for (const [c, d] of covered) {
+      if (Math.max(a, c) <= Math.min(b, d)) out = addCoverage(out, Math.max(a, c), Math.min(b, d));
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Ranges of blocks, highest first, without blocks `lo` to `hi`.
+ *
+ * @param {number[][]} ranges
+ * @param {number} lo
+ * @param {number} hi
+ * @returns {number[][]}
+ */
+const without = (ranges, lo, hi) => ranges.flatMap(([a, b]) => [...(b > hi ? [[Math.max(a, hi + 1), b]] : []), ...(a < lo ? [[a, Math.min(b, lo - 1)]] : [])]);
+
+/**
  * @param {{ address: string, duskEvm: DuskEvmClient, network?: NetworkRef, bridge?: string, state?: WithdrawalScan | null, maxRequests?: number, now?: () => number }} options
  * @returns {Promise<{ found: FoundWithdrawal[], requests: number, state: WithdrawalScan }>}
  */
@@ -2282,7 +2320,7 @@ export async function syncWithdrawals({ address, bridge, duskEvm, maxRequests = 
   if (!contract) throw new TypeError("No DuskEVM bridge to read");
 
   const rpc = evmRpc(duskEvm, net);
-  const { head: target, open, requests: asked } = await finalHead(rpc);
+  const { head: target, margin, requests: asked } = await finalHead(rpc);
   const time = now();
   // Coverage kept above the final head, as an older run read the latest, is
   // read again, and what was found there is dropped with it: it may have
@@ -2296,6 +2334,11 @@ export async function syncWithdrawals({ address, bridge, duskEvm, maxRequests = 
   let requests = asked;
   let recheck = recheckOf(state?.recheck, target);
   const topics = [ETH_BRIDGE_INITIATED_TOPIC, pad(sender)];
+  // Blocks read only under a head the RPC didn't call final, within its
+  // margin, are read again once they're under a run's margin too: a deeper
+  // reorg could still change them. Those kept above the final head go with
+  // its coverage.
+  let open = openOf(state?.open, covered);
 
   /**
    * The address's withdrawals in blocks `lo` to `hi`, those blocks covered;
@@ -2334,6 +2377,10 @@ export async function syncWithdrawals({ address, bridge, duskEvm, maxRequests = 
     }
 
     covered = addCoverage(covered, lo, hi);
+    // Read under this run's margin, they're as final as its head; within it,
+    // under a head the RPC didn't call final, they're open.
+    open = without(open, lo, hi);
+    if (margin && hi > target - margin) open = addCoverage(open, Math.max(lo, target - margin + 1), hi);
 
     return true;
   };
@@ -2366,8 +2413,19 @@ export async function syncWithdrawals({ address, bridge, duskEvm, maxRequests = 
       continue;
     }
 
-    // All the final blocks covered: they're read again, a pass at a time,
-    // from the newest down, with what a run has left.
+    // All the final blocks covered: those read only under a head the RPC
+    // didn't call final, and under this run's margin now, are read again
+    // first, the newest first. Then all of them, a pass at a time, from the
+    // newest down, with what a run has left.
+    const settling = open.find(([a]) => a <= target - margin);
+
+    if (settling) {
+      const b = Math.min(settling[1], target - margin);
+
+      await read(Math.max(settling[0], b - window + 1), b);
+      continue;
+    }
+
     if (recheck === null) recheck = { at: time + L2_RECHECK_MS, from: null, since: time };
     if (recheck.from === null && time < recheck.at) break;
 
@@ -2381,12 +2439,7 @@ export async function syncWithdrawals({ address, bridge, duskEvm, maxRequests = 
 
   if (recheck === null && !topGap(covered, target)) recheck = { at: time + L2_RECHECK_MS, from: null, since: time };
 
-  // Under a head the RPC didn't call final, the last blocks read stay open,
-  // and the next run reads them again: a reorg deeper than the margin could
-  // still change them. What was found there is kept, and found once.
-  const kept = open ? covered.map(([lo, hi]) => [lo, Math.min(hi, target - open)]).filter(([lo, hi]) => hi >= lo) : covered;
-
-  return { found, requests, state: { covered: kept, entries, ...(recheck ? { recheck } : {}), target, updatedAt: now(), window } };
+  return { found, requests, state: { covered, entries, ...(open.length ? { open: open.slice(0, L2_OPEN_RANGES) } : {}), ...(recheck ? { recheck } : {}), target, updatedAt: now(), window } };
 }
 
 /**
