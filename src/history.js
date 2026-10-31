@@ -395,14 +395,16 @@ function readHead(data) {
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
 /**
- * A memo as text when it is UTF-8 without control characters, else as 0x hex.
+ * A memo as text when it is UTF-8 without control characters, else as 0x hex
+ * (`binary`).
  *
  * @param {unknown} hex
+ * @returns {{ memo: string, binary: boolean }}
  */
-function memoText(hex) {
+function memoOf(hex) {
   const h = String(hex ?? "");
 
-  if (!h || h.length % 2 || !/^[0-9a-f]+$/i.test(h)) return "";
+  if (!h || h.length % 2 || !/^[0-9a-f]+$/i.test(h)) return { binary: false, memo: "" };
 
   const bytes = Uint8Array.from(h.match(/../g) ?? [], (b) => parseInt(b, 16));
 
@@ -410,12 +412,12 @@ function memoText(hex) {
     const text = utf8.decode(bytes);
 
     // eslint-disable-next-line no-control-regex
-    if (!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) return text;
+    if (!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) return { binary: false, memo: text };
   } catch {
     // not text
   }
 
-  return `0x${h.toLowerCase()}`;
+  return { binary: true, memo: `0x${h.toLowerCase()}` };
 }
 
 /** @param {any} receiver */
@@ -443,6 +445,7 @@ export function parseHistoryEntry(account, raw) {
   let selfValue = null;
   let payer = false;
   let memo = "";
+  let memoBinary = false;
   /** @type {EntryKind | null} */
   let kind = null;
   /** @type {string | null} */
@@ -476,7 +479,7 @@ export function parseHistoryEntry(account, raw) {
       const ours = d.sender === account || receiver === account;
 
       if (d.sender === account) payer = true;
-      if (ours) memo = memoText(d.memo);
+      if (ours) ({ binary: memoBinary, memo } = memoOf(d.memo));
 
       if (d.sender === account && receiver === account) {
         selfValue = (selfValue ?? 0n) + value;
@@ -574,7 +577,18 @@ export function parseHistoryEntry(account, raw) {
     else counterparty = direction === "out" ? sentTo : receivedFrom;
   }
 
-  return { blockHeight, counterparty: counterparty || null, direction, hash, kind, memo, payer, value, ...(refunded ? { refund: refunded } : {}) };
+  return {
+    blockHeight,
+    counterparty: counterparty || null,
+    direction,
+    hash,
+    kind,
+    memo,
+    ...(memoBinary ? { memoBinary: true } : {}),
+    payer,
+    value,
+    ...(refunded ? { refund: refunded } : {}),
+  };
 }
 
 /**
@@ -1071,14 +1085,16 @@ export function createHistory({ archive, account, store, network = null, callFac
   /**
    * Details for the newest kept entries that need them, or for `entries`,
    * a batch per request, each kept only while the history is still the one
-   * `chain` reads.
+   * `chain` reads. A request that fails rejects, or with `lenient`, as in a
+   * sync run, ends the details there and gives its error.
    *
-   * @param {{ chain: { genesis: string, kept: boolean }, entries?: ReadonlyArray<KeptEntry | ReadEntry>, maxRequests: number, onStep?: () => void }} options
+   * @param {{ chain: { genesis: string, kept: boolean }, entries?: ReadonlyArray<KeptEntry | ReadEntry>, maxRequests: number, onStep?: () => void, lenient?: boolean }} options
+   * @returns {Promise<Error | null>}
    */
-  async function fillDetails({ chain, entries, maxRequests, onStep }) {
+  async function fillDetails({ chain, entries, maxRequests, onStep, lenient = false }) {
     let requests = Math.max(0, Math.floor(maxRequests));
 
-    if (!requests) return;
+    if (!requests) return null;
 
     const due = entries ? entries.filter(needsDetails) : await pendingRows(DETAILS_BATCH * requests);
     // Arguments are asked only of the calls they're read for.
@@ -1087,7 +1103,16 @@ export function createHistory({ archive, account, store, network = null, callFac
 
     for (let i = 0; i < due.length && requests > 0; i += DETAILS_BATCH, requests -= 1) {
       const batch = due.slice(i, i + DETAILS_BATCH).map((e) => e.hash);
-      const details = await fetchTxDetails(archive, batch, { account, args, callFacts, network: net, now });
+      /** @type {Map<string, EntryDetails & Record<string, unknown>>} */
+      let details;
+
+      try {
+        details = await fetchTxDetails(archive, batch, { account, args, callFacts, network: net, now });
+      } catch (error) {
+        if (!lenient) throw error;
+
+        return error instanceof Error ? error : new Error(messageOf(error));
+      }
 
       // Asked for the bridge, and its call isn't the bridge's: read, and kept so.
       for (const [hash, found] of details) if (forBridge.has(hash) && found.bridge === undefined) found.bridge = null;
@@ -1096,11 +1121,25 @@ export function createHistory({ archive, account, store, network = null, callFac
       if (details.size) {
         if (staleFor(await store.getState(), chain)) throw new StaleHistoryError();
 
-        await store.patch(details);
+        /** @type {StaleHistoryError | null} */
+        let refused = null;
+
+        try {
+          // Checked again in the write's own transaction, by a store that can.
+          await store.patch(details, (kept) => {
+            if (staleFor(kept, chain)) throw (refused = new StaleHistoryError());
+          });
+        } catch (error) {
+          throw refused ?? error;
+        }
+
+        if (refused) throw refused;
       }
 
       onStep?.();
     }
+
+    return null;
   }
 
   /**
@@ -1146,7 +1185,7 @@ export function createHistory({ archive, account, store, network = null, callFac
    * @param {number} maxDetailRequests - 0 or more
    * @param {((state: HistoryState) => void) | undefined} onStep
    * @param {{ budget: { left: number }, head: { finalized: number, genesis: string } } | null} [restart]
-   * @returns {Promise<{ state: HistoryState, requests: number, added: number }>}
+   * @returns {Promise<{ state: HistoryState, requests: number, added: number, detailsError?: Error }>}
    */
   async function run(maxRequests, maxDetailRequests, onStep, restart = null) {
     /** @type {HistoryState | null} */
@@ -1154,6 +1193,9 @@ export function createHistory({ archive, account, store, network = null, callFac
     const budget = restart?.budget ?? { left: maxRequests };
     let detailsLeft = maxDetailRequests;
     let added = 0;
+    // A details request that failed: the run reads no more details, and goes on.
+    /** @type {Error | null} */
+    let detailsError = null;
     // The chain this run reads, once its head names it, and whether it has
     // seen the history kept: one cleared since isn't this run's to write.
     const chain = { genesis: "", kept: state !== null };
@@ -1207,7 +1249,8 @@ export function createHistory({ archive, account, store, network = null, callFac
 
       if (entries.length && added === entries.length && detailsLeft > 0) {
         detailsLeft -= 1;
-        await fillDetails({ chain, maxRequests: 1, onStep: report });
+        detailsError = await fillDetails({ chain, lenient: true, maxRequests: 1, onStep: report });
+        if (detailsError) detailsLeft = 0;
       }
     };
 
@@ -1237,7 +1280,21 @@ export function createHistory({ archive, account, store, network = null, callFac
     if (state?.genesis && genesis && state.genesis !== genesis) {
       if (restart) throw new Error("The store still keeps another chain's history");
 
-      await store.clear();
+      let started = false;
+
+      try {
+        // Only while it is still another chain's, checked in the clear's own
+        // transaction by a store that can: another run may have started it
+        // over on this chain since this one read it, and kept what it read.
+        await store.clear((kept) => {
+          if (kept === null || kept === undefined || kept.genesis === genesis) {
+            started = true;
+            throw new StaleHistoryError();
+          }
+        });
+      } catch (error) {
+        if (!started) throw error;
+      }
 
       return run(maxRequests, maxDetailRequests, onStep, { budget, head: /** @type {{ finalized: number, genesis: string }} */ (first.head) });
     }
@@ -1309,9 +1366,14 @@ export function createHistory({ archive, account, store, network = null, callFac
       await commit(range.entries, { set: { crowded: { height: lo, page: 2 }, window } });
     }
 
-    await fillDetails({ chain, maxRequests: detailsLeft, onStep: report });
+    detailsError ??= await fillDetails({ chain, lenient: true, maxRequests: detailsLeft, onStep: report });
 
-    return { added, requests: maxRequests - budget.left, state: /** @type {HistoryState} */ (state) };
+    return {
+      added,
+      requests: maxRequests - budget.left,
+      state: /** @type {HistoryState} */ (state),
+      ...(detailsError ? { detailsError } : {}),
+    };
   }
 
   return Object.freeze({

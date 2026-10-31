@@ -2,6 +2,17 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `/history`: `memoBinary` on an entry whose memo is bytes given as 0x hex, rather than typed 0x text
+- `/history`: a `check` for the store's `patch` and `clear` to make in the same transaction, so a run after a reset leaves another run's history of the new chain alone
+
+### Changed
+
+- `/history`: a details request that fails in `sync()` ends the run's details and resolves it with `detailsError`, rather than rejecting the run
+
 ## [0.3.2]
 
 ### Fixed

@@ -236,6 +236,35 @@ describe("a sync run", () => {
     like((await history.read({ limit: 50 })).entries.find((entry) => entry.hash === received.origin), { refund: 1_500_000n });
   });
 
+  it("reads on when a details request fails, and resolves saying so; the next run reads them", async () => {
+    const node = fakeArchive();
+    const { history, store } = setup(node, A);
+    let failing = true;
+    let asked = 0;
+
+    node.before = async (query) => {
+      if (!query.includes("tx(hash:")) return;
+      asked += 1;
+      if (failing) throw new TypeError("fetch failed");
+    };
+
+    const result = await history.sync();
+
+    // Every history step was kept, and one details request asked: none after it failed.
+    assert.equal(result.detailsError?.message, "fetch failed");
+    assert.deepEqual([result.state.covered, store.rows().length, asked], [[[0, FINALIZED - FINALITY_MARGIN]], 4, 1]);
+    assert.ok(store.rows().every((row) => row.detailsAt === undefined));
+    // What the app shows still rejects.
+    await assert.rejects(history.fillDetails((await history.read()).entries), { message: "fetch failed" });
+
+    failing = false;
+
+    const next = await history.sync();
+
+    assert.equal(Object.hasOwn(next, "detailsError"), false);
+    assert.ok(store.rows().every((row) => row.detailsAt));
+  });
+
   it("hears each step it keeps", async () => {
     const node = fakeArchive();
     const { history } = setup(node, A);
@@ -488,6 +517,57 @@ describe("two syncs of one history", () => {
 
     assert.deepEqual([kept?.genesis, kept?.covered], [NEW_GENESIS, [[0, 990]]]);
     assert.deepEqual(db.storeFor(KEY).rows(), []);
+  });
+
+  it("keeps what another sync read of the new chain when a slower one finds the reset too, and reads none of it again", async () => {
+    const db = memoryDatabase();
+    // The same node, reset: another genesis, and A's first entry again.
+    const newChain = fakeArchive({ finalized: 4_656_000, genesis: NEW_GENESIS });
+
+    await historyOn(db, fakeArchive().fetch).sync();
+
+    // A slow sync reads the old chain's history, then waits for its head.
+    const slow = late(newChain, /lastBlockPair/);
+    const run = historyOn(db, slow.fetch).sync();
+
+    await slow.reached.promise;
+    // Meanwhile another sync starts the history over on the new chain, and reads it.
+    await historyOn(db, newChain.fetch).sync();
+
+    const asked = newChain.log.length;
+
+    slow.held.resolve(undefined);
+    await run;
+
+    // The new chain's history was forgotten by neither: no request of the slow one's read it again.
+    assert.equal(db.db.clears, 1);
+    assert.equal(newChain.log.length, asked);
+    assert.deepEqual([(await db.storeFor(KEY).getState())?.genesis, db.storeFor(KEY).rows().length], [NEW_GENESIS, 1]);
+  });
+
+  it("keeps no details an old chain's run checked before another sync started the history over, in the same transaction", async () => {
+    const db = memoryDatabase();
+    // Reset, the same transactions again, their details not given yet.
+    const newChain = fakeArchive({ details: {}, genesis: NEW_GENESIS });
+    const store = db.storeFor(KEY);
+    const patch = store.patch.bind(store);
+    let once = false;
+
+    // Between the run's last look at the history and its write, another sync starts it over.
+    store.patch = async (details, check) => {
+      if (!once) {
+        once = true;
+        await historyOn(db, newChain.fetch).sync();
+      }
+
+      return patch(details, check);
+    };
+
+    const run = createHistory({ account: A, archive: createArchive({ fetch: fakeArchive().fetch, url: fixture.nodeUrl }), network: 2, store }).sync();
+
+    await assert.rejects(run, { name: "StaleHistoryError" });
+    assert.equal(db.storeFor(KEY).rows().length, 4);
+    assert.ok(db.storeFor(KEY).rows().every((row) => row.detailsAt === undefined));
   });
 
   it("keeps nothing an old chain's details bring after another sync kept the new chain's entries", async () => {
