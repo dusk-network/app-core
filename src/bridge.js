@@ -12,7 +12,7 @@
 
 import { networkFor, routeForAccount, routes } from "@dusk-network/networks";
 import { isAccount } from "@dusk-network/networks/account";
-import { duskEvmContracts, evmAddressOf } from "@dusk-network/networks/duskevm";
+import { BRIDGE_FUNCTIONS, duskEvmContracts, evmAddressOf } from "@dusk-network/networks/duskevm";
 import { DETAILS_BATCH, TRANSFER_CONTRACT, fetchTxDetails, historyRange } from "./history.js";
 
 /** @typedef {import("./bridge.js").Arrival} Arrival */
@@ -21,6 +21,7 @@ import { DETAILS_BATCH, TRANSFER_CONTRACT, fetchTxDetails, historyRange } from "
 /** @typedef {import("./bridge.js").DepositArrivalOptions} DepositArrivalOptions */
 /** @typedef {import("./bridge.js").FetchLike} FetchLike */
 /** @typedef {import("./bridge.js").HistoryLike} HistoryLike */
+/** @typedef {import("./bridge.js").HistoryScan} HistoryScan */
 /** @typedef {import("./bridge.js").Migration} Migration */
 /** @typedef {import("./bridge.js").MigrationPayout} MigrationPayout */
 /** @typedef {import("./bridge.js").MigrationPayoutOptions} MigrationPayoutOptions */
@@ -200,8 +201,41 @@ const msOf = (value) => (typeof value === "number" && Number.isFinite(value) && 
 const heightOf = (value) => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null);
 
 /**
+ * How far a transfer's history is read, as a result gave it; null for
+ * anything else.
+ *
+ * @param {unknown} value
+ * @returns {HistoryScan | null}
+ */
+function historyScanOf(value) {
+  const read = /** @type {any} */ (value);
+
+  if (!read || typeof read !== "object" || typeof read.of !== "string" || !Array.isArray(read.found)) return null;
+
+  const lo = read.lo === null ? null : heightOf(read.lo);
+  const next = read.next === null ? null : { from: heightOf(read.next?.from), page: heightOf(read.next?.page), to: heightOf(read.next?.to) };
+
+  if ((read.lo !== null && lo === null) || (lo === null && next === null)) return null;
+  if (next && (next.from === null || next.to === null || next.page === null || next.page < 1 || next.from > next.to)) return null;
+
+  const found = read.found.flatMap((/** @type {any} */ each) => {
+    const hash = duskHashOf(each?.hash);
+    const height = heightOf(each?.height);
+    const value = each?.value;
+
+    return hash && height !== null && typeof value === "string" && /^\d{1,20}$/.test(value) ? [{ hash, height, value }] : [];
+  });
+
+  // One left out could be equal: it's read afresh.
+  if (found.length !== read.found.length) return null;
+
+  return { found, lo, next: /** @type {HistoryScan["next"]} */ (next), of: read.of };
+}
+
+/**
  * Where a search stopped, what it searched for, and the credits it found
- * before, as a result gave them; null for anything else.
+ * before, and how far the transfer's history is read, as a result gave
+ * them; null for anything else.
  *
  * @param {unknown} value
  * @returns {Scan | null}
@@ -209,19 +243,26 @@ const heightOf = (value) => (typeof value === "number" && Number.isSafeInteger(v
 function scanOf(value) {
   const scan = /** @type {any} */ (value);
   const from = quantityOf(scan?.from);
+  const history = historyScanOf(scan?.history);
+  /** @type {Scan} */
+  const out = history ? { history } : {};
 
-  if (from === null || typeof scan?.basis !== "number" || !Number.isFinite(scan.basis) || typeof scan.search !== "string") return null;
+  if (from !== null && typeof scan?.basis === "number" && Number.isFinite(scan.basis) && typeof scan.search === "string") {
+    const seen = (Array.isArray(scan.seen) ? scan.seen : []).flatMap((/** @type {any} */ credit) => {
+      const hash = evmHashOf(credit?.hash);
+      const block = quantityOf(credit?.block);
+      const at = msOf(credit?.at);
+      const sender = credit?.sender === null ? null : addressOf(credit?.sender);
 
-  const seen = (Array.isArray(scan.seen) ? scan.seen : []).flatMap((/** @type {any} */ credit) => {
-    const hash = evmHashOf(credit?.hash);
-    const block = quantityOf(credit?.block);
-    const at = msOf(credit?.at);
-    const sender = credit?.sender === null ? null : addressOf(credit?.sender);
+      return hash && block !== null && at !== null && sender !== "" ? [{ at, block: block.toString(), hash, sender }] : [];
+    });
 
-    return hash && block !== null && at !== null && sender !== "" ? [{ at, block: block.toString(), hash, sender }] : [];
-  });
+    Object.assign(out, { basis: scan.basis, from: from.toString(), search: scan.search, seen });
+  } else if (!history) {
+    return null;
+  }
 
-  return { basis: scan.basis, from: from.toString(), search: scan.search, seen };
+  return out;
 }
 
 /**
@@ -780,7 +821,10 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
   // The logs searched for: a search for others, as for another sender or
   // amount, isn't carried on.
   const search = [filter.address, ...filter.topics.map((topic) => topic ?? "*"), filter.wei.toString()].join(":");
-  const resumed = live.flatMap((item) => (item.scan && item.scan.search === search && item.scan.basis <= first.at ? [item.scan] : []));
+  /** @type {{ basis: number, from: string, seen?: Scan["seen"] }[]} */
+  const resumed = live.flatMap(({ scan }) =>
+    scan?.from !== undefined && scan.search === search && scan.basis !== undefined && scan.basis <= first.at ? [{ basis: scan.basis, from: scan.from, seen: scan.seen }] : []
+  );
   /** @type {Map<string, Credit>} */
   const carried = new Map();
 
@@ -797,9 +841,18 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
   /** @type {bigint} */
   let start;
 
-  if (resumed.length) {
+  if (resumed.length && resumed.every((scan) => scan.basis === first.at)) {
     start = minOf(resumed.map((scan) => BigInt(scan.from)));
     head = await headOf(read, url);
+  } else if (resumed.length) {
+    // Begun from a transfer before the first now, as one that since
+    // arrived: none of the queue's credits is before where a search from
+    // the first starts, which it skips to.
+    const from = minOf(resumed.map((scan) => BigInt(scan.from)));
+    const fresh = first.notBefore !== null ? { head: await headOf(read, url), start: first.notBefore } : await startBefore(read, url, reach, blockTimes);
+
+    head = fresh.head;
+    start = from > fresh.start ? from : fresh.start;
   } else if (first.notBefore !== null) {
     start = first.notBefore;
     head = await headOf(read, url);
@@ -1016,50 +1069,214 @@ async function detailsOf(archive, hashes, { args = false, network }, counter) {
 }
 
 /**
- * A sender's deposits to DuskEVM between two heights, from its history and
- * their calls: amount, DuskEVM address and time, but those `skip` names,
- * which are looked for. Only those of at least `least` lux are read: what
- * an account paid the bridge is its deposit and any gas refund it paid
- * another account. Those whose call or time the archive doesn't give are
- * `unresolved`: they could be any deposit of up to what they paid.
+ * A transfer whose history is read: its hash, its Dusk block's time and
+ * height, the block on the other chain its credit can't be before, and its
+ * scan.
+ *
+ * @typedef {{ hash: string, at: number, height: number, notBefore: bigint | null, scan: Scan | null }} Reading
+ */
+
+/**
+ * The history a group of equal transfers needs, each transfer's read on
+ * from where its scan stopped: its account's history from `reach` blocks
+ * under its block up to it, and `reach` further down at a time while the
+ * run of equal transfers it is in reaches within `horizonMs` of the bottom.
+ * The transfer itself must be listed there: until it is, the archive
+ * hasn't read its block. Each transfer reads `pages` pages at most, so a
+ * later one's history never keeps an earlier one waiting.
+ *
+ * Those whose history is all read are `covered`, and `given` as the queue
+ * holds them, with `queue`: theirs and the equal transfers found
+ * (`peersOf`), and `unread`: by transfer, the heights it read of those that
+ * could be equal but can't be read. Each one's reading, done or not, is in
+ * `states`.
+ *
+ * @param {Archive} archive
+ * @param {ReadonlyArray<Reading>} items
+ * @param {{ account: string, direction: "in" | "out", horizonMs: number, reach: number, pages: number, keep: (entry: HistoryEntry) => boolean, of: (item: Reading) => string, peersOf: (found: HistoryScan["found"]) => Promise<{ peers: Queued[], unread: ReadonlyArray<{ hash: string, height: number }> }> }} read
+ * @param {{ requests: number }} counter
+ */
+async function readHistories(archive, items, { account, direction, horizonMs, keep, of, pages, peersOf, reach }, counter) {
+  const walks = items.map((item) => {
+    const kept = item.scan?.history;
+    /** @type {HistoryScan} */
+    const state =
+      kept && kept.of === of(item)
+        ? structuredClone(/** @type {HistoryScan} */ (kept))
+        : { found: [], lo: null, next: { from: Math.max(0, item.height - reach), page: 1, to: item.height }, of: of(item) };
+
+    return { item, left: pages, state };
+  });
+  /** @type {Reading[]} */
+  let covered = [];
+  /** @type {Queued[]} */
+  let given = [];
+  /** @type {Queued[]} */
+  let queue = [];
+  /** @type {Map<string, number[]>} */
+  const unread = new Map();
+
+  for (;;) {
+    // Each one's next range, as far as its pages go.
+    for (const walk of walks) {
+      const { state } = walk;
+
+      while (state.next && walk.left > 0) {
+        const next = /** @type {NonNullable<HistoryScan["next"]>} */ (state.next);
+        const range = await historyRange(archive, { account, direction, from: next.from, page: next.page, pages: walk.left, to: next.to });
+        const found = /** @type {HistoryScan["found"][number][]} */ (state.found);
+
+        counter.requests += range.requests;
+        walk.left -= range.requests;
+
+        for (const entry of range.entries) {
+          if (keep(entry) && !found.some((each) => each.hash === entry.hash)) found.push({ hash: entry.hash, height: entry.blockHeight, value: String(entry.value) });
+        }
+
+        if (!range.complete) {
+          state.next = { ...next, page: next.page + range.requests };
+        } else if (state.lo === null && !found.some((each) => each.hash === walk.item.hash)) {
+          // Its own block isn't read yet: its last page is read again.
+          state.next = { ...next, page: next.page + range.requests - 1 };
+          walk.left = 0;
+        } else {
+          state.lo = next.from;
+          state.next = null;
+        }
+      }
+    }
+
+    const done = walks.filter((walk) => !walk.state.next);
+
+    if (!done.length) {
+      covered = [];
+      given = [];
+      break;
+    }
+
+    given = done.map((walk) => queued(walk.item)).sort(byTime);
+
+    const mine = new Set(given.map((item) => item.hash));
+    // The others found: those given are in the queue as they are.
+    const { peers, unread: unknown } = await peersOf(uniqueByHash(done.flatMap((walk) => walk.state.found)).filter((entry) => !mine.has(entry.hash)));
+    let deeper = false;
+
+    queue = queueOf(given, peers, horizonMs);
+
+    // A run reaching within a horizon of the bottom may go on under it: the
+    // history is read further down.
+    for (const walk of done) {
+      const lo = /** @type {number} */ (walk.state.lo);
+      const bottomAt = lo === 0 ? -Infinity : walk.item.at - (walk.item.height - lo) * DUSK_BLOCK_MS;
+      const self = /** @type {Queued} */ (given.find((each) => each.hash === walk.item.hash));
+
+      if (runStart(queue, self, horizonMs).at - bottomAt < horizonMs) {
+        walk.state.next = { from: Math.max(0, lo - reach), page: 1, to: lo - 1 };
+        deeper = true;
+      } else {
+        unread.set(
+          walk.item.hash,
+          unknown.flatMap((each) => (each.height >= lo && each.height <= walk.item.height ? [each.height] : []))
+        );
+      }
+    }
+
+    if (!deeper) {
+      covered = done.map((walk) => walk.item);
+      break;
+    }
+  }
+
+  return { covered, given, queue, states: new Map(walks.map((walk) => [walk.item.hash, walk.state])), unread };
+}
+
+/**
+ * Of the deposits a sender's history lists, those equal to the group's
+ * (`to`, `amount`), from their calls: each with the block the app gave it
+ * its credit can't be before; and those whose call or time the archive
+ * doesn't give, which could be any deposit of up to what they paid, but
+ * for one the app gave: its own facts tell. `calls` keeps each call read.
  *
  * @param {Archive} archive
  * @param {Network} net
- * @param {{ sender: string, from: number, to: number, least: bigint, skip: ReadonlySet<string> }} range
+ * @param {ReadonlyArray<{ hash: string, height: number }>} found
+ * @param {{ amount: bigint, to: string, bounds: ReadonlyMap<string, bigint | null>, calls: Map<string, any>, supplied: ReadonlyMap<string, DepositItem> }} group
  * @param {{ requests: number }} counter
  */
-async function senderDeposits(archive, net, { from, least, sender, skip, to }, counter) {
-  const bridge = duskEvmContracts(net)?.bridge;
-  const read = await historyRange(archive, { account: sender, direction: "out", from, pages: HISTORY_PAGES, to });
+async function depositPeers(archive, net, found, { amount, bounds, calls, supplied, to }, counter) {
+  const missing = found.flatMap((entry) => (calls.has(entry.hash) ? [] : [entry.hash]));
+  const read = await detailsOf(archive, missing, { args: true, network: net }, counter);
 
-  counter.requests += read.requests;
+  for (const hash of missing) calls.set(hash, read.get(hash) ?? null);
 
-  // A history cut short leaves its deposits' order unclear: nothing more is read.
-  if (!read.complete) return { complete: false, deposits: [], unresolved: [] };
+  /** @type {Queued[]} */
+  const peers = [];
+  /** @type {{ hash: string, height: number }[]} */
+  const unread = [];
 
-  const candidates = read.entries.filter((entry) => entry.counterparty === bridge && !skip.has(entry.hash) && entry.value >= least);
-  const details = await detailsOf(archive, candidates.map((entry) => entry.hash), { args: true, network: net }, counter);
-  /** @type {{ amount: bigint, at: number, hash: string, height: number, to: string }[]} */
-  const deposits = [];
-  /** @type {{ hash: string, height: number, value: bigint }[]} */
-  const unresolved = [];
+  for (const entry of found) {
+    const call = calls.get(entry.hash);
+    const bridged = call?.bridge;
 
-  for (const entry of candidates) {
-    const found = details.get(entry.hash);
-    const bridged = found?.bridge;
+    // Failed, or a call that isn't a deposit: no DUSK left for DuskEVM. A
+    // deposit whose arguments can't be read could be any.
+    if (call?.success === false || (bridged && bridged.kind !== "deposit") || (bridged === null && call?.fnName !== BRIDGE_FUNCTIONS.deposit)) continue;
 
-    // Failed, or a call that isn't a deposit: no DUSK left for DuskEVM.
-    if (found?.success === false || bridged === null || (bridged && bridged.kind !== "deposit")) continue;
+    const own = supplied.get(entry.hash);
+    let at = msOf(call?.timestamp);
+    let paid = luxOf(bridged?.amount);
+    let recipient = addressOf(bridged?.to);
 
-    const at = msOf(found?.timestamp);
-    const amount = luxOf(bridged?.amount);
-    const recipient = addressOf(bridged?.to);
+    // One the app gave whose call can't be read: its own facts.
+    if (own && (!call || at === null || paid === null || !recipient)) ({ amount: paid, at, to: recipient } = own);
 
-    if (found && at !== null && amount !== null && recipient) deposits.push({ amount, at, hash: entry.hash, height: entry.blockHeight, to: recipient });
-    else unresolved.push({ hash: entry.hash, height: entry.blockHeight, value: entry.value });
+    if (at === null || paid === null || !recipient) unread.push(entry);
+    else if (recipient === to && paid === amount) peers.push({ at, given: false, hash: entry.hash, notBefore: bounds.get(entry.hash) ?? null, scan: null });
   }
 
-  return { complete: true, deposits, unresolved };
+  return { peers, unread };
+}
+
+/**
+ * Where a scan's search stopped, without its history.
+ *
+ * @param {Scan | null | undefined} scan
+ * @returns {Scan}
+ */
+const searchOf = (scan) => (scan?.from !== undefined ? { basis: scan.basis, from: scan.from, search: scan.search, seen: scan.seen } : {});
+
+/**
+ * The transfers whose history isn't all read yet wait, with where their
+ * reading stopped beside where their last search did.
+ *
+ * @param {ReadonlyArray<{ hash: string, scan: Scan | null }>} items
+ * @param {{ covered: ReadonlyArray<{ hash: string }>, states: ReadonlyMap<string, HistoryScan> }} history
+ * @param {Map<string, Arrival>} results
+ */
+function waitForHistory(items, { covered, states }, results) {
+  const read = new Set(covered.map((item) => item.hash));
+
+  for (const item of items) {
+    if (!read.has(item.hash)) results.set(item.hash, { scan: { ...searchOf(item.scan), history: /** @type {HistoryScan} */ (states.get(item.hash)) }, state: "waiting" });
+  }
+}
+
+/**
+ * A result, with how far its transfer's history is read, which every one
+ * but an arrival keeps in its scan for the next call.
+ *
+ * @param {string} hash
+ * @param {Arrival} arrival
+ * @param {ReadonlyArray<Queued>} given
+ * @param {ReadonlyMap<string, HistoryScan>} states
+ * @returns {Arrival}
+ */
+function withHistory(hash, arrival, given, states) {
+  const history = states.get(hash);
+
+  if (!history || arrival.state === "arrived") return arrival;
+
+  return { ...arrival, scan: { ...(arrival.scan ?? searchOf(given.find((each) => each.hash === hash)?.scan)), history } };
 }
 
 // ---------------------------------------------------------------------------
@@ -1380,34 +1597,6 @@ async function onExplorer(read, live, { api, bridge, maxPages, now, past, result
  * @param {{ archive: Archive | undefined, blockTimes: BlockTimes | undefined, bridge: string, list: DepositItem[], maxWindows: number, net: Network, now: number, past: DepositItem[], results: Map<string, Arrival>, url: string, used: Set<string>, windowMs: number }} options
  */
 async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows, net, now, past, results, url, used, windowMs }) {
-  /** @type {Map<string, Awaited<ReturnType<typeof senderDeposits>> & { bottom: number, top: number, topAt: number }>} */
-  const histories = new Map();
-
-  // The senders' deposits shortly before theirs, one history read a sender:
-  // the app's deposits no longer looked for among them.
-  if (archive) {
-    const reach = Math.ceil((3 * DEPOSIT_HORIZON_MS) / DUSK_BLOCK_MS);
-
-    for (const [sender, items] of groupBy(
-      live.filter((item) => item.sender !== null && item.height !== null),
-      (item) => /** @type {string} */ (item.sender)
-    )) {
-      const heights = items.map((item) => /** @type {number} */ (item.height));
-      const top = Math.max(...heights);
-      const bottom = Math.max(0, Math.min(...heights) - reach);
-      const least = items.reduce((a, item) => (item.amount < a ? item.amount : a), MAX_U64);
-
-      try {
-        const found = await senderDeposits(archive, net, { from: bottom, least, sender, skip: new Set(items.map((item) => item.hash)), to: top }, read.counter);
-        const topAt = /** @type {number} */ (items.find((item) => item.height === top)?.at);
-
-        histories.set(sender, { ...found, bottom, top, topAt });
-      } catch (error) {
-        for (const item of items) results.set(item.hash, { error: messageOf(error), reason: "error", state: "unknown" });
-      }
-    }
-  }
-
   // Equal deposits (the same DuskEVM address and amount) from a known sender
   // first, a sender at a time, its events telling its credits apart; then
   // those whose sender isn't known, which take none from the senders of the
@@ -1438,46 +1627,69 @@ async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows
     if (rest.length) unknown.push({ items: rest, rivals: aliases.get(key) ?? new Set() });
   }
 
-  // The block each deposit given can't be credited before, the app's own.
+  // The block each deposit given can't be credited before, the app's own,
+  // the deposits given, and the deposits' calls, read once.
   const bounds = new Map(list.map((item) => [item.hash, item.notBefore]));
+  const supplied = new Map(list.map((item) => [item.hash, item]));
+  /** @type {Map<string, any>} */
+  const calls = new Map();
+  const contract = duskEvmContracts(net)?.bridge;
 
   for (const { items, rivals } of [...known, ...unknown]) {
     const { amount, sender, to } = items[0];
-    const history = sender === null ? undefined : histories.get(sender);
-    const vouched = Boolean(history) && items.every((item) => item.height !== null);
-    const given = items.map(queued).sort(byTime);
-    const alike = vouched
-      ? /** @type {NonNullable<typeof history>} */ (history).deposits
-          .filter((deposit) => deposit.to === to && deposit.amount === amount)
-          .map((deposit) => ({ at: deposit.at, given: false, hash: deposit.hash, notBefore: bounds.get(deposit.hash) ?? null, scan: null }))
-      : [];
-    const queue = vouched
-      ? queueOf(given, alike, DEPOSIT_HORIZON_MS)
-      : withPast(
-          given,
-          past.filter((item) => item.to === to && item.amount === amount && item.sender === sender).map(queued),
-          windowMs
-        );
+    const vouched = Boolean(archive) && sender !== null && items.every((item) => item.height !== null);
+    let given = items.map(queued).sort(byTime);
+    /** @type {Queued[]} */
+    let queue;
     /** @type {Set<string>} */
     const unsure = new Set();
+    /** @type {Map<string, HistoryScan>} */
+    let states = new Map();
 
-    // An equal deposit just under the history read could come first, and so
-    // could one before it whose call can't be read: the credits' order
-    // can't be told.
-    if (history && vouched) {
-      const bottomAt = history.bottom === 0 ? -Infinity : history.topAt - (history.top - history.bottom) * DUSK_BLOCK_MS;
+    if (vouched) {
+      // Each deposit's own hours of its sender's history, with its sender's
+      // equal deposits there, the app's no longer looked for among them.
+      /** @type {Awaited<ReturnType<typeof readHistories>>} */
+      let history;
 
-      for (const item of given) {
-        const height = /** @type {number} */ (items.find((each) => each.hash === item.hash)?.height);
-
-        if (
-          !history.complete ||
-          runStart(queue, item, DEPOSIT_HORIZON_MS).at - bottomAt < DEPOSIT_HORIZON_MS ||
-          history.unresolved.some((peer) => peer.value >= amount && peer.height <= height)
-        ) {
-          unsure.add(item.hash);
-        }
+      try {
+        history = await readHistories(
+          /** @type {Archive} */ (archive),
+          /** @type {Reading[]} */ ([...items].sort((a, b) => /** @type {number} */ (a.height) - /** @type {number} */ (b.height))),
+          {
+            account: /** @type {string} */ (sender),
+            direction: "out",
+            horizonMs: DEPOSIT_HORIZON_MS,
+            keep: (entry) => entry.counterparty === contract && entry.value >= amount,
+            of: (item) => `${sender}:${item.height}:${amount}`,
+            pages: HISTORY_PAGES,
+            peersOf: (found) => depositPeers(/** @type {Archive} */ (archive), net, found, { amount, bounds, calls, supplied, to }, read.counter),
+            reach: Math.ceil((3 * DEPOSIT_HORIZON_MS) / DUSK_BLOCK_MS),
+          },
+          read.counter
+        );
+      } catch (error) {
+        for (const item of items) results.set(item.hash, { error: messageOf(error), reason: "error", state: "unknown" });
+        continue;
       }
+
+      states = history.states;
+      waitForHistory(items, history, results);
+
+      if (!history.covered.length) continue;
+
+      given = history.given;
+      queue = history.queue;
+
+      // One before it whose call can't be read could be equal: the credits'
+      // order can't be told.
+      for (const item of given) if (/** @type {number[]} */ (history.unread.get(item.hash)).length) unsure.add(item.hash);
+    } else {
+      queue = withPast(
+        given,
+        past.filter((item) => item.to === to && item.amount === amount && item.sender === sender).map(queued),
+        windowMs
+      );
     }
 
     try {
@@ -1499,9 +1711,9 @@ async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows
         { blockTimes, maxWindows, now, slackMs: CLOCK_SLACK_MS, url, used, windowMs }
       );
 
-      for (const [hash, arrival] of found) results.set(hash, arrival);
+      for (const [hash, arrival] of found) results.set(hash, withHistory(hash, arrival, given, states));
     } catch (error) {
-      for (const item of items) results.set(item.hash, { error: messageOf(error), reason: "error", state: "unknown" });
+      for (const item of given) results.set(item.hash, withHistory(item.hash, { error: messageOf(error), reason: "error", state: "unknown" }, given, states));
     }
   }
 }
@@ -1602,97 +1814,62 @@ export async function serviceArrivals({
   }
 
   const live = triage(known, results, { now, waitMs });
-  /** @type {Map<string, { complete: boolean, entries: HistoryEntry[], bottom: number, top: number, topAt: number, horizonMs: number }>} */
-  const histories = new Map();
-
-  // Each route's account's history, back from its transfers: every transfer
-  // that named the same address, in any case, and could be paid before.
-  for (const [id, items] of groupBy(live, (item) => item.route.id)) {
-    const { route } = items[0];
-    const horizonMs = horizonOf(route);
-    const heights = items.map((item) => item.height);
-    const top = Math.max(...heights);
-    const bottom = Math.max(0, Math.min(...heights) - Math.ceil((3 * horizonMs) / DUSK_BLOCK_MS));
-
-    try {
-      const range = await historyRange(archive, { account: route.account, direction: "in", from: bottom, pages: HISTORY_PAGES, to: top });
-
-      read.counter.requests += range.requests;
-      histories.set(id, { bottom, complete: range.complete, entries: range.entries, horizonMs, top, topAt: /** @type {SentItem} */ (items.find((item) => item.height === top)).at });
-    } catch (error) {
-      for (const item of items) results.set(item.hash, failed(error));
-    }
-  }
-
-  const groups = [...groupBy(live.filter((item) => histories.has(item.route.id)), (item) => `${item.route.id}:${item.to}:${item.net}`).values()];
-  const polled = new Set(groups.flat().map((item) => item.hash));
   // The fee of each transfer the app gave, those no longer looked for too,
   // and the block its payout can't be before.
   const feeOf = new Map(routed.map((item) => [item.hash, item.fee ?? /** @type {Route & { kind: "service" }} */ (item.route).feeLux]));
   const bounds = new Map(routed.map((item) => [item.hash, item.notBefore]));
-  // Each group's others: what the account received, at least as much as the
-  // group's transfers, naming the same address, and the app's transfers no
-  // longer looked for. What each paid whom, its memo and its time come from
-  // its own transaction.
-  const others = groups.map((items) => {
-    const { route, to } = items[0];
-    const least = items.reduce((a, item) => (item.net + item.fee < a ? item.net + item.fee : a), MAX_U64);
+  // What each transfer to a route's account paid whom, its memo and its
+  // time, from its own transaction, read once.
+  /** @type {Map<string, TransferFacts | null>} */
+  const facts = new Map(sent);
 
-    return (/** @type {NonNullable<ReturnType<typeof histories.get>>} */ (histories.get(route.id)).entries).filter(
-      (entry) => !polled.has(entry.hash) && entry.kind === "transfer" && entry.direction === "in" && entry.memo.toLowerCase() === to && (entry.value >= least || feeOf.has(entry.hash))
-    );
-  });
-  /** @type {Map<string, TransferFacts>} */
-  let peers;
-
-  try {
-    peers = new Map([...sent, ...(await transfersOf(archive, others.flat().flatMap((entry) => (sent.has(entry.hash) ? [] : [entry.hash])), read.counter))]);
-  } catch (error) {
-    for (const items of groups) for (const item of items) results.set(item.hash, failed(error));
-
-    return done();
-  }
-
-  for (const [i, items] of groups.entries()) {
+  for (const items of groupBy(live, (item) => `${item.route.id}:${item.to}:${item.net}`).values()) {
     const { net: payout, route, to } = items[0];
-    const history = /** @type {NonNullable<ReturnType<typeof histories.get>>} */ (histories.get(route.id));
+    const horizonMs = horizonOf(route);
     const fees = new Set(items.map((item) => item.fee));
-    /** @type {Queued[]} */
-    const alike = [];
-    // The heights of transfers to the same address that can't be read.
-    /** @type {number[]} */
-    const unread = [];
+    const least = payout + [...fees].reduce((a, fee) => (fee < a ? fee : a));
+    // Each transfer's own hours of the route's account's history: every
+    // transfer that named the same address, in any case, and could be paid
+    // before, the app's no longer looked for among them. Of those, the ones
+    // that could pay out as much under the group's fees, or under their own.
+    /** @type {Awaited<ReturnType<typeof readHistories>>} */
+    let history;
 
-    for (const entry of others[i]) {
-      const facts = peers.get(entry.hash);
-
-      if (!facts || facts.kind === null || facts.at === null || (facts.kind === "moonlight" && (facts.value === null || facts.receiver === null))) {
-        unread.push(entry.blockHeight);
-      } else if (!facts.failed && facts.kind === "moonlight" && facts.receiver === route.account && facts.memo.toLowerCase() === to) {
-        const value = /** @type {bigint} */ (facts.value);
-        // One the app gave pays out what its own fee leaves; one it didn't,
-        // what the group's do.
-        const own = feeOf.get(entry.hash);
-
-        if (own === undefined ? [...fees].some((fee) => value - fee === payout) : value - own === payout) {
-          alike.push({ at: facts.at, given: false, hash: entry.hash, notBefore: bounds.get(entry.hash) ?? null, scan: null });
-        }
-      }
+    try {
+      history = await readHistories(
+        archive,
+        [...items].sort((a, b) => a.height - b.height),
+        {
+          account: route.account,
+          direction: "in",
+          horizonMs,
+          keep: (entry) => entry.kind === "transfer" && entry.direction === "in" && entry.memo.toLowerCase() === to && entry.value >= payout,
+          of: (item) => `${route.account}:${item.height}:${to}:${payout}`,
+          pages: HISTORY_PAGES,
+          peersOf: (found) =>
+            servicePeers(
+              archive,
+              found.filter((entry) => BigInt(entry.value) >= least || feeOf.has(entry.hash)),
+              { bounds, facts, feeOf, fees, payout, route, to },
+              read.counter
+            ),
+          reach: Math.ceil((3 * horizonMs) / DUSK_BLOCK_MS),
+        },
+        read.counter
+      );
+    } catch (error) {
+      for (const item of items) results.set(item.hash, failed(error));
+      continue;
     }
 
-    const given = items.map(queued).sort(byTime);
-    const queue = queueOf(given, alike, history.horizonMs);
-    const bottomAt = history.bottom === 0 ? -Infinity : history.topAt - (history.top - history.bottom) * DUSK_BLOCK_MS;
-    /** @type {Set<string>} */
-    const unsure = new Set();
+    waitForHistory(items, history, results);
 
-    // A history cut short, an equal transfer just under it, or one before
-    // that can't be read: the payouts' order can't be told.
-    for (const item of given) {
-      const height = /** @type {SentItem} */ (items.find((each) => each.hash === item.hash)).height;
+    if (!history.covered.length) continue;
 
-      if (!history.complete || runStart(queue, item, history.horizonMs).at - bottomAt < history.horizonMs || unread.some((each) => each <= height)) unsure.add(item.hash);
-    }
+    const { given } = history;
+    // One before it that can't be read could be equal: the payouts' order
+    // can't be told.
+    const unsure = new Set(given.flatMap((item) => (/** @type {number[]} */ (history.unread.get(item.hash)).length ? [item.hash] : [])));
 
     try {
       const found = await followLogs(
@@ -1706,19 +1883,61 @@ export async function serviceArrivals({
           },
           given,
           guarded: false,
-          queue,
+          queue: history.queue,
           unsure,
         },
         { blockTimes, maxWindows, now, slackMs: CLOCK_SLACK_MS, url: String(rpcUrl ?? route.chain.rpcUrl), used, windowMs: CREDIT_WINDOW_MS }
       );
 
-      for (const [hash, arrival] of found) results.set(hash, arrival);
+      for (const [hash, arrival] of found) results.set(hash, withHistory(hash, arrival, given, history.states));
     } catch (error) {
-      for (const item of items) results.set(item.hash, failed(error));
+      for (const item of given) results.set(item.hash, withHistory(item.hash, failed(error), given, history.states));
     }
   }
 
   return done();
+}
+
+/**
+ * Of the transfers a route's account received naming a group's address,
+ * those equal to the group's, from their own transactions: one the app
+ * gave pays out what its own fee leaves, one it didn't what the group's
+ * fees do; each with the block the app gave it its payout can't be before.
+ * And those whose transaction can't be read. `facts` keeps each
+ * transaction read.
+ *
+ * @param {Archive} archive
+ * @param {ReadonlyArray<{ hash: string, height: number }>} found
+ * @param {{ bounds: ReadonlyMap<string, bigint | null>, facts: Map<string, TransferFacts | null>, feeOf: ReadonlyMap<string, bigint>, fees: ReadonlySet<bigint>, payout: bigint, route: Route & { kind: "service" }, to: string }} group
+ * @param {{ requests: number }} counter
+ */
+async function servicePeers(archive, found, { bounds, facts, feeOf, fees, payout, route, to }, counter) {
+  const missing = found.flatMap((entry) => (facts.has(entry.hash) ? [] : [entry.hash]));
+  const read = await transfersOf(archive, missing, counter);
+
+  for (const hash of missing) facts.set(hash, read.get(hash) ?? null);
+
+  /** @type {Queued[]} */
+  const peers = [];
+  /** @type {{ hash: string, height: number }[]} */
+  const unread = [];
+
+  for (const entry of found) {
+    const fact = facts.get(entry.hash);
+
+    if (!fact || fact.kind === null || fact.at === null || (fact.kind === "moonlight" && (fact.value === null || fact.receiver === null))) {
+      unread.push(entry);
+    } else if (!fact.failed && fact.kind === "moonlight" && fact.receiver === route.account && fact.memo.toLowerCase() === to) {
+      const value = /** @type {bigint} */ (fact.value);
+      const own = feeOf.get(entry.hash);
+
+      if (own === undefined ? [...fees].some((fee) => value - fee === payout) : value - own === payout) {
+        peers.push({ at: fact.at, given: false, hash: entry.hash, notBefore: bounds.get(entry.hash) ?? null, scan: null });
+      }
+    }
+  }
+
+  return { peers, unread };
 }
 
 // ---------------------------------------------------------------------------

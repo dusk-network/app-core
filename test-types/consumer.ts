@@ -59,6 +59,7 @@ import {
   type Arrival,
   type BlockTimes,
   type Deposit,
+  type HistoryScan,
   type MigrationPayout,
   type NoPayout,
   type Scan,
@@ -163,7 +164,7 @@ const kind: EntryKind | undefined = parsed?.kind;
 const entry: ReadEntry = historyEntry({ blockHeight: 1, counterparty: null, direction: "out", hash: "ab", kind: "contract_call", memo: "", payer: true, value: "1" }, { network: 2, pools: new Set(["ab"]) });
 const details: Promise<Map<string, EntryDetails & Record<string, unknown>>> = fetchTxDetails(archive, ["ab"], { account: "x", args: new Set(["ab"]), callFacts, network: 2, now: Date.now });
 const nonce: Promise<string | null> = fetchTxNonce(archive, "ab");
-const range: Promise<{ entries: HistoryEntry[]; complete: boolean; requests: number }> = historyRange(archive, { account: "x", direction: "out", from: 0, pages: 4, to: 10 });
+const range: Promise<{ entries: HistoryEntry[]; complete: boolean; requests: number }> = historyRange(archive, { account: "x", direction: "out", from: 0, page: 5, pages: 4, to: 10 });
 const covered: number[][] = addCoverage([[1, 2]], 3, 4);
 const gap: [number, number] | null = topGap(covered, 10);
 const downTo: number | null = shownDownTo(covered, 10);
@@ -356,8 +357,10 @@ const out2 = out.then(({ arrivals }) => {
   const one = arrivals.get("ab");
   const why: NoPayout | undefined = one?.state === "unknown" ? one.problem : undefined;
   const seen: ReadonlyArray<{ hash: string; block: string; at: number; sender: string | null }> | undefined = one?.state === "waiting" ? one.scan?.seen : undefined;
+  const read: HistoryScan | undefined = one?.state === "waiting" ? one.scan?.history : undefined;
+  const page: number | undefined = read?.next?.page;
 
-  void [why, seen];
+  void [why, seen, page];
 });
 const payout: MigrationPayout | null = migrationPayoutOf(kept, 1);
 // Where one account pays out both routes, a payout doesn't say which: its payer does.

@@ -7,7 +7,7 @@ import { evmAddressOf } from "@dusk-network/networks/duskevm";
 import { ETH_BRIDGE_FINALIZED_TOPIC, arrivalsOf, depositArrivals, depositOf } from "../src/bridge.js";
 import { activityRows } from "../src/activity.js";
 import { fetchTxDetails, historyEntry, parseHistoryEntry } from "../src/history.js";
-import { BRIDGE, EXPLORER_API, L2_BRIDGE, bridgeFinalized, call, depositEntry, details, fakeChain, fakeExplorer, hex, topicOf } from "./fixtures/bridge.js";
+import { BRIDGE, EXPLORER_API, L2_BRIDGE, bridgeFinalized, call, depositEntry, details, fakeChain, fakeExplorer, hex, moonlight, topicOf } from "./fixtures/bridge.js";
 import { fakeArchive, like, readFixture } from "./fixtures/helpers.js";
 
 const recorded = readFixture("duskevm-deposit-history.json");
@@ -404,11 +404,23 @@ describe("a deposit's arrival, on DuskEVM's RPC", () => {
   const sent = (byte, at, fields = {}) => ({ amount: TENTH, at, hash: dusk(byte), height: 5_000, sender: SENDER, to: RECIPIENT, ...fields });
   /** @param {string | number} n @param {number} block */
   const credit = (n, block) => bridgeFinalized({ block, from: FROM, hash: l2(n), to: RECIPIENT, wei: WEI });
-  const empty = () => fakeArchive({ accounts: {}, details: {}, finalized: 10_000 }).archiveClient();
+  /**
+   * The archive, its sender's history listing `deposits`, as it does once
+   * their blocks are final, with their calls.
+   *
+   * @param {...any} deposits
+   */
+  const listing = (...deposits) =>
+    fakeArchive({
+      accounts: { [SENDER]: { receiver: [], sender: [...deposits].sort((a, b) => a.height - b.height).map((d) => depositEntry({ hash: d.hash, height: d.height, sender: SENDER, value: d.amount })) } },
+      details: Object.fromEntries(deposits.map((d) => [d.hash, details(Math.floor(d.at / 1000), { deposit: { amountLux: d.amount, to: RECIPIENT } })])),
+      finalized: 10_000,
+    }).archiveClient();
 
   it("is DuskEVM's bridge paying it from its sender's DuskEVM address, once the event is there", async () => {
     const chain = fakeChain({ head: 2_000 });
-    const options = { archive: empty(), deposits: [sent("ab", second(999), { height: 10 })], fetch: chain.fetch, network: 2, now: second(2_000), via: /** @type {const} */ ("rpc") };
+    const deposit = sent("ab", second(999), { height: 10 });
+    const options = { archive: listing(deposit), deposits: [deposit], fetch: chain.fetch, network: 2, now: second(2_000), via: /** @type {const} */ ("rpc") };
     const waiting = await depositArrivals(options);
 
     like(waiting.arrivals.get(dusk("ab")), { state: "waiting" });
@@ -427,7 +439,7 @@ describe("a deposit's arrival, on DuskEVM's RPC", () => {
   it("gives two equal deposits one credit between them", async () => {
     const chain = fakeChain({ head: 2_000, logs: [credit(34, 1_900)] });
     const both = await depositArrivals({
-      archive: empty(),
+      archive: listing(sent("ef", second(200)), sent("ab", second(100))),
       deposits: [sent("ef", second(200)), sent("ab", second(100))],
       fetch: chain.fetch,
       network: 2,
@@ -439,7 +451,15 @@ describe("a deposit's arrival, on DuskEVM's RPC", () => {
     like(both.arrivals.get(dusk("ef")), { state: "waiting" });
 
     // The first one's credit kept, the second asked alone.
-    const alone = await depositArrivals({ archive: empty(), deposits: [sent("ef", second(200))], fetch: chain.fetch, network: 2, now: second(2_000), taken: [l2(34)], via: "rpc" });
+    const alone = await depositArrivals({
+      archive: listing(sent("ef", second(200)), sent("ab", second(100))),
+      deposits: [sent("ef", second(200))],
+      fetch: chain.fetch,
+      network: 2,
+      now: second(2_000),
+      taken: [l2(34)],
+      via: "rpc",
+    });
 
     like(alone.arrivals.get(dusk("ef")), { state: "waiting" });
   });
@@ -455,14 +475,11 @@ describe("a deposit's arrival, on DuskEVM's RPC", () => {
     });
     // Deposits of another amount, a page and more of them.
     const others = Array.from({ length: 58 }, (_, i) => depositEntry({ hash: i.toString(16).padStart(64, "f"), height: 4_000 + i, sender: SENDER, value: 5 }));
-    const node = fakeArchive({
-      accounts: history(others),
-      details: {
-        [dusk("ab")]: details(1_792_980_200, { deposit: { amountLux: TENTH, to: RECIPIENT } }),
-        [earlier]: details(1_792_980_100, { deposit: { amountLux: TENTH, to: RECIPIENT } }),
-      },
-      finalized: 10_000,
-    });
+    const calls = {
+      [dusk("ab")]: details(1_792_980_200, { deposit: { amountLux: TENTH, to: RECIPIENT } }),
+      [earlier]: details(1_792_980_100, { deposit: { amountLux: TENTH, to: RECIPIENT } }),
+    };
+    const node = fakeArchive({ accounts: history(others), details: calls, finalized: 10_000 });
     const chain = fakeChain({ head: 2_000, logs: [credit(34, 1_900)] });
     const options = { archive: node.archiveClient(), deposits: [sent("ab", second(200))], fetch: chain.fetch, network: 2, now: second(2_000), via: /** @type {const} */ ("rpc") };
 
@@ -478,20 +495,22 @@ describe("a deposit's arrival, on DuskEVM's RPC", () => {
     chain.logs.push(credit(35, 1_950));
     like((await depositArrivals(options)).arrivals.get(dusk("ab")), { hash: l2(35), state: "arrived" });
 
-    // A history too long to read to the end leaves the order unclear.
+    // A history longer than one call reads: the deposit waits, and the next call reads on from its scan.
     const long = fakeArchive({
-      accounts: history(Array.from({ length: 201 }, (_, i) => depositEntry({ hash: i.toString(16).padStart(64, "0"), height: 3_000 + i, sender: SENDER, value: TENTH }))),
-      details: {},
+      accounts: history(Array.from({ length: 201 }, (_, i) => moonlight({ hash: i.toString(16).padStart(64, "0"), height: 3_000 + i, receiver: networks.testnet.routes.services[0].account, sender: SENDER, value: TENTH }))),
+      details: calls,
       finalized: 10_000,
     });
+    const stopped = /** @type {any} */ ((await depositArrivals({ ...options, archive: long.archiveClient() })).arrivals.get(dusk("ab")));
 
-    like((await depositArrivals({ ...options, archive: long.archiveClient() })).arrivals.get(dusk("ab")), { reason: "unsure", state: "unknown" });
+    like(stopped, { state: "waiting" });
+    like((await depositArrivals({ ...options, archive: long.archiveClient(), deposits: [sent("ab", second(200), { scan: stopped.scan })] })).arrivals.get(dusk("ab")), { hash: l2(35), state: "arrived" });
   });
 
   it("isn't paid by a credit from before it was sent here: the head the app read before sending bounds the search", async () => {
     const chain = fakeChain({ head: 2_000, logs: [credit(1, 1_500), credit(2, 1_800)] });
     const result = await depositArrivals({
-      archive: empty(),
+      archive: listing(sent("ab", second(999), { height: 10 })),
       deposits: [sent("ab", second(999), { height: 10, notBefore: "1700" })],
       fetch: chain.fetch,
       network: 2,
@@ -506,7 +525,7 @@ describe("a deposit's arrival, on DuskEVM's RPC", () => {
   it("carries on from where its last search stopped, and says how far it got", async () => {
     // A credit 30,000 blocks after the deposit: more than two windows.
     const chain = fakeChain({ head: 40_000, logs: [credit(9, 32_000)] });
-    const options = { archive: empty(), fetch: chain.fetch, maxWindows: 2, network: 2, now: second(40_000), via: /** @type {const} */ ("rpc") };
+    const options = { archive: listing(sent("ab", second(2_000), { height: 10 })), fetch: chain.fetch, maxWindows: 2, network: 2, now: second(40_000), via: /** @type {const} */ ("rpc") };
     const first = await depositArrivals({ ...options, deposits: [sent("ab", second(2_000), { height: 10 })] });
     const stopped = /** @type {any} */ (first.arrivals.get(dusk("ab")));
 
@@ -594,7 +613,7 @@ describe("a deposit's arrival, on DuskEVM's RPC", () => {
 
       return Response.json({ id: 1, jsonrpc: "2.0", result: [...logs, { ...logs[0], address: `0x${"42".repeat(20)}`, transactionHash: l2(5) }, { ...logs[0], removed: true, transactionHash: l2(6) }] });
     };
-    const options = { archive: empty(), deposits: [sent("ab", second(999), { height: 10 })], fetch: loose, network: 2, now: second(2_000), via: /** @type {const} */ ("rpc") };
+    const options = { archive: listing(sent("ab", second(999), { height: 10 })), deposits: [sent("ab", second(999), { height: 10 })], fetch: loose, network: 2, now: second(2_000), via: /** @type {const} */ ("rpc") };
 
     like((await depositArrivals(options)).arrivals.get(dusk("ab")), { state: "waiting" });
 

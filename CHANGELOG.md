@@ -2,6 +2,18 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `/history`: `historyRange` reads on from a `page`
+
+### Fixed
+
+- `/bridge`: each transfer reads only its own hours of its account's history, read on from its `scan` while a call can't read it all: it waits then, rather than staying unsure
+- `/bridge`: a transfer the archive doesn't list in its account's history yet waits, rather than taking an earlier one's credit
+- `/bridge`: a deposit whose call's arguments the archive doesn't give counts as one that could be equal, rather than none
+
 ## [0.3.0]
 
 ### Added
