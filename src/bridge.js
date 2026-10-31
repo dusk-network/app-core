@@ -1278,19 +1278,24 @@ function exactJson(text) {
   return JSON.parse(text.replace(TOKEN, (match, string) => string ?? (/^-?\d+$/.test(match) && !Number.isSafeInteger(Number(match)) ? `"${match}"` : match)));
 }
 
-const utf8 = new TextDecoder();
+const utf8 = new TextDecoder("utf-8", { fatal: true });
 
 /**
- * A memo's bytes, given as hex, as text, read as the route's bridge reads
- * them: as UTF-8, bytes that aren't UTF-8 becoming the replacement
- * character; "" for none.
+ * A memo's bytes, given as hex, as UTF-8 text; "" for none, and for bytes
+ * that aren't UTF-8: an address or a hash is read from text only.
  *
  * @param {unknown} hex
  */
 function memoOf(hex) {
   const text = String(hex ?? "").replace(/^0x/i, "");
 
-  return /^(?:[0-9a-fA-F]{2})+$/.test(text) ? utf8.decode(Uint8Array.from(text.match(/../g) ?? [], (byte) => parseInt(byte, 16))) : "";
+  if (!/^(?:[0-9a-fA-F]{2})+$/.test(text)) return "";
+
+  try {
+    return utf8.decode(Uint8Array.from(text.match(/../g) ?? [], (byte) => parseInt(byte, 16)));
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -2451,8 +2456,9 @@ export function serviceTransferOf(entry, network) {
   const spent = luxOf(entry.gasSpent);
   const price = luxOf(entry.gasPrice);
   const amount = limit !== null && spent !== null && price !== null && (limit - spent) * price <= 0n ? value : null;
-  // The address the memo gives, exactly as the bridge reads it.
-  const memo = typeof entry.memo === "string" ? entry.memo : "";
+  // The address the memo gives, exactly as the bridge reads it: from text.
+  // A memo of bytes that aren't text, which /history gives as 0x hex, gives none.
+  const memo = typeof entry.memo === "string" && entry.memoBinary !== true ? entry.memo : "";
   const to = EVM_ADDRESS.test(memo) ? memo : null;
   const problem = entry.success === false ? "failed" : value <= route.feeLux ? "under-fee" : to === null ? "no-address" : null;
 
@@ -2470,9 +2476,8 @@ export function migrationPayoutOf(entry, network) {
   const { at, hash, height, value } = factsOf(entry);
   // What the transfer paid: a gas refund paid to the account with it aside.
   const refund = entry?.refund === undefined || entry.refund === null ? 0n : luxOf(entry.refund);
-  const memo = String(entry?.memo ?? "")
-    .trim()
-    .toLowerCase();
+  // The migration's hash, as text: a memo of bytes that aren't text names none.
+  const memo = entry?.memoBinary === true ? "" : String(entry?.memo ?? "").trim().toLowerCase();
 
   if (!paying.length || entry.success === false || !hash || height === null || value === null || refund === null || refund > value || !EVM_HASH.test(memo)) {
     return null;

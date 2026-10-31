@@ -82,6 +82,16 @@ describe("migrations into Dusk", () => {
     assert.equal(migrationPayoutOf({ ...fromBsc, success: false }, 1), null);
   });
 
+  it("are paid only by a memo of text: the hash's bytes, which /history gives as 0x hex, name no migration", async () => {
+    const sent = [{ amount: 5n * DUSK, at: Date.UTC(2026, 9, 27, 6, 20), hash: MIGRATION, route: "bsc-to-dusk" }];
+    const bytes = row({ counterparty: BSC.payoutAccount, memo: MIGRATION, memoBinary: true });
+
+    assert.equal(migrationPayoutOf(bytes, 1), null);
+    assert.deepEqual((await migrationPayouts({ entries: [bytes], migrations: sent, network: 1, now: NOW })).payouts.get(MIGRATION), { state: "waiting" });
+    // The same hash as text pays it.
+    like(migrationPayoutOf(row({ counterparty: BSC.payoutAccount, memo: MIGRATION }), 1), { hash: MIGRATION });
+  });
+
   it("are paid by an account that pays out both routes by the route each was sent on, and one not listed names no route", async () => {
     // One account pays out both chains' migrations, as a deployment can set it.
     const net = withRoutes(networks.mainnet, { migrations: { "ethereum-to-dusk": { payoutAccount: BSC.payoutAccount } } });

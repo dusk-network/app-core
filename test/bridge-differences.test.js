@@ -266,6 +266,14 @@ describe("where the apps followed migrations and transfers out differently", () 
       assert.equal(serviceTransferOf(sentWith(` ${RECIPIENT}`), 1)?.problem, "no-address");
     });
 
+    it("as text: an address's bytes, which /history gives as 0x hex, are none, and the bridge pays nothing out", () => {
+      const address = RECIPIENT.toLowerCase();
+
+      like(serviceTransferOf({ ...sentWith(address), memoBinary: true }, 1), { problem: "no-address", to: null });
+      // The same address typed as text is the one paid.
+      like(serviceTransferOf(sentWith(address), 1), { problem: null, to: address });
+    });
+
     it("in any case, its checksum unchecked: the bridge pays it (BR refused a mixed-case address whose checksum is wrong)", () => {
       // The first letter's case flipped: still mixed case, its checksum now wrong.
       const i = RECIPIENT.slice(2).search(/[a-fA-F]/) + 2;
