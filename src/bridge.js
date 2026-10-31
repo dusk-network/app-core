@@ -94,7 +94,7 @@ const RECHECK_MS = 60_000;
 // How many passes over the blocks before a credit, since it was found, a
 // transfer waits for before it takes the credit where a later equal one,
 // still without its own, could have had it instead.
-const CONFIRM_PASSES = 4;
+const CONFIRM_PASSES = 8;
 // What an RPC says when it won't search that many blocks at once.
 const RANGE_REFUSED = /limit|range|too many|exceed/i;
 const DUSK_HASH = /^[0-9a-f]{64}$/;
@@ -777,15 +777,17 @@ async function startBefore(read, url, atMs, cache) {
  * most `maxWindows`, until `head`, `enough`, or a window ending after
  * `until` (`covered`): each checked against what was asked, with its block's
  * time. A window the RPC won't search at once is asked again a quarter as
- * wide (`size`, the width it ends with). The window ending at `head` reaches
- * back up to `OVERLAP` blocks from it, though not under `floor`: those
- * blocks are read again (from `low`). `asked`: the windows asked.
+ * wide (`size`, the width it ends with; `refused`, the narrowest it
+ * refused, and `took`, the widest it answered). The window ending at `head`
+ * reaches back up to `overlap` blocks from it, no wider than `size`, though
+ * not under `floor`: those blocks are read again (from `low`). `asked`: the
+ * windows asked.
  *
  * @param {Reader} read
- * @param {{ url: string, address: string, topics: ReadonlyArray<string | null>, wei: bigint, amountOf: (data: string) => bigint | null, start: bigint, floor: bigint, head: bigint, size?: bigint, maxWindows: number, blockTimes: BlockTimes | undefined, enough: (credits: Credit[]) => boolean, until: number | null, known: Credit[] }} search
- * @returns {Promise<{ asked: number, complete: boolean, covered: boolean, credits: Credit[], low: bigint | null, next: bigint, size: bigint }>}
+ * @param {{ url: string, address: string, topics: ReadonlyArray<string | null>, wei: bigint, amountOf: (data: string) => bigint | null, start: bigint, floor: bigint, head: bigint, size?: bigint, overlap?: bigint, maxWindows: number, blockTimes: BlockTimes | undefined, enough: (credits: Credit[]) => boolean, until: number | null, known: Credit[] }} search
+ * @returns {Promise<{ asked: number, complete: boolean, covered: boolean, credits: Credit[], low: bigint | null, next: bigint, refused: bigint | null, size: bigint, took: bigint | null }>}
  */
-async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, head, known, maxWindows, size: width = BigInt(LOG_WINDOW), start, topics, until, url, wei }) {
+async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, head, known, maxWindows, overlap = OVERLAP, size: width = BigInt(LOG_WINDOW), start, topics, until, url, wei }) {
   // What an earlier search found before `start`.
   /** @type {Credit[]} */
   const credits = [...known];
@@ -795,10 +797,14 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, 
   let asked = 0;
   /** @type {bigint | null} */
   let low = null;
+  /** @type {bigint | null} */
+  let refused = null;
+  /** @type {bigint | null} */
+  let took = null;
 
   while (asked < maxWindows && from <= head) {
     const to = from + size - 1n < head ? from + size - 1n : head;
-    const back = head + 1n - (size < OVERLAP ? size : OVERLAP);
+    const back = head + 1n - (size < overlap ? size : overlap);
     const lo = to === head && back < from ? (back > floor ? back : floor) : from;
     /** @type {any} */
     let logs;
@@ -809,6 +815,7 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, 
       logs = await read.rpc(url, "eth_getLogs", [{ address, fromBlock: hex(lo), toBlock: hex(to), topics }]);
     } catch (error) {
       if (size > MIN_WINDOW && RANGE_REFUSED.test(messageOf(error))) {
+        if (refused === null || to - lo + 1n < refused) refused = to - lo + 1n;
         size = size / 4n > MIN_WINDOW ? size / 4n : MIN_WINDOW;
         continue;
       }
@@ -817,6 +824,7 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, 
     }
 
     if (to === head) low = lo;
+    if (took === null || to - lo + 1n > took) took = to - lo + 1n;
 
     for (const log of Array.isArray(logs) ? logs : []) {
       const found = creditLog(log, { address, amountOf, from: lo, to, topics, wei });
@@ -836,27 +844,29 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, 
     }
   }
 
-  return { asked, complete: from > head, covered, credits, low, next: from, size };
+  return { asked, complete: from > head, covered, credits, low, next: from, refused, size, took };
 }
 
 /**
  * A search's passes over its blocks again, as a result gave them: where the
  * one under way is (null between two), when the next begins, how many are
- * done, and when the search first reached the head; null for anything else.
+ * done, when the search first reached the head, and the widest window it
+ * reads them in where the RPC refused a wider one; null for anything else.
  *
  * @param {unknown} value
- * @returns {{ at: number, from: bigint | null, passes: number, since: number } | null}
+ * @returns {{ at: number, from: bigint | null, passes: number, since: number, size: number | null } | null}
  */
 function recheckOf(value) {
   const kept = /** @type {any} */ (value);
   const from = kept?.from === null ? null : quantityOf(kept?.from);
   /** @param {unknown} ms */
   const time = (ms) => typeof ms === "number" && Number.isFinite(ms);
+  const size = Number.isSafeInteger(kept?.size) && kept.size >= Number(MIN_WINDOW) && kept.size <= LOG_WINDOW ? kept.size : null;
 
   if (!kept || !time(kept.at) || !time(kept.since) || !Number.isSafeInteger(kept.passes) || kept.passes < 0) return null;
   if (kept.from !== null && from === null) return null;
 
-  return { at: kept.at, from, passes: kept.passes, since: kept.since };
+  return { at: kept.at, from, passes: kept.passes, since: kept.since, size };
 }
 
 /**
@@ -865,8 +875,8 @@ function recheckOf(value) {
  * @param {NonNullable<ReturnType<typeof recheckOf>>} recheck
  * @returns {NonNullable<Scan["recheck"]>}
  */
-function recheckIn({ at, from, passes, since }) {
-  return { at, from: from === null ? null : from.toString(), passes, since };
+function recheckIn({ at, from, passes, since, size }) {
+  return { at, from: from === null ? null : from.toString(), passes, since, ...(size === null ? {} : { size }) };
 }
 
 /**
@@ -881,8 +891,10 @@ function recheckIn({ at, from, passes, since }) {
  * not arrived, all of them again from where the search began, a pass at a
  * time: the first a minute later, each after as long again as it has been
  * since then, and one after the other, as far as its credit, while an
- * arrival is held back. A pass under way takes one of a call's windows,
- * and what the search ahead leaves.
+ * arrival is held back. A pass under way takes what the search ahead leaves
+ * of a call's windows, one at least, in windows no wider than the RPC took
+ * before. A pass counts once it read the blocks again, as does a call whose
+ * window at the head reached back to where the search began.
  *
  * @param {Reader} read
  * @param {{ given: Queued[], queue: Queued[], guarded: boolean, unsure: ReadonlySet<string>, rivals?: ReadonlySet<string>, filter: { address: string, topics: ReadonlyArray<string | null>, wei: bigint, amountOf: (data: string) => bigint | null } }} group
@@ -975,6 +987,13 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
 
   if (floor > start) floor = start;
 
+  // No later than a credit found before: the blocks are read again from it.
+  for (const credit of carried.values()) if (credit.block !== null && credit.block < floor) floor = credit.block;
+
+  // The widest window the blocks are read again in, where the RPC refused a
+  // wider one.
+  const width = recheck?.size ? BigInt(recheck.size) : BigInt(LOG_WINDOW);
+
   /**
    * The given transfers' credits with `found`: those that arrived, by their
    * credits, and those held back (`held`), with the last of their credits'
@@ -1040,21 +1059,30 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
     floor,
     head,
     known: [...carried.values()],
-    maxWindows: due ? maxWindows - 1 : maxWindows,
+    maxWindows,
+    overlap: width < OVERLAP ? width : OVERLAP,
     start,
     until,
     url,
   });
   const { complete, covered, next } = ahead;
   const seen = complete || covered;
+  // Its window at the head reached back to where the search began: every
+  // block read before this call is read again, as by a pass.
+  const again = recheck !== null && ahead.low !== null && ahead.low <= floor && start > floor;
+
+  if (again && recheck !== null) recheck = { ...recheck, passes: recheck.passes + 1 };
+
   let credits = mark(ahead.credits);
   const before = settled(credits, seen);
+  let { refused, took } = ahead;
 
-  if ((seen || before.held.size) && recheck === null) recheck = { at: before.held.size ? now : now + RECHECK_MS, from: null, passes: 0, since: now };
+  if ((seen || before.held.size) && recheck === null) recheck = { at: before.held.size ? now : now + RECHECK_MS, from: null, passes: 0, since: now, size: null };
 
   // A transfer not arrived yet: the blocks read before this call, again, as
   // far as the search ahead reads; while an arrival is held back, as far as
-  // its credit.
+  // its credit. With what the search ahead leaves of a call's windows, one
+  // at least.
   if (recheck !== null && (due || before.held.size) && before.arrived.size < live.length) {
     const from = recheck.from !== null && recheck.from > floor ? recheck.from : floor;
     const below = ahead.low !== null && ahead.low < start ? ahead.low : start;
@@ -1067,22 +1095,40 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
       floor: from,
       head: before.top !== null && before.top < below ? before.top : below - 1n,
       known: credits,
-      maxWindows: maxWindows - ahead.asked,
-      size: ahead.size,
+      maxWindows: maxWindows < 1 ? 0 : Math.max(1, maxWindows - ahead.asked),
+      size: ahead.size < width ? ahead.size : width,
       start: from,
       until,
       url,
     });
-    const { since } = recheck;
+    const done = pass.complete || pass.covered;
+    // A pass that read no block is none: only one that read the blocks again
+    // counts, and not twice in a call.
+    const counted = done && !again && pass.next > floor;
 
-    recheck = pass.complete || pass.covered ? { at: now + Math.max(RECHECK_MS, now - since), from: null, passes: recheck.passes + 1, since } : { ...recheck, from: pass.next };
+    recheck = done ? { ...recheck, at: now + Math.max(RECHECK_MS, now - recheck.since), from: null, passes: recheck.passes + (counted ? 1 : 0) } : { ...recheck, from: pass.next };
     credits = mark(pass.credits);
+    if (pass.refused !== null && (refused === null || pass.refused < refused)) refused = pass.refused;
+    if (pass.took !== null && (took === null || pass.took > took)) took = pass.took;
+  }
+
+  // A window refused: from the next call on, the blocks are read again in
+  // ones as wide as the widest it took narrower than that, else a quarter
+  // as wide.
+  if (recheck !== null && refused !== null) {
+    const fits = took !== null && took < refused ? took : refused / 4n;
+    const narrower = fits > MIN_WINDOW ? fits : MIN_WINDOW;
+
+    if (narrower < width) recheck = { ...recheck, size: Number(narrower) };
   }
 
   const { arrived, assigned, held, verdicts } = settled(credits, seen);
 
-  // Passes go on one after the other while an arrival is held back.
-  if (held.size && recheck !== null) recheck = { ...recheck, at: Math.min(recheck.at, now) };
+  // Passes go on one after the other while an arrival is held back; once one
+  // arrives with others still waiting, theirs begin again a minute later,
+  // the waits growing from there.
+  if (recheck !== null && held.size) recheck = { ...recheck, at: Math.min(recheck.at, now) };
+  else if (recheck !== null && arrived.size && arrived.size < live.length) recheck = { ...recheck, at: Math.min(recheck.at, now + RECHECK_MS), since: now };
 
   // The next search carries on from where this one stopped, with the
   // credits found so far: a transfer that arrived may come back from the

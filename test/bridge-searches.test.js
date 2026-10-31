@@ -102,8 +102,9 @@ describe("transfers out to BNB Smart Chain, on an RPC whose answers may hold no 
   /**
    * @param {{ head: bigint, fetch: any }} chain
    * @param {(input: string, init: any) => Promise<Response>} fetch
+   * @param {Record<string, unknown>} [more]
    */
-  const asker = (chain, fetch) => (/** @type {{ hash: string, scan: any }[]} */ waiting, /** @type {string[]} */ taken) =>
+  const asker = (chain, fetch, more = {}) => (/** @type {{ hash: string, scan: any }[]} */ waiting, /** @type {string[]} */ taken) =>
     serviceArrivals({
       archive,
       fetch,
@@ -112,6 +113,7 @@ describe("transfers out to BNB Smart Chain, on an RPC whose answers may hold no 
       taken,
       transfers: waiting.map(({ hash, scan }) => ({ hash, notBefore: notBefore.get(hash), route: TO_BSC.id, scan })),
       waitMs: Infinity,
+      ...more,
     });
 
   it("each arrive with its own payout, followed from when they were sent", async () => {
@@ -206,6 +208,55 @@ describe("transfers out to BNB Smart Chain, on an RPC whose answers may hold no 
     assert.deepEqual(paidWith(found), { [dusk("a1")]: evmHash("0a"), [dusk("a2")]: evmHash("0b") });
   });
 
+  // With one, two or eight windows a call, and an RPC that won't search more
+  // than 1,250 blocks at once: nearer the head, to fit a test. One window a
+  // call can't search up to the head past such an RPC from far behind it,
+  // so it is followed only.
+  for (const maxWindows of [1, 2, 8]) {
+    for (const maxRange of [undefined, 1_250n]) {
+      const how = `${maxWindows} window${maxWindows > 1 ? "s" : ""} a call${maxRange ? ", 1,250 blocks a window at most" : ""}`;
+
+      it(`each arrive with its own payout with ${how}`, async () => {
+        // An equal pair an hour apart, paid windows apart.
+        const pair = [
+          { block: H0, byte: "c1", height: 4_000_000 },
+          { block: H0 + 1_000n, byte: "c2", height: 4_000_045 },
+        ];
+        const node = fakeArchive({
+          accounts: { [TO_BSC.account]: { receiver: pair.map(({ byte, height }) => moonlight({ hash: dusk(byte), height, memo: R1, receiver: TO_BSC.account, sender: SENDER, value: 2n * DUSK })), sender: [] } },
+          details: {},
+          finalized: 10_000_000,
+          transactions: Object.fromEntries(pair.map(({ block, byte, height }) => [dusk(byte), transferTx({ height, memo: R1, receiver: TO_BSC.account, seconds: timeAt(block), sender: SENDER, value: 2n * DUSK })])),
+        }).archiveClient();
+        const paidOut = () =>
+          /** @type {const} */ ([
+            [H0 + 2_000n, "0d"],
+            [H0 + 8_000n, "0e"],
+          ]).map(([block, n]) => tokenTransfer({ block, from: TO_BSC.payoutAddress, hash: evmHash(n), to: R1, token: TO_BSC.chain.token, wei: DUSK * DUSK }));
+
+        for (const seed of SEEDS.slice(0, 10)) {
+          for (const first of maxWindows === 1 && maxRange ? [H0] : [H0, H0 + 12_000n]) {
+            const chain = fakeChain({ head: first, logs: logs(), maxRange, timeAt, url: TO_BSC.chain.rpcUrl });
+            const rpc = emptying(chain.fetch, { seed });
+            const { arrived, made } = await follow(chain, asker(chain, rpc.fetch, { maxWindows }), { calls: 1_600, hashes, step: 33n });
+
+            assert.deepEqual(paidWith(arrived), payouts, `seed ${seed}, first asked at ${first}, after ${made} calls`);
+          }
+
+          if (maxWindows === 1 && maxRange) continue;
+
+          const chain = fakeChain({ head: H0 + 12_000n, logs: paidOut(), maxRange, timeAt, url: TO_BSC.chain.rpcUrl });
+          const rpc = emptying(chain.fetch, { seed });
+          const ask = (/** @type {{ hash: string, scan: any }[]} */ waiting, /** @type {string[]} */ taken) =>
+            serviceArrivals({ archive: node, fetch: rpc.fetch, maxWindows, network: 1, now: timeAt(chain.head) * 1000, taken, transfers: waiting.map(({ hash, scan }) => ({ hash, route: TO_BSC.id, scan })), waitMs: Infinity });
+          const { arrived, made } = await follow(chain, ask, { calls: 1_600, hashes: [dusk("c1"), dusk("c2")], step: 33n });
+
+          assert.deepEqual(paidWith(arrived), { [dusk("c1")]: evmHash("0d"), [dusk("c2")]: evmHash("0e") }, `seed ${seed}, the pair, after ${made} calls`);
+        }
+      });
+    }
+  }
+
   it("cost one log search a call while they wait, and a few more as their blocks are read again", async () => {
     // No payout yet: two hours of calls, every answer whole.
     const chain = fakeChain({ head: H0, timeAt, url: TO_BSC.chain.rpcUrl });
@@ -287,6 +338,116 @@ describe("deposits to DuskEVM, on an RPC whose answers may hold no log", () => {
 
       assert.deepEqual(paidWith(arrived), credits, `first asked at ${first}`);
     }
+  });
+
+  for (const maxWindows of [1, 2, 8]) {
+    for (const maxRange of [undefined, 1_250n]) {
+      const how = `${maxWindows} window${maxWindows > 1 ? "s" : ""} a call${maxRange ? ", 1,250 blocks a window at most" : ""}`;
+
+      it(`each arrive with their own credit with ${how}, with the sender's history or without`, async () => {
+        for (const seed of DEPOSIT_SEEDS.slice(0, 5)) {
+          // One window a call can't search up to the head past such an RPC from far behind it: followed only.
+          for (const first of maxWindows === 1 && maxRange ? [H0 + 15n] : [H0 + 15n, H0 + 10_000n]) {
+            for (const more of [{ archive }, {}]) {
+              const chain = fakeChain({ head: first, logs: logs(), maxRange });
+              const rpc = emptying(chain.fetch, { seed });
+              const { arrived, made } = await follow(chain, asker(chain, rpc.fetch, { ...more, maxWindows }), { calls: 1_600, hashes, step: 60n });
+
+              assert.deepEqual(paidWith(arrived), credits, `seed ${seed}, first asked at ${first}, after ${made} calls`);
+            }
+          }
+        }
+      });
+    }
+  }
+
+  describe("an earlier one of two equal deposits, its credit found after the later one's", () => {
+    // Searched from block 0, the earlier deposit's credit at block 1,000 and the later one's at 6,000.
+    const pair = [sent("e1", 100n, { height: 4_990, notBefore: 0 }), sent("e2", 200n, { height: 5_000, notBefore: 0 })];
+    const node = fakeArchive({
+      accounts: { [DEPOSITOR]: { receiver: [], sender: pair.map((d) => depositEntry({ hash: d.hash, height: d.height, sender: DEPOSITOR, value: d.amount })) } },
+      details: Object.fromEntries(pair.map((d) => [d.hash, details(Math.floor(d.at / 1000), { deposit: { amountLux: d.amount, to: RECIPIENT } })])),
+      finalized: 10_000,
+    }).archiveClient();
+    /** @param {{ head: bigint }} chain @param {(input: string, init: any) => Promise<Response>} fetch @param {number} maxWindows */
+    const askOf = (chain, fetch, maxWindows) => (/** @type {{ hash: string, scan: any }[]} */ waiting, /** @type {string[]} */ taken) =>
+      depositArrivals({
+        archive: node,
+        deposits: pair.filter((d) => waiting.some((w) => w.hash === d.hash)).map((d) => ({ ...d, scan: waiting.find((w) => w.hash === d.hash)?.scan })),
+        fetch,
+        maxWindows,
+        network: 2,
+        now: second(chain.head),
+        taken,
+        via: "rpc",
+        waitMs: Infinity,
+      });
+
+    it("waits for eight reads of the blocks before it, the first read aside: an empty pass is none of them", async () => {
+      const chain = fakeChain({ head: 10_000, logs: [credit(22, 1_000n), credit(11, 6_000n)] });
+      const rpc = emptying(chain.fetch, { rate: 0 });
+
+      // Its own credit left out of the first read and the next seven.
+      rpc.held.push({ block: 1_000n, times: 8 });
+
+      const { arrived } = await follow(chain, askOf(chain, rpc.fetch, 8), { calls: 20, hashes: pair.map((d) => d.hash), step: 33n });
+
+      assert.deepEqual(paidWith(arrived), { [dusk("e1")]: evmHash(22), [dusk("e2")]: evmHash(11) });
+    });
+
+    it("reads its blocks again in a window the RPC takes, kept from call to call, with two windows a call", async () => {
+      // An RPC that won't search more than 1,250 blocks at once, followed as the head moves on: one credit, seven calls in.
+      const chain = fakeChain({ head: 5_000, maxRange: 1_250n });
+      const ask = askOf(chain, chain.fetch, 2);
+      /** @type {Map<string, any>} */
+      const scans = new Map();
+      /** @type {any} */
+      let arrival = null;
+
+      for (let call = 0; call < 60 && arrival?.state !== "arrived"; call += 1) {
+        if (call === 7) chain.logs.push(credit(11, chain.head - 1n));
+
+        const { arrivals } = await ask(
+          pair.map((d) => ({ hash: d.hash, scan: scans.get(d.hash) })),
+          []
+        );
+
+        for (const [hash, each] of arrivals) if (each.scan) scans.set(hash, each.scan);
+        arrival = arrivals.get(dusk("e1"));
+        chain.head += 33n;
+      }
+
+      // The later one could have had it: the earlier one takes it once its blocks are read again.
+      like(arrival, { hash: evmHash(11), state: "arrived" });
+    });
+
+    it("reads its blocks again from a credit kept from before where its search began", async () => {
+      const chain = fakeChain({ head: 10_000, logs: [credit(11, 6_000n)] });
+      const ask = askOf(chain, chain.fetch, 8);
+      const first = await ask(
+        pair.map((d) => ({ hash: d.hash, scan: undefined })),
+        []
+      );
+      // Its scan says the search began after that credit, as one begun from a start that came out late would.
+      /** @type {Map<string, any>} */
+      const scans = new Map([...first.arrivals].map(([hash, each]) => [hash, { ...each.scan, start: "8000" }]));
+      /** @type {any} */
+      let arrival = first.arrivals.get(dusk("e1"));
+
+      for (let call = 0; call < 20 && arrival?.state !== "arrived"; call += 1) {
+        chain.head += 33n;
+
+        const { arrivals } = await ask(
+          pair.map((d) => ({ hash: d.hash, scan: scans.get(d.hash) })),
+          []
+        );
+
+        for (const [hash, each] of arrivals) if (each.scan) scans.set(hash, each.scan);
+        arrival = arrivals.get(dusk("e1"));
+      }
+
+      like(arrival, { hash: evmHash(11), state: "arrived" });
+    });
   });
 
   it("reads the newest blocks again on each call, and no further back than where its search began", async () => {
