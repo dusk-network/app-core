@@ -76,14 +76,16 @@ const MAX_U64 = (1n << 64n) - 1n;
 const TIMEOUT_MS = 8_000;
 // About one Dusk block every 10 seconds: how far back a sender's history is read.
 const DUSK_BLOCK_MS = 10_000;
-// The blocks the chain's pace is read over, how much further back than the
-// pace says a search starts, and how often it steps back again from a block
-// that is still later than the transfer.
+// The blocks the chain's pace is read over, from a block rounded down to a
+// multiple of `PACE_STEP` so that the app's cache keeps its time, and how
+// long before the transfer a search starts as the pace says: the block is
+// then checked by its time, and stepped back while it's still later.
 const PACE_SAMPLE = 100_000n;
-const PACE_MARGIN = 1.2;
-const START_MARGIN = 50n;
-const START_CHECKS = 4;
+const PACE_STEP = 10_000n;
+const START_MS = 10 * 60_000;
 const MIN_WINDOW = 50n;
+// The widest a search's windows grow, while the RPC answers them whole.
+const MAX_WINDOW = 100_000n;
 // How far back from the head a search's last window reaches: those blocks
 // are read again on each call.
 const OVERLAP = 1_000n;
@@ -245,9 +247,9 @@ function historyScanOf(value) {
 }
 
 /**
- * Where a search stopped, what it searched for, and the credits it found
- * before, and how far the transfer's history is read, as a result gave
- * them; null for anything else.
+ * Where a search stopped, what it searched for, the credits it found
+ * before, the width of its windows, and how far the transfer's history is
+ * read, as a result gave them; null for anything else.
  *
  * @param {unknown} value
  * @returns {Scan | null}
@@ -274,10 +276,16 @@ function scanOf(value) {
     // as a search kept by an earlier version.
     const start = quantityOf(scan.start);
     const recheck = start === null ? null : recheckOf(scan.recheck);
+    // The width of its windows, as an earlier version kept it for its passes
+    // where it isn't said; and the narrowest the RPC refused.
+    const size = Number.isSafeInteger(scan.size) && scan.size >= Number(MIN_WINDOW) && scan.size <= Number(MAX_WINDOW) ? scan.size : (recheck?.size ?? null);
+    const refused = Number.isSafeInteger(scan.refused) && scan.refused > 0 ? scan.refused : null;
 
     Object.assign(out, { basis: scan.basis, from: from.toString(), search: scan.search, seen });
     if (start !== null) out.start = start.toString();
     if (recheck) out.recheck = recheckIn(recheck);
+    if (size !== null) out.size = size;
+    if (refused !== null) out.refused = refused;
   } else if (!history) {
     return null;
   }
@@ -395,6 +403,10 @@ function reader(fetchFn, timeoutMs) {
 
   return {
     counter,
+    // What a call reads once for all its searches, by what and where: a
+    // chain's head and pace.
+    /** @type {Map<string, Promise<any>>} */
+    once: new Map(),
 
     /**
      * @param {string} url
@@ -693,35 +705,102 @@ async function blockTime(read, url, block, cache) {
 
   if (typeof kept === "number" && Number.isFinite(kept)) return kept;
 
-  const seconds = quantityOf((await read.rpc(url, "eth_getBlockByNumber", [hex(block), false]))?.timestamp);
+  return once(read, `time ${url} ${block}`, async () => {
+    const seconds = quantityOf((await read.rpc(url, "eth_getBlockByNumber", [hex(block), false]))?.timestamp);
 
-  if (seconds === null) throw new Error(`The chain gave no time for block ${block}`);
+    if (seconds === null) throw new Error(`The chain gave no time for block ${block}`);
 
-  const at = Number(seconds) * 1000;
+    const at = Number(seconds) * 1000;
 
-  cache?.set(Number(block), at);
+    cache?.set(Number(block), at);
 
-  return at;
+    return at;
+  });
 }
 
 /**
+ * What a call reads once for all its searches on a chain.
+ *
+ * @template T
+ * @param {Reader} read
+ * @param {string} key
+ * @param {() => Promise<T>} get
+ * @returns {Promise<T>}
+ */
+function once(read, key, get) {
+  const kept = read.once.get(key);
+
+  if (kept) return kept;
+
+  const got = get();
+
+  read.once.set(key, got);
+  // One that failed is read again by the next search.
+  got.catch(() => read.once.delete(key));
+
+  return got;
+}
+
+/**
+ * The chain's head, read once a call: the head its pace was read with, where
+ * the call read that.
+ *
  * @param {Reader} read
  * @param {string} url
  * @returns {Promise<bigint>}
  */
 async function headOf(read, url) {
-  const head = quantityOf(await read.rpc(url, "eth_blockNumber", []));
+  const paced = read.once.get(`pace ${url}`);
 
-  if (head === null) throw new Error("The chain gave no head");
+  if (paced) return (await paced).head;
 
-  return head;
+  return once(read, `head ${url}`, async () => {
+    const head = quantityOf(await read.rpc(url, "eth_blockNumber", []));
+
+    if (head === null) throw new Error("The chain gave no head");
+
+    return head;
+  });
 }
 
 /**
- * The chain's head, and a block from before `atMs`: estimated from the
- * chain's pace over its last 100,000 blocks, a fifth further back, then
- * stepped back while its own time is still later, twice as far each time,
- * as the chain's pace may have changed.
+ * The chain's head, its time, and its pace (blocks a second) over its last
+ * 100,000 blocks or so, read once a call.
+ *
+ * @param {Reader} read
+ * @param {string} url
+ * @param {BlockTimes | undefined} cache
+ * @returns {Promise<{ head: bigint, seconds: number, pace: number }>}
+ */
+function paceOf(read, url, cache) {
+  return once(read, `pace ${url}`, async () => {
+    const latest = await read.rpc(url, "eth_getBlockByNumber", ["latest", false]);
+    const head = quantityOf(latest?.number);
+    const headSeconds = quantityOf(latest?.timestamp);
+
+    if (head === null || headSeconds === null) throw new Error("The chain gave no head");
+
+    cache?.set(Number(head), Number(headSeconds) * 1000);
+    read.once.set(`time ${url} ${head}`, Promise.resolve(Number(headSeconds) * 1000));
+
+    const back = head < PACE_SAMPLE ? 0n : ((head - PACE_SAMPLE) / PACE_STEP) * PACE_STEP;
+    let pace = 1;
+
+    if (back < head) {
+      const span = Number(headSeconds) - (await blockTime(read, url, back, cache)) / 1000;
+
+      if (span > 0) pace = Number(head - back) / span;
+    }
+
+    return { head, pace, seconds: Number(headSeconds) };
+  });
+}
+
+/**
+ * The chain's head, and a block from before `atMs`: the block 10 minutes
+ * before it, as the chain's pace says, checked by its time, and stepped back
+ * while that's still later, twice as far each time, as the chain's pace may
+ * have changed.
  *
  * @param {Reader} read
  * @param {string} url
@@ -730,43 +809,21 @@ async function headOf(read, url) {
  * @returns {Promise<{ head: bigint, start: bigint }>}
  */
 async function startBefore(read, url, atMs, cache) {
-  const latest = await read.rpc(url, "eth_getBlockByNumber", ["latest", false]);
-  const head = quantityOf(latest?.number);
-  const headSeconds = quantityOf(latest?.timestamp);
-
-  if (head === null || headSeconds === null) throw new Error("The chain gave no head");
-
-  cache?.set(Number(head), Number(headSeconds) * 1000);
-
-  const back = head < PACE_SAMPLE ? head : PACE_SAMPLE;
-  // Blocks a second.
-  let pace = 1;
-
-  if (back > 0n) {
-    const sample = await blockTime(read, url, head - back, cache);
-    const span = Number(headSeconds) - sample / 1000;
-
-    if (span > 0) pace = Number(back) / span;
-  }
-
-  /**
-   * @param {bigint} block
-   * @param {number} seconds
-   * @param {number} [times]
-   */
-  const stepBack = (block, seconds, times = 1) => {
-    const step = BigInt(Math.ceil(Math.max(0, seconds) * pace * PACE_MARGIN * times)) + START_MARGIN;
+  const { head, pace, seconds } = await paceOf(read, url, cache);
+  /** @param {bigint} block @param {number} ms @param {number} times */
+  const back = (block, ms, times) => {
+    const step = BigInt(Math.ceil((Math.max(0, ms) / 1000) * pace * times));
 
     return block > step ? block - step : 0n;
   };
-  let start = stepBack(head, Number(headSeconds) - atMs / 1000);
+  let start = back(head, seconds * 1000 - atMs + START_MS, 1);
 
-  for (let check = 0; check < START_CHECKS && start > 0n; check += 1) {
+  for (let times = 2; start > 0n; times *= 2) {
     const at = await blockTime(read, url, start, cache);
 
     if (at <= atMs) break;
 
-    start = stepBack(start, (at - atMs) / 1000, 2 ** (check + 1));
+    start = back(start, at - atMs + START_MS, times);
   }
 
   return { head, start };
@@ -775,37 +832,43 @@ async function startBefore(read, url, atMs, cache) {
 /**
  * The credits asked for from block `start`, a window of blocks at a time, at
  * most `maxWindows`, until `head`, `enough`, or a window ending after
- * `until` (`covered`): each checked against what was asked, with its block's
- * time. A window the RPC won't search at once is asked again a quarter as
- * wide (`size`, the width it ends with; `refused`, the narrowest it
- * refused, and `took`, the widest it answered). The window ending at `head`
+ * `until` (`covered`, as the block before `start` may already be, where a
+ * search before stopped there): each checked against what was asked, with
+ * its block's time. Each window is `size` blocks wide, twice as wide after
+ * one the RPC answered whole, up to `MAX_WINDOW`, and narrower than any it
+ * refused (`refused`, the narrowest). One it won't search at once, or one
+ * wider than `LOG_WINDOW` that isn't answered, is asked again a quarter as
+ * wide, or as wide as the widest it answered where that's wider: `size` and
+ * `refused` are as the search leaves them. The window ending at `head`
  * reaches back up to `overlap` blocks from it, no wider than `size`, though
  * not under `floor`: those blocks are read again (from `low`). `asked`: the
  * windows asked.
  *
  * @param {Reader} read
- * @param {{ url: string, address: string, topics: ReadonlyArray<string | null>, wei: bigint, amountOf: (data: string) => bigint | null, start: bigint, floor: bigint, head: bigint, size?: bigint, overlap?: bigint, maxWindows: number, blockTimes: BlockTimes | undefined, enough: (credits: Credit[]) => boolean, until: number | null, known: Credit[] }} search
- * @returns {Promise<{ asked: number, complete: boolean, covered: boolean, credits: Credit[], low: bigint | null, next: bigint, refused: bigint | null, size: bigint, took: bigint | null }>}
+ * @param {{ url: string, address: string, topics: ReadonlyArray<string | null>, wei: bigint, amountOf: (data: string) => bigint | null, start: bigint, floor: bigint, head: bigint, size: bigint, refused: bigint | null, overlap?: bigint, maxWindows: number, blockTimes: BlockTimes | undefined, enough: (credits: Credit[]) => boolean, until: number | null, known: Credit[] }} search
+ * @returns {Promise<{ asked: number, complete: boolean, covered: boolean, credits: Credit[], low: bigint | null, next: bigint, refused: bigint | null, size: bigint }>}
  */
-async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, head, known, maxWindows, overlap = OVERLAP, size: width = BigInt(LOG_WINDOW), start, topics, until, url, wei }) {
+async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, head, known, maxWindows, overlap = OVERLAP, refused: kept, size: width, start, topics, until, url, wei }) {
   // What an earlier search found before `start`.
   /** @type {Credit[]} */
   const credits = [...known];
   let from = start;
   let size = width;
+  let refused = kept;
   let covered = false;
   let asked = 0;
   /** @type {bigint | null} */
   let low = null;
   /** @type {bigint | null} */
-  let refused = null;
-  /** @type {bigint | null} */
   let took = null;
 
-  while (asked < maxWindows && from <= head) {
+  if (until !== null && start > floor && start <= head) covered = (await blockTime(read, url, start - 1n, blockTimes)) > until;
+
+  while (!covered && asked < maxWindows && from <= head) {
     const to = from + size - 1n < head ? from + size - 1n : head;
     const back = head + 1n - (size < overlap ? size : overlap);
     const lo = to === head && back < from ? (back > floor ? back : floor) : from;
+    const blocks = to - lo + 1n;
     /** @type {any} */
     let logs;
 
@@ -814,9 +877,11 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, 
     try {
       logs = await read.rpc(url, "eth_getLogs", [{ address, fromBlock: hex(lo), toBlock: hex(to), topics }]);
     } catch (error) {
-      if (size > MIN_WINDOW && RANGE_REFUSED.test(messageOf(error))) {
-        if (refused === null || to - lo + 1n < refused) refused = to - lo + 1n;
-        size = size / 4n > MIN_WINDOW ? size / 4n : MIN_WINDOW;
+      if (blocks > MIN_WINDOW && (blocks > BigInt(LOG_WINDOW) || RANGE_REFUSED.test(messageOf(error)))) {
+        const fits = took !== null && took < blocks && took > blocks / 4n ? took : blocks / 4n;
+
+        if (refused === null || blocks < refused) refused = blocks;
+        size = fits > MIN_WINDOW ? fits : MIN_WINDOW;
         continue;
       }
 
@@ -824,7 +889,14 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, 
     }
 
     if (to === head) low = lo;
-    if (took === null || to - lo + 1n > took) took = to - lo + 1n;
+    if (took === null || blocks > took) took = blocks;
+
+    // Answered whole: the next one twice as wide, while narrower than any refused.
+    if (blocks === size) {
+      const wider = size * 2n < MAX_WINDOW ? size * 2n : MAX_WINDOW;
+
+      if (refused === null || wider < refused) size = wider;
+    }
 
     for (const log of Array.isArray(logs) ? logs : []) {
       const found = creditLog(log, { address, amountOf, from: lo, to, topics, wei });
@@ -844,14 +916,15 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, 
     }
   }
 
-  return { asked, complete: from > head, covered, credits, low, next: from, refused, size, took };
+  return { asked, complete: from > head, covered, credits, low, next: from, refused, size };
 }
 
 /**
  * A search's passes over its blocks again, as a result gave them: where the
  * one under way is (null between two), when the next begins, how many are
- * done, when the search first reached the head, and the widest window it
- * reads them in where the RPC refused a wider one; null for anything else.
+ * done, when the search first reached the head, and the width of the
+ * windows it read them in, as an earlier version kept it; null for anything
+ * else.
  *
  * @param {unknown} value
  * @returns {{ at: number, from: bigint | null, passes: number, since: number, size: number | null } | null}
@@ -875,8 +948,8 @@ function recheckOf(value) {
  * @param {NonNullable<ReturnType<typeof recheckOf>>} recheck
  * @returns {NonNullable<Scan["recheck"]>}
  */
-function recheckIn({ at, from, passes, since, size }) {
-  return { at, from: from === null ? null : from.toString(), passes, since, ...(size === null ? {} : { size }) };
+function recheckIn({ at, from, passes, since }) {
+  return { at, from: from === null ? null : from.toString(), passes, since };
 }
 
 /**
@@ -892,9 +965,10 @@ function recheckIn({ at, from, passes, since, size }) {
  * time: the first a minute later, each after as long again as it has been
  * since then, and one after the other, as far as its credit, while an
  * arrival is held back. A pass under way takes what the search ahead leaves
- * of a call's windows, one at least, in windows no wider than the RPC took
- * before. A pass counts once it read the blocks again, as does a call whose
- * window at the head reached back to where the search began.
+ * of a call's windows, one at least. A pass counts once it read the blocks
+ * again, as does a call whose window at the head reached back to where the
+ * search began. Both go on in windows as wide as the searches before left
+ * them, narrower than the narrowest the RPC refused.
  *
  * @param {Reader} read
  * @param {{ given: Queued[], queue: Queued[], guarded: boolean, unsure: ReadonlySet<string>, rivals?: ReadonlySet<string>, filter: { address: string, topics: ReadonlyArray<string | null>, wei: bigint, amountOf: (data: string) => bigint | null } }} group
@@ -922,10 +996,10 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
   // The logs searched for: a search for others, as for another sender or
   // amount, isn't carried on.
   const search = [filter.address, ...filter.topics.map((topic) => topic ?? "*"), filter.wei.toString()].join(":");
-  /** @type {{ basis: number, from: string, seen?: Scan["seen"], start?: string, recheck?: Scan["recheck"] }[]} */
+  /** @type {{ basis: number, from: string, seen?: Scan["seen"], start?: string, recheck?: Scan["recheck"], size?: number, refused?: number }[]} */
   const resumed = live.flatMap(({ scan }) =>
     scan?.from !== undefined && scan.search === search && scan.basis !== undefined && scan.basis <= first.at
-      ? [{ basis: scan.basis, from: scan.from, recheck: scan.recheck, seen: scan.seen, start: scan.start }]
+      ? [{ basis: scan.basis, from: scan.from, recheck: scan.recheck, refused: scan.refused, seen: scan.seen, size: scan.size, start: scan.start }]
       : []
   );
   /** @type {Map<string, Credit>} */
@@ -990,9 +1064,11 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
   // No later than a credit found before: the blocks are read again from it.
   for (const credit of carried.values()) if (credit.block !== null && credit.block < floor) floor = credit.block;
 
-  // The widest window the blocks are read again in, where the RPC refused a
-  // wider one.
-  const width = recheck?.size ? BigInt(recheck.size) : BigInt(LOG_WINDOW);
+  // The width of the windows, and the narrowest the RPC refused, as the
+  // searches before left them: the narrowest of each.
+  const sizes = resumed.flatMap((scan) => (scan.size === undefined ? [] : [BigInt(scan.size)]));
+  const refusals = resumed.flatMap((scan) => (scan.refused === undefined ? [] : [BigInt(scan.refused)]));
+  const width = sizes.length ? minOf(sizes) : BigInt(LOG_WINDOW);
 
   /**
    * The given transfers' credits with `found`: those that arrived, by their
@@ -1060,7 +1136,8 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
     head,
     known: [...carried.values()],
     maxWindows,
-    overlap: width < OVERLAP ? width : OVERLAP,
+    refused: refusals.length ? minOf(refusals) : null,
+    size: width,
     start,
     until,
     url,
@@ -1075,7 +1152,7 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
 
   let credits = mark(ahead.credits);
   const before = settled(credits, seen);
-  let { refused, took } = ahead;
+  let { refused, size } = ahead;
 
   if ((seen || before.held.size) && recheck === null) recheck = { at: before.held.size ? now : now + RECHECK_MS, from: null, passes: 0, since: now, size: null };
 
@@ -1096,7 +1173,8 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
       head: before.top !== null && before.top < below ? before.top : below - 1n,
       known: credits,
       maxWindows: maxWindows < 1 ? 0 : Math.max(1, maxWindows - ahead.asked),
-      size: ahead.size < width ? ahead.size : width,
+      refused,
+      size,
       start: from,
       until,
       url,
@@ -1108,18 +1186,7 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
 
     recheck = done ? { ...recheck, at: now + Math.max(RECHECK_MS, now - recheck.since), from: null, passes: recheck.passes + (counted ? 1 : 0) } : { ...recheck, from: pass.next };
     credits = mark(pass.credits);
-    if (pass.refused !== null && (refused === null || pass.refused < refused)) refused = pass.refused;
-    if (pass.took !== null && (took === null || pass.took > took)) took = pass.took;
-  }
-
-  // A window refused: from the next call on, the blocks are read again in
-  // ones as wide as the widest it took narrower than that, else a quarter
-  // as wide.
-  if (recheck !== null && refused !== null) {
-    const fits = took !== null && took < refused ? took : refused / 4n;
-    const narrower = fits > MIN_WINDOW ? fits : MIN_WINDOW;
-
-    if (narrower < width) recheck = { ...recheck, size: Number(narrower) };
+    ({ refused, size } = pass);
   }
 
   const { arrived, assigned, held, verdicts } = settled(credits, seen);
@@ -1138,8 +1205,10 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
     basis: first.at,
     from: next.toString(),
     ...(recheck ? { recheck: recheckIn(recheck) } : {}),
+    ...(refused === null ? {} : { refused: Number(refused) }),
     search,
     seen: credits.flatMap((credit) => (credit.at >= reach && credit.block !== null ? [{ at: credit.at, block: credit.block.toString(), hash: credit.hash, pass: credit.pass ?? 0, sender: credit.from }] : [])),
+    size: Number(size),
     start: floor.toString(),
   };
 
@@ -2072,6 +2141,12 @@ export async function serviceArrivals({
   }
 
   const live = triage(known, results, { now, waitMs });
+  // The block times the app keeps for a route's chain: by its chain ID, or
+  // the one cache given, where the network's service routes are all on one
+  // chain.
+  const oneChain = new Set(services.map((route) => route.chain?.chainId)).size === 1;
+  /** @param {Route} route @returns {BlockTimes | undefined} */
+  const timesOf = (route) => (typeof blockTimes === "function" ? (blockTimes(route.chain.chainId) ?? undefined) : oneChain ? blockTimes : undefined);
   // The fee of each transfer the app gave, those no longer looked for too,
   // and the block its payout can't be before.
   const feeOf = new Map(routed.map((item) => [item.hash, item.fee ?? /** @type {Route & { kind: "service" }} */ (item.route).feeLux]));
@@ -2144,7 +2219,7 @@ export async function serviceArrivals({
           queue: history.queue,
           unsure,
         },
-        { blockTimes, maxWindows, now, slackMs: CLOCK_SLACK_MS, url: String(rpcUrl ?? route.chain.rpcUrl), used, windowMs: CREDIT_WINDOW_MS }
+        { blockTimes: timesOf(route), maxWindows, now, slackMs: CLOCK_SLACK_MS, url: String(rpcUrl ?? route.chain.rpcUrl), used, windowMs: CREDIT_WINDOW_MS }
       );
 
       for (const [hash, arrival] of found) results.set(hash, withHistory(hash, arrival, given, history.states));

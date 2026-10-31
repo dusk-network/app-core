@@ -331,8 +331,9 @@ const followed = deposits.then(({ arrivals }) => {
   } else if (one?.state === "unknown") {
     const why: UnknownReason = one.reason;
     const next: Scan | undefined = one.scan;
+    const width: [number | undefined, number | undefined] = [next?.size, next?.refused];
     const error: string | undefined = one.error;
-    void [why, next, error];
+    void [why, next, width, error];
   }
 
   const input: ActivityInput["arrivals"] = forActivity;
@@ -352,6 +353,15 @@ const out: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = servi
   transfers: facts?.to && !facts.problem ? [{ fee: facts.fee, hash: facts.hash, notBefore: 1n, route: facts.route, scan: null }] : [],
   waitMs: 1,
 });
+// A cache a chain, by its chain ID.
+const timesByChain = new Map<number, BlockTimes>();
+const outByChain: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = serviceArrivals({
+  archive,
+  blockTimes: (chainId: number) => timesByChain.get(chainId),
+  network: 1,
+  transfers: [],
+});
+void outByChain;
 const sentOut: [bigint, bigint | null] | null = facts ? [facts.sent, facts.amount] : null;
 const out2 = out.then(({ arrivals }) => {
   const one = arrivals.get("ab");

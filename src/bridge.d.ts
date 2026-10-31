@@ -73,7 +73,11 @@ export declare const WAIT_MS: 604800000;
 /** Pages of an address's incoming calls on DuskEVM's explorer read at most, by default. */
 export declare const EXPLORER_PAGES: 5;
 
-/** Blocks one log search asks for at once; narrower where the RPC asks for it. */
+/**
+ * Blocks a search's first log search asks for at once: each one after asks
+ * for twice as many as one the RPC answered whole, up to 100,000, and fewer
+ * where the RPC asks for it. The width is kept in the search's `scan`.
+ */
 export declare const LOG_WINDOW: 5000;
 
 /** Log searches one call makes for a group of equal transfers, by default: one more where the search ahead takes them all while its blocks are read again. */
@@ -117,8 +121,10 @@ export type HistoryScan = {
  * before (`recheck`): where the one under way is (`from`, null between
  * two), when the next one begins (`at`), how many are done, as each credit
  * seen has the passes done before it was found (`pass`), when the search
- * first reached the head (`since`), in milliseconds, and the widest window
- * the blocks are read again in, where the RPC refused a wider one (`size`).
+ * first reached the head (`since`), in milliseconds (and the width of the
+ * windows they were read in, as an earlier version kept it: `size`). The
+ * width of the next search's windows (`size`), and the narrowest the RPC
+ * refused (`refused`): it stays narrower than that.
  * With the archive, how far the transfer's own history is read
  * (`history`): a history longer than one call reads is read on from there,
  * before any search. Kept by the app with the credits it was made with,
@@ -131,6 +137,8 @@ export type Scan = {
   seen?: ReadonlyArray<{ hash: string; block: string; at: number; sender: string | null; pass?: number }>;
   start?: string;
   recheck?: { from: string | null; at: number; passes: number; since: number; size?: number };
+  size?: number;
+  refused?: number;
   history?: HistoryScan;
 };
 
@@ -294,8 +302,12 @@ export type ServiceArrivalOptions = {
   rpcUrl?: string;
   /** Transactions on the other chain that paid the app's other transfers, which aren't among `transfers`. */
   taken?: Iterable<string>;
-  /** That chain's block times the app keeps. */
-  blockTimes?: BlockTimes;
+  /**
+   * The block times the app keeps for each chain, by its chain ID: or one
+   * cache, for a network whose service routes are all on one chain (it
+   * isn't used for any other).
+   */
+  blockTimes?: BlockTimes | ((chainId: number) => BlockTimes | undefined);
   now?: number;
   waitMs?: number;
   maxWindows?: number;

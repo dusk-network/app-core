@@ -209,9 +209,7 @@ describe("transfers out to BNB Smart Chain, on an RPC whose answers may hold no 
   });
 
   // With one, two or eight windows a call, and an RPC that won't search more
-  // than 1,250 blocks at once: nearer the head, to fit a test. One window a
-  // call can't search up to the head past such an RPC from far behind it,
-  // so it is followed only.
+  // than 1,250 blocks at once: nearer the head, to fit a test.
   for (const maxWindows of [1, 2, 8]) {
     for (const maxRange of [undefined, 1_250n]) {
       const how = `${maxWindows} window${maxWindows > 1 ? "s" : ""} a call${maxRange ? ", 1,250 blocks a window at most" : ""}`;
@@ -235,15 +233,13 @@ describe("transfers out to BNB Smart Chain, on an RPC whose answers may hold no 
           ]).map(([block, n]) => tokenTransfer({ block, from: TO_BSC.payoutAddress, hash: evmHash(n), to: R1, token: TO_BSC.chain.token, wei: DUSK * DUSK }));
 
         for (const seed of SEEDS.slice(0, 10)) {
-          for (const first of maxWindows === 1 && maxRange ? [H0] : [H0, H0 + 12_000n]) {
+          for (const first of [H0, H0 + 12_000n]) {
             const chain = fakeChain({ head: first, logs: logs(), maxRange, timeAt, url: TO_BSC.chain.rpcUrl });
             const rpc = emptying(chain.fetch, { seed });
             const { arrived, made } = await follow(chain, asker(chain, rpc.fetch, { maxWindows }), { calls: 1_600, hashes, step: 33n });
 
             assert.deepEqual(paidWith(arrived), payouts, `seed ${seed}, first asked at ${first}, after ${made} calls`);
           }
-
-          if (maxWindows === 1 && maxRange) continue;
 
           const chain = fakeChain({ head: H0 + 12_000n, logs: paidOut(), maxRange, timeAt, url: TO_BSC.chain.rpcUrl });
           const rpc = emptying(chain.fetch, { seed });
@@ -346,8 +342,7 @@ describe("deposits to DuskEVM, on an RPC whose answers may hold no log", () => {
 
       it(`each arrive with their own credit with ${how}, with the sender's history or without`, async () => {
         for (const seed of DEPOSIT_SEEDS.slice(0, 5)) {
-          // One window a call can't search up to the head past such an RPC from far behind it: followed only.
-          for (const first of maxWindows === 1 && maxRange ? [H0 + 15n] : [H0 + 15n, H0 + 10_000n]) {
+          for (const first of [H0 + 15n, H0 + 10_000n]) {
             for (const more of [{ archive }, {}]) {
               const chain = fakeChain({ head: first, logs: logs(), maxRange });
               const rpc = emptying(chain.fetch, { seed });
