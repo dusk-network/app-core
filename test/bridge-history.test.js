@@ -10,7 +10,7 @@ import { networks } from "@dusk-network/networks";
 import { evmAddressOf } from "@dusk-network/networks/duskevm";
 
 import { HISTORY_PAGES, depositArrivals, serviceArrivals } from "../src/bridge.js";
-import { bridgeFinalized, depositEntry, details, fakeChain, moonlight, tokenTransfer, transferTx, withRoutes } from "./fixtures/bridge.js";
+import { BRIDGE, bridgeFinalized, depositEntry, details, fakeChain, moonlight, tokenTransfer, transferTx, withRoutes } from "./fixtures/bridge.js";
 import { fakeArchive, like } from "./fixtures/helpers.js";
 
 const DUSK = 1_000_000_000n;
@@ -134,6 +134,75 @@ describe("deposits to DuskEVM, on its RPC with the sender's history", () => {
 
     like(arrivals.get(dusk("d1")), { hash: evmHash(1), state: "arrived" });
     like(arrivals.get(dusk("d2")), { hash: evmHash(2), state: "arrived" });
+  });
+
+  it("counts an earlier equal deposit the app gave, still read on, before a later one, where its call's arguments can't be read", async () => {
+    // The earlier one's hours hold 201 other transfers under it, the later one's, 50 minutes on, don't.
+    const unreadable = details(1_792_980_100, { deposit: { amountLux: TENTH, to: RECIPIENT } });
+
+    delete unreadable.tx.callData.data;
+    assert.equal(unreadable.tx.callData.contractId, BRIDGE);
+
+    const node = fakeArchive({
+      accounts: {
+        [SENDER]: {
+          receiver: [],
+          sender: [
+            ...busy(201, 7_840, { receiver: OTHER, sender: SENDER, value: 1 }),
+            depositEntry({ hash: dusk("d1"), height: 10_000, sender: SENDER, value: TENTH }),
+            depositEntry({ hash: dusk("d2"), height: 10_300, sender: SENDER, value: TENTH }),
+          ],
+        },
+      },
+      details: { [dusk("d1")]: unreadable, [dusk("d2")]: asDeposit(1_792_983_100) },
+      finalized: 20_000,
+    });
+    // One credit so far, after both were sent: the earlier one's.
+    const chain = fakeChain({ head: 5_000, logs: [credit(1, 3_200)] });
+    const { arrivals } = await depositArrivals({
+      archive: node.archiveClient(),
+      deposits: [sent("d1", second(100), { height: 10_000 }), sent("d2", second(3_100), { height: 10_300 })],
+      fetch: chain.fetch,
+      network: 2,
+      now: second(5_000),
+      via: "rpc",
+    });
+
+    like(arrivals.get(dusk("d1")), { state: "waiting" });
+    assert.notEqual(arrivals.get(dusk("d2"))?.state, "arrived");
+  });
+
+  it("keeps how far its history is read when DuskEVM's RPC fails, and reads none of it again", async () => {
+    const node = fakeArchive({
+      accounts: {
+        [SENDER]: {
+          receiver: [],
+          sender: [...busy(201, 9_000, { receiver: OTHER, sender: SENDER, value: 1 }), depositEntry({ hash: dusk("d1"), height: 10_000, sender: SENDER, value: TENTH })],
+        },
+      },
+      details: { [dusk("d1")]: asDeposit(1_792_980_100) },
+      finalized: 20_000,
+    });
+    const chain = fakeChain({ head: 5_000, logs: [credit(1, 300)] });
+    const down = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const options = { archive: node.archiveClient(), network: 2, now: second(5_000), via: /** @type {const} */ ("rpc") };
+    const d1 = sent("d1", second(100), { height: 10_000 });
+    const first = /** @type {any} */ ((await depositArrivals({ ...options, deposits: [d1], fetch: down })).arrivals.get(dusk("d1")));
+
+    like(first, { state: "waiting" });
+
+    const failed = /** @type {any} */ ((await depositArrivals({ ...options, deposits: [{ ...d1, scan: first.scan }], fetch: down })).arrivals.get(dusk("d1")));
+
+    like(failed, { reason: "error", state: "unknown" });
+    assert.equal(failed.scan?.history?.next, null);
+
+    const reads = historyReads(node.log);
+    const next = await depositArrivals({ ...options, deposits: [{ ...d1, scan: failed.scan }], fetch: chain.fetch });
+
+    like(next.arrivals.get(dusk("d1")), { hash: evmHash(1), state: "arrived" });
+    assert.equal(historyReads(node.log), reads);
   });
 
   it("reads further down while a run of equal deposits reaches the bottom of what it read: the run's first takes the first credit", async () => {

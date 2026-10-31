@@ -12,7 +12,7 @@
 
 import { networkFor, routeForAccount, routes } from "@dusk-network/networks";
 import { isAccount } from "@dusk-network/networks/account";
-import { duskEvmContracts, evmAddressOf } from "@dusk-network/networks/duskevm";
+import { BRIDGE_FUNCTIONS, duskEvmContracts, evmAddressOf } from "@dusk-network/networks/duskevm";
 import { DETAILS_BATCH, TRANSFER_CONTRACT, fetchTxDetails, historyRange } from "./history.js";
 
 /** @typedef {import("./bridge.js").Arrival} Arrival */
@@ -1218,8 +1218,9 @@ async function depositPeers(archive, net, found, { amount, bounds, calls, suppli
     const call = calls.get(entry.hash);
     const bridged = call?.bridge;
 
-    // Failed, or a call that isn't a deposit: no DUSK left for DuskEVM.
-    if (call?.success === false || bridged === null || (bridged && bridged.kind !== "deposit")) continue;
+    // Failed, or a call that isn't a deposit: no DUSK left for DuskEVM. A
+    // deposit whose arguments can't be read could be any.
+    if (call?.success === false || (bridged && bridged.kind !== "deposit") || (bridged === null && call?.fnName !== BRIDGE_FUNCTIONS.deposit)) continue;
 
     const own = supplied.get(entry.hash);
     let at = msOf(call?.timestamp);
@@ -1712,7 +1713,7 @@ async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows
 
       for (const [hash, arrival] of found) results.set(hash, withHistory(hash, arrival, given, states));
     } catch (error) {
-      for (const item of given) results.set(item.hash, { error: messageOf(error), reason: "error", state: "unknown" });
+      for (const item of given) results.set(item.hash, withHistory(item.hash, { error: messageOf(error), reason: "error", state: "unknown" }, given, states));
     }
   }
 }
@@ -1890,7 +1891,7 @@ export async function serviceArrivals({
 
       for (const [hash, arrival] of found) results.set(hash, withHistory(hash, arrival, given, history.states));
     } catch (error) {
-      for (const item of given) results.set(item.hash, failed(error));
+      for (const item of given) results.set(item.hash, withHistory(item.hash, failed(error), given, history.states));
     }
   }
 
