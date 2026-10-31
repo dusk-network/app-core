@@ -102,7 +102,8 @@ describe("a profile's shielded history", () => {
         [3602438, UNSHIELD, "in", "1012000000", null],
       ]
     );
-    assert.equal(first.entries[0].kind, "shield");
+    // Each as its conversion went: the unshield to a public account, whoever's notes it made.
+    assert.deepEqual(first.entries.map((e) => e.kind), ["shield", "unshield"]);
 
     // The note tree was read once, from the first note.
     assert.equal(w.tree.sizes, 1);
@@ -137,8 +138,8 @@ describe("a profile's shielded history", () => {
       [
         [3861643, "shield", "in", "2000000000", null],
         [3602438, "unshield", "out", String(10_500_000_000n - 1_012_000_000n - 12_429_102n), "12429102"],
-        // The notes it spent, as it received them.
-        [226951, "shield", "in", String(DUSK / 2n), null],
+        // The notes it spent, as it received them: from an unshield's outputs, and a shield.
+        [226951, "unshield", "in", String(DUSK / 2n), null],
         [184423, "shield", "in", String(10n * DUSK), null],
       ]
     );
@@ -402,6 +403,44 @@ describe("the decoys of a shielded history", () => {
     w.store.put = async () => {};
     await assert.rejects(w.read(), { message: "The decoys weren't kept, so no block was asked for" });
     assert.deepEqual(w.node.queries, []);
+  });
+
+  it("are the same for two reads at once, drawn and kept in one transaction by a store that can", async () => {
+    const w = wallet({ leaves: treeLeaves({ distinct: true }), notes: sentNotes });
+    // Two pages of one profile over one record, as IndexedDB keeps it: each
+    // reads it before either keeps decoys, and the second writes only once
+    // the first asked for its blocks.
+    const kept = { record: /** @type {any} */ (null), reads: 0 };
+    const bothRead = Promise.withResolvers();
+    const firstAsked = Promise.withResolvers();
+    /** @param {boolean} second @returns {import("../src/shielded.js").ShieldedStore} */
+    const page = (second) => ({
+      get: async () => {
+        if ((kept.reads += 1) === 2) bothRead.resolve(undefined);
+        await bothRead.promise;
+
+        return structuredClone(kept.record);
+      },
+      put: async (record) => {
+        if (second) await firstAsked.promise;
+        kept.record = structuredClone(record);
+      },
+      update: async (change) => {
+        if (second) await firstAsked.promise;
+        kept.record = structuredClone(change(structuredClone(kept.record)));
+
+        return structuredClone(kept.record);
+      },
+    });
+
+    w.node.before = () => firstAsked.resolve(undefined);
+
+    const [one, two] = await Promise.all([w.read({ random: seq(1), store: page(false) }), w.read({ random: seq(2), store: page(true) })]);
+
+    // Both asked among the 16 decoys kept, and nothing else.
+    assert.deepEqual(decoysOf(w.node.heights()), new Set(kept.record.decoys));
+    assert.equal(kept.record.decoys.length, 16);
+    assert.deepEqual([one.pending, two.pending, two.entries], [false, false, one.entries]);
   });
 
   it("are kept beside the history kept before, which still shows while the new one is worked out", async () => {

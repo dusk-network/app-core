@@ -219,9 +219,9 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 /**
  * Histories kept in memory, by key, as the wallets keep them: the sync
- * state, and the entries by hash, an entry read again keeping what it had.
- * `reset()` forgets everything and counts the reset: a store made before it
- * writes nothing after it.
+ * state, and the entries by hash, an entry read again keeping what it had,
+ * a write's check made with it. `reset()` forgets everything and counts the
+ * reset: a store made before it writes nothing after it.
  */
 export function memoryDatabase() {
   const db = {
@@ -282,9 +282,11 @@ export function memoryDatabase() {
 
           return structuredClone(next);
         },
-        async patch(details) {
+        async patch(details, check) {
           await tick();
           guard();
+          // In the write's own transaction, as an IndexedDB store checks it.
+          check?.(db.states.has(key) ? structuredClone(db.states.get(key)) : null);
 
           const rows = rowsOf();
 
@@ -299,9 +301,10 @@ export function memoryDatabase() {
             .slice(0, limit)
             .map((row) => structuredClone(row));
         },
-        async clear() {
+        async clear(check) {
           await tick();
           guard();
+          check?.(db.states.has(key) ? structuredClone(db.states.get(key)) : null);
           db.clears += 1;
           db.states.delete(key);
           db.rows.delete(key);

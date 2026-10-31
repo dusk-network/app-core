@@ -6,14 +6,21 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 ### Added
 
+- `/history`: `memoBinary` on an entry whose memo is bytes given as 0x hex, rather than typed 0x text
+- `/history`: a `check` for the store's `patch` and `clear` to make in the same transaction, so a run after a reset leaves another run's history of the new chain alone
+- `/shielded`: an optional `update` on the store, which keeps the decoys in one transaction, so two reads at once ask among the same ones
 - `/bridge`: `serviceArrivals` takes `blockTimes` as a cache for each chain, by its chain ID
 
 ### Changed
 
+- `/history`: a details request that fails in `sync()` ends the run's details and resolves it with `detailsError`, rather than rejecting the run
 - `/bridge`: an RPC search's windows grow up to 100,000 blocks while the RPC answers them whole, and a call reads a chain's head and pace once for all its searches
 
 ### Fixed
 
+- `/shielded`: a conversion is a shield or an unshield as its event says, also for a profile that only got its change
+- `/shielded`: two notes a block made for one shielded address go to a transaction each, rather than both to the first
+- `/activity`: a gas refund from another account's call to DuskEVM's bridge is a received transfer, rather than a bridge withdrawal
 - `/bridge`: an RPC search starts 10 minutes before the transfer as the chain's pace says, at a block whose time is checked to be before it, rather than a fifth further back than the pace says
 - `/bridge`: an RPC search keeps the width of its windows in its `scan`, so one window a call moves on past an RPC that takes fewer blocks than it asked
 - `/bridge`: `serviceArrivals` uses one `blockTimes` cache only for a network whose service routes are all on one chain

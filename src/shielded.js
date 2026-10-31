@@ -38,6 +38,17 @@ export const HEIGHTS_PER_REQUEST = 15;
 // (`convert`, `mint`, `withdraw`), where a `phoenix` event lists whole notes.
 const RECEIVER_START = 328;
 const RECEIVER_END = 392;
+// Such an event makes one transparent note, and carries the note's whole
+// shielded address with its value right after it; the note holds that
+// value in the 8 bytes after its position.
+const ADDRESS_END = 648;
+const VALUE_START = 656;
+const VALUE_END = 664;
+const MAKES_NOTE = new Set(["convert", "mint", "withdraw"]);
+// A `convert` event: its sender, then where its value went, a shielded
+// address (0) or a public account (1).
+const CONVERT_BYTES = 544;
+const CONVERT_RECEIVER = 208;
 // A request for 15 blocks and their events may take a while.
 const BLOCKS_TIMEOUT_MS = 30_000;
 const MAX_U64 = (1n << 64n) - 1n;
@@ -329,6 +340,24 @@ function randomIndex(n, random) {
 const cryptoRandom = () => crypto.getRandomValues(new Uint32Array(1))[0];
 
 /**
+ * The heights in a random order.
+ *
+ * @param {ReadonlyArray<number>} list
+ * @param {() => number} random
+ */
+function shuffled(list, random) {
+  const heights = [...list];
+
+  for (let i = heights.length - 1; i > 0; i -= 1) {
+    const j = randomIndex(i + 1, random);
+
+    [heights[i], heights[j]] = [heights[j], heights[i]];
+  }
+
+  return heights;
+}
+
+/**
  * @param {ReadonlyArray<number>} pool
  * @param {ReadonlyArray<number>} real
  * @param {{ keep?: ReadonlyArray<number>, perHeight?: number, random?: () => number }} [options]
@@ -348,15 +377,7 @@ export function pickHeights(pool, real, { keep = [], perHeight = DECOYS_PER_HEIG
     free.pop();
   }
 
-  const heights = [...own, ...decoys];
-
-  for (let i = heights.length - 1; i > 0; i -= 1) {
-    const j = randomIndex(i + 1, random);
-
-    [heights[i], heights[j]] = [heights[j], heights[i]];
-  }
-
-  return { decoys, heights };
+  return { decoys, heights: shuffled([...own, ...decoys], random) };
 }
 
 // ---------------------------------------------------------------------------
@@ -430,11 +451,12 @@ export async function fetchShieldedBlocks(archive, heights, { isCurrent = always
 // ---------------------------------------------------------------------------
 
 /**
- * What one transaction did to the profile's notes.
+ * What one transaction did to the profile's notes, and what its `convert`
+ * event says it was.
  *
- * @typedef {{ hash: string, height: number, made: bigint, spent: bigint, topics: Set<string> }} Tally
+ * @typedef {{ hash: string, height: number, made: bigint, spent: bigint, topics: Set<string>, conversion: EntryKind | null }} Tally
  *
- * @typedef {{ matched: boolean, part: string, value: bigint, whole: string }} MadeNote
+ * @typedef {{ matched: boolean, part: string, tail: string, value: bigint, whole: string }} MadeNote
  */
 
 /**
@@ -452,30 +474,73 @@ function hexHas(hay, needle) {
 }
 
 /**
+ * What a `convert` event did: a shield, into a note, or an unshield, to a
+ * public account; null for an event of another shape.
+ *
+ * @param {string} data - its data, as lower-case hex
+ * @returns {EntryKind | null}
+ */
+function conversionOf(data) {
+  const tag = data.length === 2 * CONVERT_BYTES ? data.slice(2 * CONVERT_RECEIVER, 2 * CONVERT_RECEIVER + 2) : "";
+
+  return tag === "00" ? ENTRY_KIND.SHIELD : tag === "01" ? ENTRY_KIND.UNSHIELD : null;
+}
+
+/**
  * Adds one transfer contract event to its transaction's tally. A `phoenix`
  * event names the nullifiers its transaction spent and the notes it made
- * (change and the fee's refund among them); an event paying a shielded
- * receiver from a public account or a contract names part of the note.
+ * (change and the fee's refund among them), whole; an event paying a
+ * shielded receiver from a public account or a contract made one note, and
+ * is kept in `makers` until every whole note of the block is matched.
  *
  * @param {Tally} tally
  * @param {any} event
  * @param {MadeNote[]} made - the profile's notes at this height
  * @param {{ nullifier: string, value: bigint }[]} spent - the profile's spent notes
+ * @param {{ tally: Tally, data: string }[]} makers
  */
-function addTransferEvent(tally, event, made, spent) {
+function addTransferEvent(tally, event, made, spent, makers) {
   const data = String(event.data).toLowerCase();
-  const phoenix = event.topic === "phoenix";
+  const topic = String(event.topic);
 
-  tally.topics.add(String(event.topic));
+  tally.topics.add(topic);
 
-  if (phoenix) {
-    for (const n of spent) if (hexHas(data, n.nullifier)) tally.spent += n.value;
-  }
+  if (topic === "convert") tally.conversion ??= conversionOf(data);
+  if (MAKES_NOTE.has(topic)) makers.push({ data, tally });
+  if (topic !== "phoenix") return;
+
+  for (const n of spent) if (hexHas(data, n.nullifier)) tally.spent += n.value;
 
   for (const n of made) {
-    if (!n.matched && hexHas(data, phoenix ? n.whole : n.part)) {
+    if (!n.matched && hexHas(data, n.whole)) {
       tally.made += n.value;
       n.matched = true;
+    }
+  }
+}
+
+/**
+ * Gives each event that made one note the note it made: first the one
+ * whose shielded address and value it carries, then one whose address it
+ * names, so two notes to the same address in one block go to an event
+ * each.
+ *
+ * @param {{ tally: Tally, data: string }[]} makers
+ * @param {MadeNote[]} made
+ */
+function matchMakers(makers, made) {
+  /** @type {Set<{ tally: Tally, data: string }>} */
+  const done = new Set();
+
+  for (const key of /** @type {const} */ (["tail", "part"])) {
+    for (const maker of makers) {
+      const note = done.has(maker) ? undefined : made.find((n) => !n.matched && hexHas(maker.data, n[key]));
+
+      if (!note) continue;
+
+      maker.tally.made += note.value;
+      note.matched = true;
+      done.add(maker);
     }
   }
 }
@@ -488,7 +553,7 @@ function kindOf(t) {
   if (t.topics.has("stake:stake")) return ENTRY_KIND.STAKE;
   if (t.topics.has("stake:unstake")) return ENTRY_KIND.UNSTAKE;
   if (t.topics.has("stake:withdraw")) return ENTRY_KIND.WITHDRAW_REWARD;
-  if (t.topics.has("convert")) return t.spent > 0n ? ENTRY_KIND.UNSHIELD : ENTRY_KIND.SHIELD;
+  if (t.topics.has("convert")) return t.conversion ?? (t.spent > 0n ? ENTRY_KIND.UNSHIELD : ENTRY_KIND.SHIELD);
 
   return t.topics.has("deposit") ? ENTRY_KIND.CONTRACT_CALL : ENTRY_KIND.TRANSFER;
 }
@@ -559,7 +624,7 @@ function tallyNotes(notes, blocks) {
     if (known) return known;
 
     /** @type {Tally} */
-    const tally = { hash, height, made: 0n, spent: 0n, topics: new Set() };
+    const tally = { conversion: null, hash, height, made: 0n, spent: 0n, topics: new Set() };
 
     txs.set(hash, tally);
 
@@ -575,17 +640,22 @@ function tallyNotes(notes, blocks) {
     const made = own.map((n) => ({
       matched: false,
       part: hex(n.leaf.subarray(RECEIVER_START, RECEIVER_END)),
+      tail: hex(n.leaf.subarray(RECEIVER_START, ADDRESS_END)) + hex(n.leaf.subarray(VALUE_START, VALUE_END)),
       value: BigInt(n.value),
       whole: hex(n.leaf.subarray(0, NOTE_BYTES)),
     }));
+    /** @type {{ tally: Tally, data: string }[]} */
+    const makers = [];
 
     for (const event of /** @type {any[]} */ (events)) {
       const source = String(event.source ?? event.target ?? "").toLowerCase();
       const hash = String(event.origin).toLowerCase();
 
       if (source === STAKE_CONTRACT) tallyOf(hash, height).topics.add(`stake:${event.topic}`);
-      else if (source === TRANSFER_CONTRACT) addTransferEvent(tallyOf(hash, height), event, made, spent);
+      else if (source === TRANSFER_CONTRACT) addTransferEvent(tallyOf(hash, height), event, made, spent, makers);
     }
+
+    matchMakers(makers, made);
 
     if (height > 0) unnamed += made.filter((n) => !n.matched).length;
   }
@@ -626,25 +696,40 @@ const fingerprintOf = (notes) =>
     .join(",");
 
 /**
- * The kept history, as far as it reads as one; null for none. A store that
- * can't be read rejects: taking it for none would draw new decoys for the
- * same notes, and a node could compare the two sets.
+ * A kept history, as far as it reads as one; null for none.
+ *
+ * @param {unknown} kept
+ * @returns {ShieldedRecord | null}
+ */
+function recordOf(kept) {
+  if (!kept || typeof kept !== "object") return null;
+
+  const { decoys, entries, fingerprint } = /** @type {any} */ (kept);
+
+  return {
+    decoys: Array.isArray(decoys) ? decoys.filter(isHeight) : [],
+    entries: Array.isArray(entries) ? entries : [],
+    fingerprint: typeof fingerprint === "string" ? fingerprint : "",
+  };
+}
+
+/**
+ * The kept history; null for none. A store that can't be read rejects:
+ * taking it for none would draw new decoys for the same notes, and a node
+ * could compare the two sets.
  *
  * @param {ShieldedStore} store
  * @returns {Promise<ShieldedRecord | null>}
  */
-async function keptRecord(store) {
-  /** @type {any} */
-  const kept = await store.get();
+const keptRecord = async (store) => recordOf(await store.get());
 
-  if (!kept || typeof kept !== "object") return null;
-
-  return {
-    decoys: Array.isArray(kept.decoys) ? kept.decoys.filter(isHeight) : [],
-    entries: Array.isArray(kept.entries) ? kept.entries : [],
-    fingerprint: typeof kept.fingerprint === "string" ? kept.fingerprint : "",
-  };
-}
+/**
+ * `decoys`, with those of `more` it lacks after them: kept decoys only grow.
+ *
+ * @param {ReadonlyArray<number>} decoys
+ * @param {ReadonlyArray<number>} more
+ */
+const grown = (decoys, more) => [...decoys, ...more.filter((h) => !decoys.includes(h))];
 
 /**
  * @param {ShieldedHistoryOptions} options
@@ -704,7 +789,7 @@ export async function shieldedHistory({ archive, notes, valueOf, tree, store, tr
   // Not for a height the tree as read doesn't have: no decoy could be one.
   if (!pool || real.some((h) => !inTree.has(h))) return unfinished;
 
-  const { decoys, heights } = pickHeights(pool, real, { keep: kept?.decoys ?? [], random });
+  let { decoys, heights } = pickHeights(pool, real, { keep: kept?.decoys ?? [], random });
 
   // Without another height to ask among, asking would name the profile's own.
   if (!decoys.length) return unfinished;
@@ -712,13 +797,36 @@ export async function shieldedHistory({ archive, notes, valueOf, tree, store, tr
   // The decoys are kept before any block is asked for, beside what was kept
   // before: a read that fails partway asks among the same ones next time,
   // so no two requests differ in their decoys alone. They are read back:
-  // nothing is asked unless they are kept.
+  // nothing is asked unless they are kept. A store with `update` draws and
+  // keeps them in one transaction, from the decoys kept then: two reads at
+  // once ask among the same ones, the first kept.
   if (!sameHeights(decoys, kept?.decoys ?? [])) {
-    await store.put({ decoys, entries: kept?.entries ?? [], fingerprint: kept?.fingerprint ?? "" });
+    /** @type {ShieldedRecord | null} */
+    let drawn = null;
 
-    const back = await keptRecord(store);
+    if (typeof store.update === "function") {
+      const back = recordOf(
+        await store.update((now) => {
+          const record = recordOf(now);
+          const more = pickHeights(pool, real, { keep: record?.decoys ?? [], random }).decoys;
 
-    if (!back || !sameHeights(back.decoys, decoys)) throw new Error("The decoys weren't kept, so no block was asked for");
+          return (drawn = { decoys: more, entries: record?.entries ?? [], fingerprint: record?.fingerprint ?? "" });
+        })
+      ) ?? (await keptRecord(store));
+
+      if (!back || !drawn || !sameHeights(back.decoys, /** @type {ShieldedRecord} */ (drawn).decoys)) {
+        throw new Error("The decoys weren't kept, so no block was asked for");
+      }
+
+      decoys = back.decoys;
+      heights = shuffled([...real, ...decoys], random ?? cryptoRandom);
+    } else {
+      await store.put({ decoys, entries: kept?.entries ?? [], fingerprint: kept?.fingerprint ?? "" });
+
+      const back = await keptRecord(store);
+
+      if (!back || !sameHeights(back.decoys, decoys)) throw new Error("The decoys weren't kept, so no block was asked for");
+    }
 
     current();
   }
@@ -737,7 +845,12 @@ export async function shieldedHistory({ archive, notes, valueOf, tree, store, tr
 
   const entries = entriesOf(tallies, blocks);
 
-  await store.put({ decoys, entries, fingerprint });
+  // Kept over the decoys kept now, which only grow.
+  if (typeof store.update === "function") {
+    await store.update((now) => ({ decoys: grown(recordOf(now)?.decoys ?? [], decoys), entries, fingerprint }));
+  } else {
+    await store.put({ decoys, entries, fingerprint });
+  }
 
   // A wallet that changed while its history was kept gets none of it.
   current();

@@ -119,6 +119,12 @@ export type HistoryEntry = {
   refund?: bigint;
   /** The memo as text, or as 0x hex when it isn't text; "" for none. */
   memo: string;
+  /**
+   * True when `memo` is bytes that aren't text, given as 0x hex, so a memo
+   * typed as 0x text isn't taken for them; left out otherwise. An entry an
+   * earlier version kept has none.
+   */
+  memoBinary?: boolean;
   /** Whether the account paid the fee. */
   payer: boolean;
 };
@@ -213,6 +219,13 @@ export type HistoryState = {
 };
 
 /**
+ * A store's check before a write, called with the state kept now, in the
+ * write's own transaction: when it throws, the store writes nothing, and
+ * may reject.
+ */
+export type StoreCheck = (kept: HistoryState | null) => void;
+
+/**
  * Where one account's history is kept on one network: the app's own
  * storage, which the app scopes and keys. Each method may return a value or
  * a promise.
@@ -234,12 +247,21 @@ export type HistoryStore = {
     entries: KeptEntry[],
     update: (kept: HistoryState | null) => HistoryState
   ): Promise<HistoryState | void> | HistoryState | void;
-  /** Add details to kept entries, by hash; entries that aren't kept are left alone. */
-  patch(details: Map<string, EntryDetails & Record<string, unknown>>): Promise<void> | void;
+  /**
+   * Add details to kept entries, by hash; entries that aren't kept are left
+   * alone. A store that calls `check` first, in the same transaction, keeps
+   * no details on a history another run started over since.
+   */
+  patch(details: Map<string, EntryDetails & Record<string, unknown>>, check?: StoreCheck): Promise<void> | void;
   /** Kept entries, newest first: at most `limit`, below the height `before` when it's given. */
   list(options: { limit: number; before?: number }): Promise<KeptEntry[]> | KeptEntry[];
-  /** Forget what is kept of the old chain: the node is on another one now. */
-  clear(): Promise<void> | void;
+  /**
+   * Forget what is kept of the old chain: the node is on another one now. A
+   * store that calls `check` first, in the same transaction, forgets
+   * nothing once another run started the history over on the new chain,
+   * and keeps what that run read.
+   */
+  clear(check?: StoreCheck): Promise<void> | void;
 };
 
 /** When nodes last answered without the archive: the app's storage, by URL. */
@@ -472,13 +494,15 @@ export type History = {
    * One sync run: the newest heights first, then older ones, within its
    * budgets. Each step is kept as it lands, so a run that stops anywhere is
    * carried on by the next. A run whose head names another chain than the
-   * history kept starts it over, on what is left of its budget. Rejects as
-   * the store does, as after a wallet reset; with a NoArchiveError for a
-   * node without the archive; with a StaleHistoryError once another run
-   * overtook it; and with a RangeError, before any request, for fewer than
-   * 2 history requests.
+   * history kept starts it over, on what is left of its budget. A details
+   * request that fails ends the run's details, not the run: it resolves
+   * with `detailsError`, and the next run asks for them again. Rejects as
+   * the store does, as after a wallet reset; as a history request does;
+   * with a NoArchiveError for a node without the archive; with a
+   * StaleHistoryError once another run overtook it; and with a RangeError,
+   * before any request, for fewer than 2 history requests.
    */
-  sync(options?: SyncOptions): Promise<{ state: HistoryState; requests: number; added: number }>;
+  sync(options?: SyncOptions): Promise<{ state: HistoryState; requests: number; added: number; detailsError?: Error }>;
   /** Details for kept entries that need them, as those shown before a sync gave them any: one request per 50. */
   fillDetails(entries: ReadonlyArray<KeptEntry | ReadEntry>, options?: { onStep?: () => void }): Promise<void>;
   /**

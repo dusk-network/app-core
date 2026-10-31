@@ -5,7 +5,7 @@ import { networks, routes } from "@dusk-network/networks";
 
 import { PENDING_MS, activityRows, settleSends } from "../src/activity.js";
 import { createHistory, historyEntry, parseHistoryEntry } from "../src/history.js";
-import { A, B, BRIDGE, C, DUSK, EVM, STORE, entryOf, hash, nameHook, recorded } from "./fixtures/activity.js";
+import { A, B, BRIDGE, C, DUSK, EVM, PORTAL, STORE, entryOf, hash, nameHook, recorded } from "./fixtures/activity.js";
 import { fakeArchive, fixture, like, memoryDatabase, readFixture } from "./fixtures/helpers.js";
 
 /** @typedef {import("../src/activity.js").ActivityInput} ActivityInput */
@@ -636,6 +636,40 @@ describe("a call to DuskEVM's bridge", () => {
     assert.equal(proved([proof], { claims: new Map([[withdrawal.toLowerCase(), { claimed: true }]]) })?.claimed, true);
     // The claim itself, of a withdrawal that pays someone else.
     like(rowsOf({ public: [claim] })[0].bridge, { amount: 1_008_000_000_000n, nonce, step: "claim" });
+  });
+
+  it("is a received transfer for an account another one's call paid its gas refund", async () => {
+    // Recorded on Testnet: a deposit of 0.5 DUSK to DuskEVM; here its unspent gas goes to A.
+    const deposit = readFixture("duskevm-deposit-history.json");
+    const raw = structuredClone(deposit.entry);
+
+    raw.events.find((/** @type {any} */ e) => e.topic === "moonlight").data.refund_info = [A, "1500000"];
+
+    const node = fakeArchive({ accounts: { [A]: { receiver: [raw], sender: [] } }, details: { ...fixture.details, ...deposit.details }, finalized: raw.block_height + 100 });
+    const history = createHistory({ account: A, archive: node.archiveClient(), network: 2, store: memoryDatabase().storeFor("refund") });
+
+    await history.sync();
+
+    const { entries } = await history.read();
+
+    // The history says what the call was; the row, that the bridge paid A nothing, with a network or without one.
+    like(entries[0], { bridge: { amount: "500000000", kind: "deposit", to: deposit.recipient }, contractId: BRIDGE });
+
+    for (const network of [2, null]) {
+      like(rowsOf({ account: A, network, public: entries })[0], { bridge: null, category: "received", counterparty: deposit.account, direction: "in", value: 1_500_000n }, String(network));
+    }
+  });
+
+  it("is a withdrawal for the account the bridge paid, its claim read, with a network or without one", () => {
+    const facts = { amount: "1008000000000", hash: `0x${"8e".repeat(32)}`, kind: "claim", recipient: A, withdrawal: "0001".padEnd(64, "0") };
+    const paid = entryOf({ bridge: facts, contractId: PORTAL, counterparty: PORTAL, direction: "in", fnName: "finalizeWithdrawalTransaction", kind: "transfer", payer: false, value: "1008000000000" });
+
+    for (const network of [2, null]) {
+      const [row] = rowsOf({ network, public: [paid] });
+
+      like(row, { category: "bridge", direction: "in", value: 1_008_000_000_000n }, String(network));
+      like(row.bridge, { amount: 1_008_000_000_000n, nonce: facts.withdrawal, step: "withdrawal" }, String(network));
+    }
   });
 
   it("is a withdrawal for the account it paid", () => {

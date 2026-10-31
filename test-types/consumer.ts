@@ -35,6 +35,7 @@ import {
   type KeptEntry,
   type ReadEntry,
   type RefusalStore,
+  type StoreCheck,
 } from "@dusk-network/app-core/history";
 import { networks, type Route } from "@dusk-network/networks";
 import {
@@ -127,13 +128,28 @@ const callFacts: CallFacts = {
   read: (call, account) => ({ registeredName: call.args ? account : null }),
   wants: (entry) => entry.fnName === "register" && entry.registeredName === undefined,
 };
+// A store that checks the state kept in the same transaction as its write.
+const check: StoreCheck = (kept) => void kept?.genesis;
+const checking: HistoryStore = {
+  ...store,
+  clear: (forget) => {
+    forget?.(state);
+    state = null;
+  },
+  patch: (details, keep) => {
+    keep?.(state);
+    store.patch(details);
+  },
+};
 const history = createHistory({ account: "x", archive, callFacts, network: networks.testnet, now: () => 1, store });
-const byChainId = createHistory({ account: "x", archive, network: 2, store });
-const synced: Promise<{ state: HistoryState; requests: number; added: number }> = history.sync({
+const byChainId = createHistory({ account: "x", archive, network: 2, store: checking });
+const synced: Promise<{ state: HistoryState; requests: number; added: number; detailsError?: Error }> = history.sync({
   maxDetailRequests: RUN_DETAIL_REQUESTS,
   maxRequests: RUN_REQUESTS,
   onStep: (step: HistoryState) => void step.covered,
 });
+const detailsFailed = synced.then(({ detailsError }) => detailsError?.message);
+const binary: boolean | undefined = parseHistoryEntry("x", {})?.memoBinary;
 const read = history.read({ before: 10, limit: PAGE, pools: ["ab"] }).then(({ complete, coveredTo, entries, state: kept }) => {
   const first: ReadEntry | undefined = entries[0];
   const value: bigint | undefined = first?.value;
@@ -174,7 +190,7 @@ const overtaken: Error = new StaleHistoryError();
 const numbers: number[] = [PAGE, FIRST_WINDOW, FINALITY_MARGIN, DETAILS_BATCH, RUN_REQUESTS, RUN_DETAIL_REQUESTS, NO_ARCHIVE_RETRY_MS];
 const contracts: string[] = [TRANSFER_CONTRACT, STAKE_CONTRACT];
 const kinds: EntryKind[] = [ENTRY_KIND.TRANSFER, ENTRY_KIND.CONTRACT_CALL, ENTRY_KIND.WITHDRAW_REWARD];
-void [answer, checked, byChainId, synced, read, needs, filled, kind, entry, details, nonce, range, gap, downTo, refusedAt, overtaken, numbers, contracts, kinds];
+void [answer, checked, check, byChainId, synced, detailsFailed, binary, read, needs, filled, kind, entry, details, nonce, range, gap, downTo, refusedAt, overtaken, numbers, contracts, kinds];
 // @ts-expect-error a direction is "in", "out" or "both"
 historyRange(archive, { account: "x", direction: "self" });
 // @ts-expect-error an archive needs its URL
@@ -188,6 +204,15 @@ const shieldedStore: ShieldedStore = {
   get: () => shieldedRecord,
   put: async (next) => {
     shieldedRecord = next;
+  },
+};
+// One that keeps the decoys in one transaction.
+const updatingStore: ShieldedStore = {
+  ...shieldedStore,
+  update: async (change) => {
+    shieldedRecord = change(shieldedRecord);
+
+    return shieldedRecord;
   },
 };
 let keptHeights: TreeHeights | null = null;
@@ -204,7 +229,7 @@ const shielded: Promise<ShieldedHistory> = shieldedHistory({
   isCurrent: () => true,
   notes: async () => [owned],
   random: () => 1,
-  store: shieldedStore,
+  store: updatingStore,
   synced: true,
   tree,
   treeHeights,
@@ -232,7 +257,7 @@ const blocks: Promise<Map<number, ShieldedBlock>> = fetchShieldedBlocks(archive,
 const position: { height: number; pos: bigint } = leafInfo(owned.leaf);
 const made: ShieldedEntry[] = shieldedEntries({ blocks: new Map(), notes: [{ ...owned, value: 1n }] });
 const layout: number[] = [LEAF_BYTES, NOTE_BYTES, LEAF_POS_OFFSET, LEAF_HEIGHT_OFFSET, HEIGHTS_PER_REQUEST];
-void [shown, tapped, tapHeights, heightsKept, heightsRead, picked, blocks, position, made, layout];
+void [shieldedStore, shown, tapped, tapHeights, heightsKept, heightsRead, picked, blocks, position, made, layout];
 // @ts-expect-error a shielded history needs to know whether the notes are all found
 shieldedHistory({ archive, notes: () => [], store: shieldedStore, tree, treeHeights, valueOf: () => 1n });
 // @ts-expect-error an entry's amounts are text, as kept

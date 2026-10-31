@@ -136,7 +136,7 @@ describe("parseHistoryEntry", () => {
     assert.equal(parseHistoryEntry(A, null), null);
   });
 
-  it("keeps a memo as its text, and one that isn't text as 0x hex", () => {
+  it("keeps a memo as its text, and one that isn't text as 0x hex, telling bytes from typed 0x text", () => {
     const hex = (/** @type {string | Uint8Array} */ v) => Buffer.from(v).toString("hex");
     /** @param {string} memo */
     const withMemo = (memo) => {
@@ -144,14 +144,20 @@ describe("parseHistoryEntry", () => {
 
       entry.events[0].data.memo = memo;
 
-      return parseHistoryEntry(A, entry)?.memo;
+      const parsed = parseHistoryEntry(A, entry);
+
+      return [parsed?.memo, parsed?.memoBinary];
     };
+    const address = "0xeE1b68ED496712cda857ada41d326d357049E51C";
 
     // As the wallets read it: the text as sent, spaces too.
-    assert.equal(withMemo(hex(" 0xeE1b68ED496712cda857ada41d326d357049E51C ")), " 0xeE1b68ED496712cda857ada41d326d357049E51C ");
-    assert.equal(withMemo(hex(Uint8Array.of(0xff, 0x00, 0x01))), "0xff0001");
-    assert.equal(withMemo(hex("a\u0007bell")), `0x${hex("a\u0007bell")}`);
-    assert.equal(withMemo("abc"), "");
+    assert.deepEqual(withMemo(hex(` ${address} `)), [` ${address} `, undefined]);
+    assert.deepEqual(withMemo(hex(Uint8Array.of(0xff, 0x00, 0x01))), ["0xff0001", true]);
+    assert.deepEqual(withMemo(hex("a\u0007bell")), [`0x${hex("a\u0007bell")}`, true]);
+    assert.deepEqual(withMemo("abc"), ["", undefined]);
+    // An EVM address typed as text, and the same 20 bytes raw.
+    assert.deepEqual(withMemo(hex(address)), [address, undefined]);
+    assert.deepEqual(withMemo(address.slice(2)), [address.toLowerCase(), true]);
   });
 
   it("names the kinds and contracts it reads", () => {
@@ -263,6 +269,7 @@ describe("historyEntry", () => {
 
   it("passes on what the store keeps beside the entry", () => {
     like(historyEntry({ ...row, registeredName: "shpongle.dusk", reservation: null }), { registeredName: "shpongle.dusk", reservation: null });
+    like(historyEntry({ ...row, memo: "0xff0001", memoBinary: true }), { memo: "0xff0001", memoBinary: true });
   });
 
   it("says a call is Sozu's on the network's own pool, or one its hub named", () => {

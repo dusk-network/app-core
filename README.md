@@ -53,13 +53,14 @@ const { entries, complete } = await history.read({ limit: 50 });
 ```
 
 - A run reads the newest heights first, in windows under the last finalized block: a day, then wider while they hold few entries, narrower where a page of 50 fills. It makes at most 8 history requests and 2 details requests (`maxRequests`, 2 at least, and `maxDetailRequests`), and keeps each step as it lands, each page of a block with more than a page too, so the next run carries on where it stopped. A later run asks only for what is above the heights kept.
+- A details request that fails ends the run's details, not the run: it reads on, and resolves with `detailsError`. The next run asks for the details again. A history request that fails rejects the run, as does the store.
 - `read({ limit, before })` gives the entries above the first gap, newest first: below it, newer ones may be missing. `complete` says every height from the head down is covered. When `limit` cuts through a block, the rest of that block comes too, so `before` the last entry's height reads on without skipping any.
 - A node whose GraphQL has no archive is asked nothing for an hour. Without `refusals`, the archive object alone remembers it.
-- A node on another chain than the history kept (a reset devnet) makes the run ask the store to `clear()` and start over, within its budget. A run another one overtook that way, or whose history was cleared under it, keeps nothing more and rejects with a `StaleHistoryError`.
+- A node on another chain than the history kept (a reset devnet) makes the run ask the store to `clear()` and start over, within its budget; where another run started it over on that chain already, it carries on from what that run kept. A run another one overtook that way, or whose history was cleared under it, keeps nothing more and rejects with a `StaleHistoryError`.
 - `network` is the node's network or its chain ID, for the DuskEVM bridge's calls, the bridge's routes and Sozu. A node of a network there's no file for passes none.
 - `fillDetails(entries)` reads the details of entries shown before a run gave them any.
 
-An entry is facts, not text: `direction` ("in", "out", "self"), `kind` (`transfer`, `shield`, `unshield`, `contract_call`, `stake`, `unstake`, `withdraw_reward`), `counterparty`, `value` and `fee` in lux (a gas refund paid to another account counts in the sender's `value` and in that account's, told apart as `refund`), `memo`, and with its details its time, outcome, gas and call. A call to DuskEVM's bridge or Portal has `bridge`, what it did (`decodeBridgeCall`): a deposit's amount and DuskEVM address, or a withdrawal's proof or claim, its hash, whom it pays and its nonce. A transfer with one of the bridge's accounts has its `route` (`routeForAccount`), and a stake or an unstake with Sozu `sozu: true` (`isSozuCall`, with the pools the hub named in `read({ pools })`).
+An entry is facts, not text: `direction` ("in", "out", "self"), `kind` (`transfer`, `shield`, `unshield`, `contract_call`, `stake`, `unstake`, `withdraw_reward`), `counterparty`, `value` and `fee` in lux (a gas refund paid to another account counts in the sender's `value` and in that account's, told apart as `refund`), `memo` (as text, or as 0x hex with `memoBinary: true` for bytes that aren't text), and with its details its time, outcome, gas and call. A call to DuskEVM's bridge or Portal has `bridge`, what it did (`decodeBridgeCall`): a deposit's amount and DuskEVM address, or a withdrawal's proof or claim, its hash, whom it pays and its nonce. A transfer with one of the bridge's accounts has its `route` (`routeForAccount`), and a stake or an unstake with Sozu `sozu: true` (`isSozuCall`, with the pools the hub named in `read({ pools })`).
 
 ### The store
 
@@ -69,9 +70,11 @@ The app keeps each account's history where it wants, under its own keys, and pas
 |---|---|
 | `getState()` | The sync state, or null before the first run. |
 | `commit(entries, update)` | Keeps one step in one transaction: `entries` by hash, an entry kept already keeping the fields these don't carry (its details), and the state `update(kept)` makes from the state kept now. When `update` throws, nothing of the step is kept. Gives the state kept. |
-| `patch(details)` | Adds details to kept entries, by hash (a `Map`); entries that aren't kept are left alone. |
+| `patch(details, check)` | Adds details to kept entries, by hash (a `Map`); entries that aren't kept are left alone. |
 | `list({ limit, before })` | Kept entries, newest first: at most `limit`, below the height `before` when given. |
-| `clear()` | Forgets what is kept of the old chain. |
+| `clear(check)` | Forgets what is kept of the old chain. |
+
+A store that can calls `check(kept)` first, with the state kept now, in the same transaction, and writes nothing when it throws. Then no details go on a history another run started over since, and a run that finds a reset doesn't forget what another one already read of the new chain. A store that doesn't call it works as before.
 
 The state is `{ account, covered, crowded, finalized, genesis, headAt, target, updatedAt, window }`; fields the store keeps beside these stay. An entry is kept with its amounts as decimal strings, so it stores as JSON. A store that rejects a write, as one bound to a wallet that has been reset since, makes the run reject, and nothing more is kept.
 
@@ -130,7 +133,7 @@ const { entries, pending } = await shieldedHistory({
 - `isCurrent` is asked between every two steps, before each request and write, and once more after the history is kept: once the wallet, the profile or the node changed, the read asks and keeps nothing more and rejects. A node that answered without the archive is asked nothing for an hour, its tree included.
 - The blocks come 15 heights a request, through the archive of `/history`.
 
-An entry is facts, not text: `kind` (the kinds of `/history`), `direction` for the profile's notes ("in", "out", or "self" when what they spent came back but the fee), `value` and `fee` in lux as decimal strings (a fee only where the profile's notes paid it), `success` and `error`, and its block's `timestamp`. It stores as JSON as it is.
+An entry is facts, not text: `kind` (the kinds of `/history`; a conversion's by where its value went, as its event says), `direction` for the profile's notes ("in", "out", or "self" when what they spent came back but the fee), `value` and `fee` in lux as decimal strings (a fee only where the profile's notes paid it), `success` and `error`, and its block's `timestamp`. It stores as JSON as it is.
 
 ### The stores and the tree
 
@@ -140,6 +143,7 @@ The app keeps the history where it wants, under its own keys, and reads its note
 |---|---|
 | `store.get()` | The profile's kept history, `{ fingerprint, entries, decoys }`, or null. Reject when it can't be read: the read then asks nothing rather than draw new decoys. |
 | `store.put(record)` | Keeps it in place of the one kept. A put that rejects, as one bound to a wallet that has been reset since, rejects the read. A store that can't keep a history for want of room may pass over it: the read gives it anyway, and the next one works it out again among the same decoys. |
+| `store.update(change)` | Optional: keeps `change(kept)` in place of the record kept now, in one transaction, and gives what it kept. The decoys are then drawn from those kept and kept at once, so two reads of a profile at once ask among the same ones. Without it, two such reads can each draw their own. It rejects and passes over a history as `put` does. |
 | `treeHeights.get()`, `treeHeights.put({ heights, notes })` | The note tree's distinct heights from its first `notes` leaves, shared by the network's profiles. A put that fails is passed over. |
 | `tree.size()` | How many leaves the node's note tree has (the transfer contract's `num_notes`). |
 | `tree.leaves(from)` | Its leaves from position `from` on (`leaves_from_pos`): a stream of their bytes, or an answer whose body is one. |
@@ -167,7 +171,7 @@ const rows = activityRows({
 - A send the chain's histories don't have yet is `pending`: for 15 minutes at most (`PENDING_MS`), unless the node has it in its queue, then `unknown`. One the node dropped is `unknown` and `dropped`. A send marked settled shows with the chain's row alone.
 - The shielded side of a shield or an unshield is the public row's, with the fee the shielded side paid.
 - `category` is the filter a row is under: "staking" (native and Sozu's), "bridge" (DuskEVM's bridge and the routes to other chains), "sent", "received", or "other" (a shield, an unshield, a transfer to the account itself).
-- A call to DuskEVM's bridge or Portal has `bridge`: what it did (`step`: "deposit", "withdrawal", "proof", "claim" or "call"), the amount its call names, a deposit's DuskEVM address and where it arrived there (`arrivals`), a withdrawal's hash, recipient and nonce, and whether a proof's withdrawal is claimed: by a claim of the same activity that went through, is on its way or is on chain, or as the app read it (`claims`).
+- A call to DuskEVM's bridge or Portal has `bridge`: what it did (`step`: "deposit", "withdrawal", "proof", "claim" or "call"), the amount its call names, a deposit's DuskEVM address and where it arrived there (`arrivals`), a withdrawal's hash, recipient and nonce, and whether a proof's withdrawal is claimed: by a claim of the same activity that went through, is on its way or is on chain, or as the app read it (`claims`). What came in from an account has none, whatever its transaction called: a gas refund from another account's call to the bridge is a transfer from that account.
 - A transfer with one of the bridge's accounts has its `route`, and a call of Sozu's pool `sozu`, "stake" or "unstake" (with the pools the hub named in `pools`).
 - `nameCall` is the app's hook for the name service, as the wallets read .dusk names with `@duskdomains/sdk/call-facts`: given a call's contract and function, and the entry or the send it is from, it says what the call does, and the name and the reservation it is for. A reservation has the name of a registration after it with the same reservation.
 

@@ -3,10 +3,12 @@ import { describe, it } from "node:test";
 
 import { NoArchiveError, STAKE_CONTRACT, TRANSFER_CONTRACT, createArchive } from "../src/history.js";
 import { HEIGHTS_PER_REQUEST, NOTE_BYTES, fetchShieldedBlocks, shieldedEntries } from "../src/shielded.js";
-import { DUSK, FIRST, L492, L493, L494, L495, NODE, NULLIFIERS, SHIELD, UNSHIELD, blocksNode, leafAt, recordedBlocks } from "./fixtures/shielded.js";
+import { DUSK, FIRST, L492, L493, L494, L495, NODE, NULLIFIERS, SHIELD, UNSHIELD, blocksNode, leafAt, phoenix, recordedBlocks } from "./fixtures/shielded.js";
 
 /** @param {Uint8Array} bytes */
 const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+/** @param {number} n */
+const hash = (n) => n.toString(16).padStart(2, "0").repeat(32);
 
 describe("the blocks at the notes' heights", () => {
   it(`are asked for ${HEIGHTS_PER_REQUEST} heights a request, each with its events, time and gas`, async () => {
@@ -101,14 +103,56 @@ describe("the shielded history's entries", () => {
     ]);
   });
 
-  it("read a transaction that only made the profile's notes as received", () => {
+  it("read a transaction that only made the profile's notes as received, an unshield as its conversion says", () => {
     // The same unshield, seen by a profile that only got its outputs.
-    const [, unshield] = shieldedEntries({ blocks: recordedBlocks(), notes: notes().filter((n) => !n.spent) });
+    const [shield, unshield] = shieldedEntries({ blocks: recordedBlocks(), notes: notes().filter((n) => !n.spent) });
 
     assert.deepEqual(
-      { direction: unshield.direction, fee: unshield.fee, hash: unshield.hash, value: unshield.value },
-      { direction: "in", fee: null, hash: UNSHIELD, value: "1012000000" }
+      { direction: unshield.direction, fee: unshield.fee, hash: unshield.hash, kind: unshield.kind, value: unshield.value },
+      { direction: "in", fee: null, hash: UNSHIELD, kind: "unshield", value: "1012000000" }
     );
+    assert.equal(shield.kind, "shield");
+  });
+
+  it("give each of two notes one block made for the same shielded address to its own transaction", () => {
+    // Made up from the shield at 3861643: two shields at 500 to its note's
+    // address, of 2 and 3 DUSK, the second listed first.
+    const H = 500;
+    const recorded = phoenix.blocks.e3861643.json.find((/** @type {any} */ e) => e.topic === "convert").data;
+    /** @param {bigint} value */
+    const u64 = (value) => {
+      const out = new Uint8Array(8);
+
+      new DataView(out.buffer).setBigUint64(0, value, true);
+
+      return out;
+    };
+    // A note made in the open holds its value after its position.
+    /** @param {number} pos @param {bigint} value */
+    const noteOf = (pos, value) => {
+      const leaf = leafAt(L495, pos, H);
+
+      leaf.set(u64(value), 656);
+
+      return { leaf, nullifier: pos.toString(16).padStart(64, "0"), spent: false, value };
+    };
+    /** @param {string} origin @param {bigint} value */
+    const shieldOf = (origin, value) => ({ data: recorded.slice(0, -16) + hex(u64(value)), origin, source: TRANSFER_CONTRACT, topic: "convert" });
+    /** @param {bigint} first @param {bigint} second */
+    const blocksOf = (first, second) =>
+      new Map([[H, { events: [shieldOf(hash(0xb2), second), shieldOf(hash(0xb1), first)], timestamp: 1_000, txs: new Map() }]]);
+    /** @param {any[]} entries */
+    const amounts = (entries) => entries.map((e) => [e.hash.slice(0, 2), e.kind, e.direction, e.value]);
+
+    assert.deepEqual(amounts(shieldedEntries({ blocks: blocksOf(2n * DUSK, 3n * DUSK), notes: [noteOf(600, 2n * DUSK), noteOf(601, 3n * DUSK)] })), [
+      ["b1", "shield", "in", String(2n * DUSK)],
+      ["b2", "shield", "in", String(3n * DUSK)],
+    ]);
+    // Of the same value, either note is either one's.
+    assert.deepEqual(amounts(shieldedEntries({ blocks: blocksOf(2n * DUSK, 2n * DUSK), notes: [noteOf(600, 2n * DUSK), noteOf(601, 2n * DUSK)] })), [
+      ["b1", "shield", "in", String(2n * DUSK)],
+      ["b2", "shield", "in", String(2n * DUSK)],
+    ]);
   });
 
   it("find nothing of the profile's in other heights' blocks, and leave reverted events out", () => {
