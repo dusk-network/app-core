@@ -2,6 +2,8 @@
 // answering the way they do, from lists of calls, blocks and logs; and the
 // Dusk archive's entries for the bridge's transfers.
 
+import { createHash } from "node:crypto";
+
 import { networks } from "@dusk-network/networks";
 import { duskEvmContracts, encodeDepositArgs } from "@dusk-network/networks/duskevm";
 
@@ -185,6 +187,71 @@ export function fakeChain({ head, logs = [], maxRange, stamps = false, timeAt = 
   };
 
   return chain;
+}
+
+/**
+ * A chain's `fetch` whose eth_getLogs answers come back without their logs:
+ * `rate` of them at random, the same ones for the same `seed`, and the next
+ * `times` answers for ranges holding a block `held` names (each answer left
+ * without its logs counts for every such block in its range). A refusal
+ * stays a refusal. `emptied` counts the answers left without their logs.
+ *
+ * @param {(input: string, init: any) => Promise<Response>} fetch
+ * @param {{ rate?: number, seed?: number }} [options]
+ */
+export function emptying(fetch, { rate = 1 / 3, seed = 1 } = {}) {
+  let drawn = 0;
+  // Each draw from a hash of the seed and its count: nearby seeds' draws are
+  // as unrelated as any others'.
+  const random = () => createHash("sha256").update(`${seed}:${(drawn += 1)}`).digest().readUInt32BE(0) / 4_294_967_296;
+  const rpc = {
+    emptied: 0,
+    /** @type {{ block: bigint, times: number }[]} */
+    held: [],
+    /** @param {string} input @param {any} init */
+    fetch: async (input, init) => {
+      const { id, method, params } = JSON.parse(init.body);
+      const answer = await fetch(input, init);
+
+      if (method !== "eth_getLogs") return answer;
+
+      const [{ fromBlock, toBlock }] = params;
+      const held = rpc.held.filter(({ block, times }) => times > 0 && block >= BigInt(fromBlock) && block <= BigInt(toBlock));
+      const empty = random() < rate;
+      const body = await answer.json();
+
+      if (body.error || (!held.length && !empty)) return json(body);
+      for (const each of held) each.times -= 1;
+      rpc.emptied += 1;
+
+      return json({ id, jsonrpc: "2.0", result: [] });
+    },
+  };
+
+  return rpc;
+}
+
+/**
+ * Asks as an app does while it waits: again with the scans the last results
+ * gave, until one arrives with `hash`, or `calls` calls. The last results.
+ *
+ * @param {(scans: Map<string, any>) => Promise<{ arrivals: Map<string, any> }>} ask
+ * @param {string} hash
+ * @param {number} [calls]
+ */
+export async function untilArrived(ask, hash, calls = 10) {
+  /** @type {Map<string, any>} */
+  const scans = new Map();
+  /** @type {{ arrivals: Map<string, any> }} */
+  let result = { arrivals: new Map() };
+
+  for (let call = 0; call < calls && result.arrivals.get(hash)?.state !== "arrived"; call += 1) {
+    result = await ask(scans);
+
+    for (const [each, arrival] of result.arrivals) if (arrival.scan) scans.set(each, arrival.scan);
+  }
+
+  return result;
 }
 
 /**

@@ -7,7 +7,7 @@ import { evmAddressOf } from "@dusk-network/networks/duskevm";
 import { ETH_BRIDGE_FINALIZED_TOPIC, arrivalsOf, depositArrivals, depositOf } from "../src/bridge.js";
 import { activityRows } from "../src/activity.js";
 import { fetchTxDetails, historyEntry, parseHistoryEntry } from "../src/history.js";
-import { BRIDGE, EXPLORER_API, L2_BRIDGE, bridgeFinalized, call, depositEntry, details, fakeChain, fakeExplorer, hex, moonlight, topicOf } from "./fixtures/bridge.js";
+import { BRIDGE, EXPLORER_API, L2_BRIDGE, bridgeFinalized, call, depositEntry, details, fakeChain, fakeExplorer, hex, moonlight, topicOf, untilArrived } from "./fixtures/bridge.js";
 import { fakeArchive, like, readFixture } from "./fixtures/helpers.js";
 
 const recorded = readFixture("duskevm-deposit-history.json");
@@ -438,14 +438,22 @@ describe("a deposit's arrival, on DuskEVM's RPC", () => {
 
   it("gives two equal deposits one credit between them", async () => {
     const chain = fakeChain({ head: 2_000, logs: [credit(34, 1_900)] });
-    const both = await depositArrivals({
-      archive: listing(sent("ef", second(200)), sent("ab", second(100))),
-      deposits: [sent("ef", second(200)), sent("ab", second(100))],
-      fetch: chain.fetch,
-      network: 2,
-      now: second(2_000),
-      via: "rpc",
-    });
+    /** @param {Map<string, any>} [scans] */
+    const ask = (scans = new Map()) =>
+      depositArrivals({
+        archive: listing(sent("ef", second(200)), sent("ab", second(100))),
+        deposits: [sent("ef", second(200)), sent("ab", second(100))].map((d) => ({ ...d, scan: scans.get(d.hash) })),
+        fetch: chain.fetch,
+        network: 2,
+        now: second(2_000),
+        via: "rpc",
+      });
+
+    // The credit could be the later one's while the earlier one's isn't read
+    // yet: it's the earlier one's once its blocks are read again.
+    like((await ask()).arrivals.get(dusk("ab")), { state: "waiting" });
+
+    const both = await untilArrived(ask, dusk("ab"));
 
     like(both.arrivals.get(dusk("ab")), { hash: l2(34), state: "arrived" });
     like(both.arrivals.get(dusk("ef")), { state: "waiting" });

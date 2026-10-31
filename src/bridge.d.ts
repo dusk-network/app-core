@@ -113,7 +113,12 @@ export type HistoryScan = {
  * transfer it began from, the logs it searched for (`search`), and the
  * credits it found before (`seen`), which the next one counts again. A
  * search for other logs, as for another sender or amount, starts afresh.
- * With the archive, how far the transfer's own history is read
+ * The block it began at (`start`), and its passes over the blocks it read
+ * before (`recheck`): where the one under way is (`from`, null between
+ * two), when the next one begins (`at`), how many are done, as each credit
+ * seen has the passes done before it was found (`pass`), and when the
+ * search first reached the head (`since`), in milliseconds. With the
+ * archive, how far the transfer's own history is read
  * (`history`): a history longer than one call reads is read on from there,
  * before any search. Kept by the app with the credits it was made with,
  * and passed back as it is.
@@ -122,7 +127,9 @@ export type Scan = {
   from?: string;
   basis?: number;
   search?: string;
-  seen?: ReadonlyArray<{ hash: string; block: string; at: number; sender: string | null }>;
+  seen?: ReadonlyArray<{ hash: string; block: string; at: number; sender: string | null; pass?: number }>;
+  start?: string;
+  recheck?: { from: string | null; at: number; passes: number; since: number };
   history?: HistoryScan;
 };
 

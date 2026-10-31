@@ -47,9 +47,10 @@ import { DETAILS_BATCH, TRANSFER_CONTRACT, fetchTxDetails, historyRange } from "
 /**
  * A credit on the other chain: its transaction, its block and time, its
  * amount in wei, whether it went through, and the address it came from as
- * its log names it (lower case; null where it isn't named).
+ * its log names it (lower case; null where it isn't named). Found by an RPC
+ * search, the passes over its blocks again done before it was (`pass`).
  *
- * @typedef {{ hash: string, block: bigint | null, at: number, wei: bigint, success: boolean, from: string | null }} Credit
+ * @typedef {{ hash: string, block: bigint | null, at: number, wei: bigint, success: boolean, from: string | null, pass?: number }} Credit
  */
 
 /**
@@ -83,6 +84,17 @@ const PACE_MARGIN = 1.2;
 const START_MARGIN = 50n;
 const START_CHECKS = 4;
 const MIN_WINDOW = 50n;
+// How far back from the head a search's last window reaches: those blocks
+// are read again on each call.
+const OVERLAP = 1_000n;
+// How long after a search first reaches the head it reads its blocks again
+// from its first one; each pass after waits as long again as it has been
+// since then, so the waits about double each time.
+const RECHECK_MS = 60_000;
+// How many passes over the blocks before a credit, since it was found, a
+// transfer waits for before it takes the credit where a later equal one,
+// still without its own, could have had it instead.
+const CONFIRM_PASSES = 4;
 // What an RPC says when it won't search that many blocks at once.
 const RANGE_REFUSED = /limit|range|too many|exceed/i;
 const DUSK_HASH = /^[0-9a-f]{64}$/;
@@ -253,11 +265,19 @@ function scanOf(value) {
       const block = quantityOf(credit?.block);
       const at = msOf(credit?.at);
       const sender = credit?.sender === null ? null : addressOf(credit?.sender);
+      // The passes done before it was found: none where it isn't said.
+      const pass = Number.isSafeInteger(credit?.pass) && credit.pass >= 0 ? credit.pass : 0;
 
-      return hash && block !== null && at !== null && sender !== "" ? [{ at, block: block.toString(), hash, sender }] : [];
+      return hash && block !== null && at !== null && sender !== "" ? [{ at, block: block.toString(), hash, pass, sender }] : [];
     });
+    // Where it began, and its passes over the blocks again: without them,
+    // as a search kept by an earlier version.
+    const start = quantityOf(scan.start);
+    const recheck = start === null ? null : recheckOf(scan.recheck);
 
     Object.assign(out, { basis: scan.basis, from: from.toString(), search: scan.search, seen });
+    if (start !== null) out.start = start.toString();
+    if (recheck) out.recheck = recheckIn(recheck);
   } else if (!history) {
     return null;
   }
@@ -451,6 +471,36 @@ function clustersOf(queue, windowMs) {
 const allOpen = (queue, windowMs, now) => clustersOf(queue, windowMs).every((cluster) => now < cluster[cluster.length - 1].at + windowMs);
 
 /**
+ * How a group's credits are matched: see `settle`.
+ *
+ * @typedef {{ guarded: boolean, now: number, slackMs: number, used: ReadonlySet<string>, windowMs: number, rivals?: ReadonlySet<string> }} Rules
+ */
+
+/**
+ * Whether a credit could pay a transfer, whether or not another one took it:
+ * it went through, isn't one the app gave another of its transfers when
+ * this one is the app's, comes from none of `rivals`, and is in the
+ * transfer's time and at or after the block it can't be before.
+ *
+ * @param {Queued} item
+ * @param {Credit} credit
+ * @param {Rules} rules
+ */
+function pays(item, credit, { guarded, rivals = new Set(), slackMs, used, windowMs }) {
+  const lo = item.at - (guarded ? windowMs : slackMs);
+  const hi = guarded ? item.at + windowMs : Infinity;
+
+  return (
+    credit.success &&
+    (!item.given || !used.has(credit.hash)) &&
+    (credit.from === null || !rivals.has(credit.from)) &&
+    credit.at >= lo &&
+    credit.at <= hi &&
+    (item.notBefore === null || credit.block === null || credit.block >= item.notBefore)
+  );
+}
+
+/**
  * Each transfer of a queue of equal ones, oldest first, takes the first
  * credit that went through after it that no earlier one took: from
  * `slackMs` before it on, and at or after the block it can't be before.
@@ -470,10 +520,11 @@ const allOpen = (queue, windowMs, now) => clustersOf(queue, windowMs).every((clu
  *
  * @param {ReadonlyArray<Queued>} queue oldest first
  * @param {ReadonlyArray<Credit>} credits
- * @param {{ guarded: boolean, now: number, slackMs: number, used: ReadonlySet<string>, windowMs: number, rivals?: ReadonlySet<string> }} rules
+ * @param {Rules} rules
  * @returns {{ assigned: Map<string, Credit>, verdicts: Map<string, Verdict> }}
  */
-function settle(queue, credits, { guarded, now, rivals = new Set(), slackMs, used, windowMs }) {
+function settle(queue, credits, rules) {
+  const { guarded, now, used, windowMs } = rules;
   const sorted = [...credits].sort(byTime);
   /** @type {Map<string, Credit>} */
   const assigned = new Map();
@@ -482,18 +533,7 @@ function settle(queue, credits, { guarded, now, rivals = new Set(), slackMs, use
   const verdicts = new Map();
 
   for (const item of queue) {
-    const lo = item.at - (guarded ? windowMs : slackMs);
-    const hi = guarded ? item.at + windowMs : Infinity;
-    const credit = sorted.find(
-      (c) =>
-        c.success &&
-        !taken.has(c.hash) &&
-        (!item.given || !used.has(c.hash)) &&
-        (c.from === null || !rivals.has(c.from)) &&
-        c.at >= lo &&
-        c.at <= hi &&
-        (item.notBefore === null || c.block === null || c.block >= item.notBefore)
-    );
+    const credit = sorted.find((c) => !taken.has(c.hash) && pays(item, c, rules));
 
     if (credit) {
       assigned.set(item.hash, credit);
@@ -734,30 +774,39 @@ async function startBefore(read, url, atMs, cache) {
 
 /**
  * The credits asked for from block `start`, a window of blocks at a time, at
- * most `maxWindows`, until the head, `enough`, or a window ending after
+ * most `maxWindows`, until `head`, `enough`, or a window ending after
  * `until` (`covered`): each checked against what was asked, with its block's
  * time. A window the RPC won't search at once is asked again a quarter as
- * wide.
+ * wide (`size`, the width it ends with). The window ending at `head` reaches
+ * back up to `OVERLAP` blocks from it, though not under `floor`: those
+ * blocks are read again (from `low`). `asked`: the windows asked.
  *
  * @param {Reader} read
- * @param {{ url: string, address: string, topics: ReadonlyArray<string | null>, wei: bigint, amountOf: (data: string) => bigint | null, start: bigint, head: bigint, maxWindows: number, blockTimes: BlockTimes | undefined, enough: (credits: Credit[]) => boolean, until: number | null, known: Credit[] }} search
- * @returns {Promise<{ complete: boolean, covered: boolean, credits: Credit[], next: bigint }>}
+ * @param {{ url: string, address: string, topics: ReadonlyArray<string | null>, wei: bigint, amountOf: (data: string) => bigint | null, start: bigint, floor: bigint, head: bigint, size?: bigint, maxWindows: number, blockTimes: BlockTimes | undefined, enough: (credits: Credit[]) => boolean, until: number | null, known: Credit[] }} search
+ * @returns {Promise<{ asked: number, complete: boolean, covered: boolean, credits: Credit[], low: bigint | null, next: bigint, size: bigint }>}
  */
-async function searchLogs(read, { address, amountOf, blockTimes, enough, head, known, maxWindows, start, topics, until, url, wei }) {
+async function searchLogs(read, { address, amountOf, blockTimes, enough, floor, head, known, maxWindows, size: width = BigInt(LOG_WINDOW), start, topics, until, url, wei }) {
   // What an earlier search found before `start`.
   /** @type {Credit[]} */
   const credits = [...known];
   let from = start;
-  let size = BigInt(LOG_WINDOW);
+  let size = width;
   let covered = false;
+  let asked = 0;
+  /** @type {bigint | null} */
+  let low = null;
 
-  for (let round = 0; round < maxWindows && from <= head; round += 1) {
+  while (asked < maxWindows && from <= head) {
     const to = from + size - 1n < head ? from + size - 1n : head;
+    const back = head + 1n - (size < OVERLAP ? size : OVERLAP);
+    const lo = to === head && back < from ? (back > floor ? back : floor) : from;
     /** @type {any} */
     let logs;
 
+    asked += 1;
+
     try {
-      logs = await read.rpc(url, "eth_getLogs", [{ address, fromBlock: hex(from), toBlock: hex(to), topics }]);
+      logs = await read.rpc(url, "eth_getLogs", [{ address, fromBlock: hex(lo), toBlock: hex(to), topics }]);
     } catch (error) {
       if (size > MIN_WINDOW && RANGE_REFUSED.test(messageOf(error))) {
         size = size / 4n > MIN_WINDOW ? size / 4n : MIN_WINDOW;
@@ -767,8 +816,10 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, head, k
       throw error;
     }
 
+    if (to === head) low = lo;
+
     for (const log of Array.isArray(logs) ? logs : []) {
-      const found = creditLog(log, { address, amountOf, from, to, topics, wei });
+      const found = creditLog(log, { address, amountOf, from: lo, to, topics, wei });
 
       if (!found || credits.some((credit) => credit.hash === found.hash)) continue;
       if (found.at !== null) blockTimes?.set(Number(found.block), found.at);
@@ -785,7 +836,37 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, head, k
     }
   }
 
-  return { complete: from > head, covered, credits, next: from };
+  return { asked, complete: from > head, covered, credits, low, next: from, size };
+}
+
+/**
+ * A search's passes over its blocks again, as a result gave them: where the
+ * one under way is (null between two), when the next begins, how many are
+ * done, and when the search first reached the head; null for anything else.
+ *
+ * @param {unknown} value
+ * @returns {{ at: number, from: bigint | null, passes: number, since: number } | null}
+ */
+function recheckOf(value) {
+  const kept = /** @type {any} */ (value);
+  const from = kept?.from === null ? null : quantityOf(kept?.from);
+  /** @param {unknown} ms */
+  const time = (ms) => typeof ms === "number" && Number.isFinite(ms);
+
+  if (!kept || !time(kept.at) || !time(kept.since) || !Number.isSafeInteger(kept.passes) || kept.passes < 0) return null;
+  if (kept.from !== null && from === null) return null;
+
+  return { at: kept.at, from, passes: kept.passes, since: kept.since };
+}
+
+/**
+ * A search's passes over its blocks again, as its scan keeps them.
+ *
+ * @param {NonNullable<ReturnType<typeof recheckOf>>} recheck
+ * @returns {NonNullable<Scan["recheck"]>}
+ */
+function recheckIn({ at, from, passes, since }) {
+  return { at, from: from === null ? null : from.toString(), passes, since };
 }
 
 /**
@@ -794,6 +875,14 @@ async function searchLogs(read, { address, amountOf, blockTimes, enough, head, k
  * later than the group's first transfer, else from the block the first was
  * sent at (as the app saw the chain's head then), else from about when it
  * was sent.
+ *
+ * Each block is read more than once: on each call, those up to `OVERLAP`
+ * under the head, and once the search has reached the head with a transfer
+ * not arrived, all of them again from where the search began, a pass at a
+ * time: the first a minute later, each after as long again as it has been
+ * since then, and one after the other, as far as its credit, while an
+ * arrival is held back. A pass under way takes one of a call's windows,
+ * and what the search ahead leaves.
  *
  * @param {Reader} read
  * @param {{ given: Queued[], queue: Queued[], guarded: boolean, unsure: ReadonlySet<string>, rivals?: ReadonlySet<string>, filter: { address: string, topics: ReadonlyArray<string | null>, wei: bigint, amountOf: (data: string) => bigint | null } }} group
@@ -821,9 +910,11 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
   // The logs searched for: a search for others, as for another sender or
   // amount, isn't carried on.
   const search = [filter.address, ...filter.topics.map((topic) => topic ?? "*"), filter.wei.toString()].join(":");
-  /** @type {{ basis: number, from: string, seen?: Scan["seen"] }[]} */
+  /** @type {{ basis: number, from: string, seen?: Scan["seen"], start?: string, recheck?: Scan["recheck"] }[]} */
   const resumed = live.flatMap(({ scan }) =>
-    scan?.from !== undefined && scan.search === search && scan.basis !== undefined && scan.basis <= first.at ? [{ basis: scan.basis, from: scan.from, seen: scan.seen }] : []
+    scan?.from !== undefined && scan.search === search && scan.basis !== undefined && scan.basis <= first.at
+      ? [{ basis: scan.basis, from: scan.from, recheck: scan.recheck, seen: scan.seen, start: scan.start }]
+      : []
   );
   /** @type {Map<string, Credit>} */
   const carried = new Map();
@@ -832,7 +923,7 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
   // counts again, as the transfer it paid may be among the queue's.
   for (const scan of resumed) {
     for (const credit of scan.seen ?? []) {
-      if (credit.at >= reach) carried.set(credit.hash, { at: credit.at, block: BigInt(credit.block), from: credit.sender, hash: credit.hash, success: true, wei: filter.wei });
+      if (credit.at >= reach) carried.set(credit.hash, { at: credit.at, block: BigInt(credit.block), from: credit.sender, hash: credit.hash, pass: credit.pass ?? 0, success: true, wei: filter.wei });
     }
   }
 
@@ -840,10 +931,29 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
   let head;
   /** @type {bigint} */
   let start;
+  // The block the search began at, and its passes over the blocks before.
+  /** @type {bigint} */
+  let floor;
+  /** @type {ReturnType<typeof recheckOf>} */
+  let recheck = null;
 
   if (resumed.length && resumed.every((scan) => scan.basis === first.at)) {
-    start = minOf(resumed.map((scan) => BigInt(scan.from)));
-    head = await headOf(read, url);
+    const kept = resumed.reduce((a, b) => (BigInt(b.from) < BigInt(a.from) ? b : a));
+
+    start = BigInt(kept.from);
+    recheck = recheckOf(kept.recheck);
+
+    if (resumed.every((scan) => scan.start !== undefined)) {
+      floor = minOf(resumed.map((scan) => BigInt(/** @type {string} */ (scan.start))));
+      head = await headOf(read, url);
+    } else {
+      // Kept without where it began: from where a search from the first
+      // begins.
+      const fresh = first.notBefore !== null ? { head: await headOf(read, url), start: first.notBefore } : await startBefore(read, url, reach, blockTimes);
+
+      floor = fresh.start;
+      head = fresh.head;
+    }
   } else if (resumed.length) {
     // Begun from a transfer before the first now, as one that since
     // arrived: none of the queue's credits is before where a search from
@@ -853,38 +963,126 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
 
     head = fresh.head;
     start = from > fresh.start ? from : fresh.start;
+    floor = fresh.start;
   } else if (first.notBefore !== null) {
     start = first.notBefore;
+    floor = start;
     head = await headOf(read, url);
   } else {
     ({ head, start } = await startBefore(read, url, reach, blockTimes));
+    floor = start;
   }
 
+  if (floor > start) floor = start;
+
+  /**
+   * The given transfers' credits with `found`: those that arrived, by their
+   * credits, and those held back (`held`), with the last of their credits'
+   * blocks (`top`). One a later transfer of the queue, still without a
+   * credit, could have had the credit of instead is held back until the
+   * blocks before it are read again `CONFIRM_PASSES` times since it was
+   * found: its own may yet be found there.
+   *
+   * @param {Credit[]} found
+   * @param {boolean} seen
+   */
+  const settled = (found, seen) => {
+    const { assigned, verdicts } = settle(queue, found, rules);
+    const passes = recheck?.passes ?? 0;
+    const mine = new Set(live.map((item) => item.hash));
+    /** @type {Set<string>} */
+    const arrived = new Set();
+    /** @type {Set<string>} */
+    const held = new Set();
+    /** @type {bigint | null} */
+    let top = null;
+
+    queue.forEach((item, i) => {
+      const credit = assigned.get(item.hash);
+
+      if (!credit || !mine.has(item.hash) || verdicts.get(item.hash) !== "arrived" || !(seen || !guarded)) return;
+
+      // A later one without a credit could have had this one instead.
+      const doubt = !guarded && passes - (credit.pass ?? 0) < CONFIRM_PASSES && queue.slice(i + 1).some((later) => !assigned.has(later.hash) && pays(later, credit, rules));
+
+      if (!doubt) {
+        arrived.add(credit.hash);
+      } else {
+        held.add(item.hash);
+        if (credit.block !== null && (top === null || credit.block > top)) top = credit.block;
+      }
+    });
+
+    return { arrived, assigned, held, top, verdicts };
+  };
+  /**
+   * The credits found in this call, with the passes done before the next
+   * one to begin.
+   *
+   * @param {Credit[]} found
+   * @returns {Credit[]}
+   */
+  const mark = (found) => {
+    const pass = recheck === null ? 0 : recheck.passes + (recheck.from !== null ? 1 : 0);
+
+    return found.map((credit) => (credit.pass === undefined ? { ...credit, pass } : credit));
+  };
   // Where the credits can't be told apart, only those in the transfers'
   // windows count: once they're all over, read no further than the last.
   const last = queue[queue.length - 1].at + windowMs;
-  const { complete, covered, credits, next } = await searchLogs(read, {
+  const until = guarded && now >= last ? last : null;
+  const due = recheck !== null && (recheck.from !== null || now >= recheck.at);
+  const ahead = await searchLogs(read, {
     ...filter,
     blockTimes,
     // Once every transfer of the queue has its credit: read no further.
     enough: (found) => !guarded && settle(queue, found, rules).assigned.size === queue.length,
+    floor,
     head,
     known: [...carried.values()],
-    maxWindows,
+    maxWindows: due ? maxWindows - 1 : maxWindows,
     start,
-    until: guarded && now >= last ? last : null,
+    until,
     url,
   });
+  const { complete, covered, next } = ahead;
   const seen = complete || covered;
-  const { assigned, verdicts } = settle(queue, credits, rules);
-  /** @type {Set<string>} */
-  const arrived = new Set();
+  let credits = mark(ahead.credits);
+  const before = settled(credits, seen);
 
-  for (const item of live) {
-    const credit = assigned.get(item.hash);
+  if ((seen || before.held.size) && recheck === null) recheck = { at: before.held.size ? now : now + RECHECK_MS, from: null, passes: 0, since: now };
 
-    if (credit && verdicts.get(item.hash) === "arrived" && (seen || !guarded)) arrived.add(credit.hash);
+  // A transfer not arrived yet: the blocks read before this call, again, as
+  // far as the search ahead reads; while an arrival is held back, as far as
+  // its credit.
+  if (recheck !== null && (due || before.held.size) && before.arrived.size < live.length) {
+    const from = recheck.from !== null && recheck.from > floor ? recheck.from : floor;
+    const below = ahead.low !== null && ahead.low < start ? ahead.low : start;
+    const pass = await searchLogs(read, {
+      ...filter,
+      blockTimes,
+      // Read through: a credit further on, still before those found ahead,
+      // could be a transfer's first.
+      enough: () => false,
+      floor: from,
+      head: before.top !== null && before.top < below ? before.top : below - 1n,
+      known: credits,
+      maxWindows: maxWindows - ahead.asked,
+      size: ahead.size,
+      start: from,
+      until,
+      url,
+    });
+    const { since } = recheck;
+
+    recheck = pass.complete || pass.covered ? { at: now + Math.max(RECHECK_MS, now - since), from: null, passes: recheck.passes + 1, since } : { ...recheck, from: pass.next };
+    credits = mark(pass.credits);
   }
+
+  const { arrived, assigned, held, verdicts } = settled(credits, seen);
+
+  // Passes go on one after the other while an arrival is held back.
+  if (held.size && recheck !== null) recheck = { ...recheck, at: Math.min(recheck.at, now) };
 
   // The next search carries on from where this one stopped, with the
   // credits found so far: a transfer that arrived may come back from the
@@ -893,15 +1091,19 @@ async function followLogs(read, { filter, given, guarded, queue, rivals, unsure 
   const scan = {
     basis: first.at,
     from: next.toString(),
+    ...(recheck ? { recheck: recheckIn(recheck) } : {}),
     search,
-    seen: credits.flatMap((credit) => (credit.at >= reach && credit.block !== null ? [{ at: credit.at, block: credit.block.toString(), hash: credit.hash, sender: credit.from }] : [])),
+    seen: credits.flatMap((credit) => (credit.at >= reach && credit.block !== null ? [{ at: credit.at, block: credit.block.toString(), hash: credit.hash, pass: credit.pass ?? 0, sender: credit.from }] : [])),
+    start: floor.toString(),
   };
 
   for (const item of live) {
     const credit = assigned.get(item.hash);
     const verdict = verdicts.get(item.hash);
 
-    if (credit && arrived.has(credit.hash)) {
+    if (held.has(item.hash)) {
+      out.set(item.hash, { scan, state: "waiting" });
+    } else if (credit && arrived.has(credit.hash)) {
       used.add(credit.hash);
       out.set(item.hash, {
         amount: credit.wei / WEI_PER_LUX,
@@ -1243,7 +1445,17 @@ async function depositPeers(archive, net, found, { amount, bounds, calls, suppli
  * @param {Scan | null | undefined} scan
  * @returns {Scan}
  */
-const searchOf = (scan) => (scan?.from !== undefined ? { basis: scan.basis, from: scan.from, search: scan.search, seen: scan.seen } : {});
+function searchOf(scan) {
+  if (scan?.from === undefined) return {};
+
+  /** @type {Scan} */
+  const out = { basis: scan.basis, from: scan.from, search: scan.search, seen: scan.seen };
+
+  if (scan.start !== undefined) out.start = scan.start;
+  if (scan.recheck !== undefined) out.recheck = scan.recheck;
+
+  return out;
+}
 
 /**
  * The transfers whose history isn't all read yet wait, with where their
