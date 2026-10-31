@@ -90,7 +90,11 @@ export declare const L2_WINDOW: 100000;
 /** Log searches one run of `syncWithdrawals` makes, the head's included, by default. */
 export declare const L2_RUN_REQUESTS: 8;
 
-/** DuskEVM blocks under the head counted as final where the RPC has no "finalized" block: about an hour. */
+/**
+ * DuskEVM blocks under the head counted as final where the RPC has no
+ * "finalized" block: about an hour. As many under that head again stay
+ * open, and the next run reads them again.
+ */
 export declare const UNFINALIZED_MARGIN: 1800;
 
 /** Pages of an address's transactions `explorerWithdrawals` reads at most, by default. */
@@ -461,7 +465,10 @@ export type FoundWithdrawal = {
 
 /** Where `syncWithdrawals` got to, kept by the app and passed back as it is. */
 export type WithdrawalScan = {
-  /** The final blocks covered, as ranges, highest first. */
+  /**
+   * The final blocks covered, as ranges, highest first: where the RPC has no
+   * finalized block, up to `UNFINALIZED_MARGIN` blocks under `target`.
+   */
   covered: number[][];
   /** What was found, by hash. */
   entries: Record<string, FoundWithdrawal>;
@@ -489,7 +496,10 @@ export type WithdrawalScan = {
  * take though in half its requests at most (while older blocks are still to
  * be read, only once the final head has moved), and carries on below; under
  * a final head lower than the last run's, what was covered and found above
- * it is dropped, and read again. Once all the final blocks are
+ * it is dropped, and read again. Where the RPC has no finalized block, the
+ * final head is the latest less `UNFINALIZED_MARGIN`, and as many blocks
+ * under it stay open: the next run reads them again, so a deeper reorg
+ * there is found. Once all the final blocks are
  * covered, they're read again from the newest down, a pass at a time with
  * the requests a run has left: the first an hour later, each after as long
  * again as it has been since. A withdrawal is found once: one read again

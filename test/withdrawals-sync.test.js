@@ -120,6 +120,40 @@ describe("a sync of an address's withdrawals", () => {
     assert.equal(sync.requests, 3);
   });
 
+  it("reads the last 1,800 blocks under a head the RPC didn't call final again on the next run, so a deeper reorg there is found (#32)", async () => {
+    // No finalized block: the latest less 1,800 is taken as final, 300,000 here. Synced up to 299,550 before.
+    /** @type {ReturnType<typeof withdrawalLog>[]} */
+    const logs = [];
+    const duskEvm = duskEvmOf(logs, { final: 300_000, finalized: false });
+    const clock = 1_793_000_000_000;
+    const first = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, now: () => clock, state: { covered: [[0, 299_550]], entries: {}, target: 299_550, window: L2_WINDOW } });
+
+    // A reorg deeper than the margin puts a withdrawal in a block the run read under that head, without it.
+    logs.push(withdrawalLog(1, 299_000));
+    // The next run is 150,000 blocks on: the newest blocks it reads don't reach back there.
+    duskEvm.final = 450_000;
+
+    const next = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, now: () => clock + 15 * MINUTE, state: first.state });
+
+    assert.deepEqual(
+      next.found.map((entry) => [entry.hash, entry.blockNumber]),
+      [[h(1), 299_000]]
+    );
+    // Each run keeps its last 1,800 blocks open. The second's requests: the head's two, the newest blocks, and those with the new ones under them.
+    assert.equal(first.state.target, 300_000);
+    assert.deepEqual(first.state.covered, [[0, 298_200]]);
+    assert.equal(next.requests, 4);
+    assert.deepEqual(next.state.covered, [[0, 448_200]]);
+
+    // Found once: the run after reads those blocks again, and gives it no more.
+    duskEvm.final += 450;
+
+    const after = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, now: () => clock + 30 * MINUTE, state: next.state });
+
+    assert.deepEqual(after.found, []);
+    assert.ok(after.state.entries[h(1)]);
+  });
+
   it("finds a withdrawal an answer left out, reading the blocks again an hour after it covered them all (#40)", async () => {
     // Its block's first answer comes back without it.
     const duskEvm = duskEvmOf([withdrawalLog(1, 150_000)], { final: 300_000, hold: new Map([[150_000, 1]]) });
