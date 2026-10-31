@@ -8,6 +8,7 @@
  */
 
 import { networkFor, routeForAccount } from "@dusk-network/networks";
+import { isAccount } from "@dusk-network/networks/account";
 import { BRIDGE_FUNCTIONS, isBridgeContract } from "@dusk-network/networks/duskevm";
 import { SOZU_FN, isSozuCall } from "@dusk-network/networks/sozu";
 
@@ -570,12 +571,12 @@ export function activityRows({
             : null;
     const sozuCall = Boolean(c?.sozu) || Boolean(net && isSozuCall(net, { contractId, fnName }, { pools: poolList }));
     const call = c?.bridge ?? s?.bridge ?? null;
-    // What came in is the bridge's only when the bridge paid it: a gas
-    // refund from another account's call to it is a transfer from that account.
     const touchesBridge =
-      direction === "in"
-        ? Boolean(net && isBridgeContract(net, counterparty))
-        : Boolean(call) || Boolean(net && [contractId, counterparty].some((id) => isBridgeContract(/** @type {Network} */ (net), id)));
+      (Boolean(call) || Boolean(net && [contractId, counterparty].some((id) => isBridgeContract(/** @type {Network} */ (net), id)))) &&
+      // What came in from an account isn't the bridge's, whatever its
+      // transaction called: a gas refund from another account's call to the
+      // bridge is a transfer from that account.
+      !(direction === "in" && isAccount(counterparty));
     const bridge = touchesBridge ? bridgeOf({ call, direction, fnName, value }) : null;
 
     /** @type {ActivityRow["nameCall"]} */

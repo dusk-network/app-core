@@ -5,7 +5,7 @@ import { networks, routes } from "@dusk-network/networks";
 
 import { PENDING_MS, activityRows, settleSends } from "../src/activity.js";
 import { createHistory, historyEntry, parseHistoryEntry } from "../src/history.js";
-import { A, B, BRIDGE, C, DUSK, EVM, STORE, entryOf, hash, nameHook, recorded } from "./fixtures/activity.js";
+import { A, B, BRIDGE, C, DUSK, EVM, PORTAL, STORE, entryOf, hash, nameHook, recorded } from "./fixtures/activity.js";
 import { fakeArchive, fixture, like, memoryDatabase, readFixture } from "./fixtures/helpers.js";
 
 /** @typedef {import("../src/activity.js").ActivityInput} ActivityInput */
@@ -652,9 +652,24 @@ describe("a call to DuskEVM's bridge", () => {
 
     const { entries } = await history.read();
 
-    // The history says what the call was; the row, that the bridge paid A nothing.
+    // The history says what the call was; the row, that the bridge paid A nothing, with a network or without one.
     like(entries[0], { bridge: { amount: "500000000", kind: "deposit", to: deposit.recipient }, contractId: BRIDGE });
-    like(rowsOf({ account: A, public: entries })[0], { bridge: null, category: "received", counterparty: deposit.account, direction: "in", value: 1_500_000n });
+
+    for (const network of [2, null]) {
+      like(rowsOf({ account: A, network, public: entries })[0], { bridge: null, category: "received", counterparty: deposit.account, direction: "in", value: 1_500_000n }, String(network));
+    }
+  });
+
+  it("is a withdrawal for the account the bridge paid, its claim read, with a network or without one", () => {
+    const facts = { amount: "1008000000000", hash: `0x${"8e".repeat(32)}`, kind: "claim", recipient: A, withdrawal: "0001".padEnd(64, "0") };
+    const paid = entryOf({ bridge: facts, contractId: PORTAL, counterparty: PORTAL, direction: "in", fnName: "finalizeWithdrawalTransaction", kind: "transfer", payer: false, value: "1008000000000" });
+
+    for (const network of [2, null]) {
+      const [row] = rowsOf({ network, public: [paid] });
+
+      like(row, { category: "bridge", direction: "in", value: 1_008_000_000_000n }, String(network));
+      like(row.bridge, { amount: 1_008_000_000_000n, nonce: facts.withdrawal, step: "withdrawal" }, String(network));
+    }
   });
 
   it("is a withdrawal for the account it paid", () => {

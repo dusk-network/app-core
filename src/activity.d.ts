@@ -249,8 +249,9 @@ export type ActivityRow = {
   /** A call of Sozu's pool (`isSozuCall`): whether it staked or unstaked. */
   sozu: "stake" | "unstake" | null;
   /**
-   * A call to DuskEVM's bridge or Portal; for what came in, only when the
-   * bridge paid it, not a gas refund from another account's call to it.
+   * A call to DuskEVM's bridge or Portal. What came in from an account has
+   * none, whatever its transaction called: a gas refund from another
+   * account's call to the bridge is a transfer from that account.
    */
   bridge: ActivityBridge | null;
   /**
