@@ -139,6 +139,52 @@ describe("a sync of an address's withdrawals", () => {
     assert.deepEqual(requests, [5, 2, 2]);
   });
 
+  it("reads the newest final blocks again on a run whose final head hasn't moved", async () => {
+    // Synced up to 300,000, a withdrawal at 290,000 that an answer left out.
+    const duskEvm = duskEvmOf([withdrawalLog(1, 290_000)], { final: 300_000 });
+    const sync = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, state: { covered: [[0, 300_000]], entries: {}, target: 300_000, window: L2_WINDOW } });
+
+    assert.deepEqual(
+      sync.found.map((entry) => entry.hash),
+      [h(1)]
+    );
+    // The head, and the newest blocks in one window.
+    assert.equal(sync.requests, 2);
+  });
+
+  it("reads the newest 50,000 final blocks again in as many windows as they take, where the RPC takes fewer blocks", async () => {
+    // Synced up to 300,000 in windows of 25,000, the head 450 blocks on: a withdrawal at 270,000 that an answer left out.
+    const duskEvm = duskEvmOf([withdrawalLog(1, 270_000)], { final: 300_450 });
+    const sync = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, state: { covered: [[0, 300_000]], entries: {}, target: 300_000, window: 25_000 } });
+
+    assert.deepEqual(
+      sync.found.map((entry) => entry.hash),
+      [h(1)]
+    );
+    // The head, and the newest blocks, the new ones among them, in two windows.
+    assert.equal(sync.requests, 3);
+  });
+
+  it("reads the newest blocks again in half a run's requests at most, the rest for older blocks", async () => {
+    // Windows of 6,250 blocks, the final head 450 blocks on from 300,000, blocks under 200,000 not read yet.
+    const duskEvm = duskEvmOf([], { final: 300_450 });
+    const sync = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, state: { covered: [[200_000, 300_000]], entries: {}, target: 300_000, window: 6_250 } });
+
+    assert.equal(sync.requests, 8);
+    // Three windows at the head, then four below what was covered.
+    assert.deepEqual(sync.state.covered, [[175_000, 300_450]]);
+  });
+
+  it("leaves a run under the same final head as the last to the older blocks while they're still to be read", async () => {
+    const duskEvm = duskEvmOf([], { final: 4_200_000 });
+    const first = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET });
+    const second = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, state: first.state });
+
+    assert.deepEqual(first.state.covered, [[3_500_001, 4_200_000]]);
+    // Seven windows below, none at the head.
+    assert.deepEqual(second.state.covered, [[2_800_001, 4_200_000]]);
+  });
+
   it("finds each withdrawal once, where a third of the answers come back without their logs", async () => {
     for (const seed of SEEDS) {
       // A dozen withdrawals over 2,000,000 final blocks, and eight more over a week of runs every 15 minutes.

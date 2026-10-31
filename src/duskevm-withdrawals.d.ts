@@ -473,10 +473,12 @@ export type WithdrawalScan = {
  * (`ETHBridgeInitiated`, by its sender), the newest final blocks first, a
  * window at a time, narrower where the RPC asks for it, within
  * `maxRequests`, the head's requests among them. Only final blocks count as
- * covered: those above can still be reorged away. The next run carries on
- * below and reads what is new above, with the 50,000 final blocks under it
- * again; under a final head lower than the last run's, what was covered and
- * found above it is dropped, and read again. Once all the final blocks are
+ * covered: those above can still be reorged away. Each run reads the
+ * newest 50,000 final blocks, the new ones first, in as many windows as they
+ * take though in half its requests at most (while older blocks are still to
+ * be read, only once the final head has moved), and carries on below; under
+ * a final head lower than the last run's, what was covered and found above
+ * it is dropped, and read again. Once all the final blocks are
  * covered, they're read again from the newest down, a pass at a time with
  * the requests a run has left: the first an hour later, each after as long
  * again as it has been since. A withdrawal is found once: one read again

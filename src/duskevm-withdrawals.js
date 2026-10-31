@@ -127,9 +127,10 @@ const U32_MAX = (1n << 32n) - 1n;
 /** The low 240 bits of a withdrawal's nonce: its count, under its version. */
 const NONCE_COUNT = (1n << 240n) - 1n;
 
-// The newest final blocks a sync reads again on each run, below the new
-// ones, and how long after it first covered all the final blocks it reads
-// them all again: each pass after waits as long again as it has been since.
+// The newest final blocks a sync reads again on each run, the new ones
+// among them, and how long after it first covered all the final blocks it
+// reads them all again: each pass after waits as long again as it has been
+// since.
 const L2_OVERLAP = 50_000;
 const L2_RECHECK_MS = 60 * 60_000;
 // Answers a read is sent again for, a quarter second, then half a second later.
@@ -2196,16 +2197,31 @@ export async function syncWithdrawals({ address, bridge, duskEvm, maxRequests = 
     return true;
   };
 
+  // The newest final blocks, read again on each run, from the newest down,
+  // so the new ones first: in as many windows as they take, though no more
+  // than half the requests the run has left (one at least, where nothing
+  // else is to be read). While older blocks are still to be read, a run
+  // under the same final head as the last leaves them all to those.
+  const lowest = Math.max(0, target - L2_OVERLAP + 1);
+  const due = recheck !== null && (recheck.from !== null || time >= recheck.at);
+  const older = topGap(addCoverage(covered, lowest, target), target) !== null;
+  const half = Math.floor((maxRequests - requests) / 2);
+  const share = older && state?.target === target ? 0 : older || due ? half : Math.max(1, half);
+  let top = target;
+
+  for (let windows = 0; windows < share && top >= lowest && requests < maxRequests; windows += 1) {
+    const lo = Math.max(0, top - window + 1);
+
+    if (await read(lo, top)) top = lo - 1;
+  }
+
   while (requests < maxRequests) {
     const gap = topGap(covered, target);
 
     if (gap) {
       const [a, b] = gap;
-      // What is new above what was covered: with the newest blocks under it,
-      // read again on each run.
-      const floor = b === target && a > 0 ? Math.max(0, a - L2_OVERLAP) : a;
 
-      await read(Math.max(floor, b - window + 1), b);
+      await read(Math.max(a, b - window + 1), b);
       continue;
     }
 
