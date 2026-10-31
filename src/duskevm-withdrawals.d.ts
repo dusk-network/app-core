@@ -359,7 +359,11 @@ export type WithdrawalsOptions = {
   maxBatch?: number;
   /** How many of the newest games a proof is looked for among: 64 by default, and for anything but a positive whole number. */
   gameSearchDepth?: number | bigint;
-  /** Where the deployment's fixed facts are kept: each game's hub, each game type's hub, each hub's clock limit. */
+  /**
+   * Where the deployment's fixed facts are kept: each game's hub, each game
+   * type's hub, each hub's clock limit, and each withdrawal's receipt once
+   * its DuskEVM block is final.
+   */
   cache?: FactCache;
   /** The clock, in milliseconds. */
   now?: () => number;
@@ -368,7 +372,14 @@ export type WithdrawalsOptions = {
 /** A network's withdrawals, read on its Dusk node and DuskEVM. */
 export type Withdrawals = {
   readonly network: Network;
-  /** A DuskEVM transaction's withdrawal, from its receipt; refuses as `parseWithdrawalReceipt` does. */
+  /**
+   * A DuskEVM transaction's withdrawal, from its receipt; refuses as
+   * `parseWithdrawalReceipt` does. The receipt is read after DuskEVM's
+   * finalized block, which the receipts read at the same time share, and
+   * kept in `cache` once its block is at or under that one: a final
+   * receipt is read once. One that isn't final yet, or isn't a
+   * withdrawal's, is read again each time.
+   */
   receipt(txHash: string): Promise<ReceiptWithdrawal>;
   /**
    * Where a withdrawal is, for `submitter` (a Dusk account, or its

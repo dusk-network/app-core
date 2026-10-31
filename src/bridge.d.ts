@@ -409,6 +409,8 @@ export type HistoryLike = {
   /** Of `value`, a gas refund paid to another account than the sender. */
   refund?: bigint | string | null;
   memo: string;
+  /** True when `memo` is bytes that aren't text, given as 0x hex: no address or hash is read from it. */
+  memoBinary?: boolean;
   payer: boolean;
   timestamp?: number | null;
   success?: boolean | null;
@@ -433,7 +435,7 @@ export type ServiceTransferFacts = {
   /** What the route's account received: known only where no gas was left to refund; null otherwise. */
   amount: bigint | null;
   fee: bigint;
-  /** The address its memo gives, exactly as the bridge reads it; null when it isn't one. */
+  /** The address its memo gives, exactly as the bridge reads it; null when it isn't one, or the memo isn't text. */
   to: string | null;
   at: number | null;
   height: number | null;
@@ -444,16 +446,18 @@ export type ServiceTransferFacts = {
 /**
  * A transfer the account sent to a service route's account, as its entry
  * says it; null for any other entry. The memo is read as the route's bridge
- * reads it: 0x and 40 hex digits, any case, nothing around them.
+ * reads it: 0x and 40 hex digits, any case, nothing around them, as text. A
+ * memo of bytes that aren't text (`memoBinary`) gives no address.
  */
 export declare function serviceTransferOf(entry: HistoryLike, network: NetworkRef): ServiceTransferFacts | null;
 
 /**
  * A payout of a migration, from its entry: a transfer the account received
  * from a migration route's payout account, with a transaction hash as the
- * memo, of its value less any gas `refund` paid to the account with it. Its
- * route is null where that account pays out more than one route. Null for
- * any other entry, and on a route without its payout account.
+ * memo as text, of its value less any gas `refund` paid to the account with
+ * it. Its route is null where that account pays out more than one route.
+ * Null for any other entry, a memo of bytes that aren't text included, and
+ * on a route without its payout account.
  */
 export declare function migrationPayoutOf(entry: HistoryLike, network: NetworkRef): MigrationPayout | null;
 

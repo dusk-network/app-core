@@ -169,11 +169,14 @@ describe("a DuskEVM receipt's withdrawal", () => {
     refuses(() => parseWithdrawalReceipt(TESTNET, { logs: [log], status: "0x1", transactionHash: TX }), "not-a-withdrawal");
   });
 
-  it("reads the receipt on DuskEVM in lower case, through the app's client", async () => {
+  it("reads the receipt on DuskEVM in lower case, through the app's client, after DuskEVM's finalized block", async () => {
     const chain = fakeChain({ l2: { eth_getTransactionReceipt: () => receiptOf(LOG_1008) } });
 
     await createWithdrawals(withdrawalsOn(chain)).receipt(TX.toUpperCase().replace("0X", "0x"));
-    assert.deepEqual(chain.rpc, [{ method: "eth_getTransactionReceipt", params: [TX] }]);
+    assert.deepEqual(chain.rpc, [
+      { method: "eth_getBlockByNumber", params: ["finalized", false] },
+      { method: "eth_getTransactionReceipt", params: [TX] },
+    ]);
   });
 
   it("works for a network the route of which is in its file only", () => {
@@ -186,5 +189,135 @@ describe("a DuskEVM receipt's withdrawal", () => {
     like(parseWithdrawalReceipt(TESTNET, receiptOf(passedLog({ extraData: paysAccount(USER2) }))).facts, { recipient: { account: USER2, kind: "account" } });
     assert.equal(ROUTE.l2Messenger, "0x4200000000000000000000000000000000000007");
     assert.equal(u256(1).length, 32);
+  });
+});
+
+describe("a withdrawal's receipt, kept once its DuskEVM block is final", () => {
+  const SUBMITTER = `0x${"2c".repeat(20)}`;
+  const OTHER_TX = LOG_CONTRACT_CREDIT.transactionHash;
+
+  /**
+   * DuskEVM giving the receipts and its finalized block: at `finalized`, a
+   * hex height; `finalized` as a function answers in its place.
+   *
+   * @param {{ finalized?: string | (() => any), receipt?: (params: any[]) => any }} [options]
+   */
+  const chainWith = ({ finalized = LOG_1008.blockNumber, receipt = ([hash]) => receiptOf(hash === OTHER_TX ? LOG_CONTRACT_CREDIT : LOG_1008) } = {}) =>
+    fakeChain({
+      l2: {
+        eth_getBlockByNumber: (/** @type {any[]} */ [tag]) => {
+          if (tag !== "finalized") throw new Error(`Block ${tag} isn't answered here`);
+
+          return typeof finalized === "function" ? finalized() : { number: finalized };
+        },
+        eth_getTransactionReceipt: receipt,
+      },
+    });
+  /** @param {ReturnType<typeof fakeChain>} chain @param {string} [hash] */
+  const receiptsAsked = (chain, hash = TX) => chain.rpc.filter(({ method, params }) => method === "eth_getTransactionReceipt" && params[0] === hash).length;
+  /** @param {ReturnType<typeof fakeChain>} chain */
+  const finalizedAsked = (chain) => chain.rpc.filter(({ method }) => method === "eth_getBlockByNumber").length;
+
+  it("is read once: a later status, proof or claim asks DuskEVM for no receipt, and reads the same withdrawal", async () => {
+    const chain = chainWith();
+    const withdrawals = createWithdrawals(withdrawalsOn(chain));
+    const first = await withdrawals.receipt(TX);
+
+    // Dusk answers nothing here: each step refuses further on, after its receipt.
+    await Promise.allSettled([withdrawals.status(TX), withdrawals.prepareProof(TX, { submitter: SUBMITTER }), withdrawals.claimCall(TX, { submitter: SUBMITTER })]);
+    assert.deepEqual(await withdrawals.receipt(TX), first);
+    assert.equal(receiptsAsked(chain), 1);
+    assert.equal(finalizedAsked(chain), 1);
+  });
+
+  it("stays kept for another session with the app's cache, and apart from another network's", async () => {
+    const cache = new Map();
+    const chain = chainWith();
+
+    await createWithdrawals(withdrawalsOn(chain, { cache })).receipt(TX);
+    await createWithdrawals(withdrawalsOn(chain, { cache })).receipt(TX);
+    assert.equal(receiptsAsked(chain), 1);
+
+    // The same network with another Portal: another deployment's receipts aren't its own.
+    const contracts = /** @type {any} */ (TESTNET.duskEvm).contracts;
+    const other = { ...TESTNET, duskEvm: { ...TESTNET.duskEvm, contracts: { ...contracts, optimism_portal: { ...contracts.optimism_portal, contractId: "ab".repeat(32) } } } };
+    const elsewhere = chainWith();
+
+    like(await createWithdrawals(withdrawalsOn(elsewhere, { cache, network: other })).receipt(TX), { transactionHash: TX });
+    assert.equal(receiptsAsked(elsewhere), 1);
+  });
+
+  it("is read again while its block is over DuskEVM's finalized one, and kept once it isn't", async () => {
+    let finalized = "0x2f265c";
+    const chain = chainWith({ finalized: () => ({ number: finalized }) });
+    const withdrawals = createWithdrawals(withdrawalsOn(chain));
+
+    await withdrawals.receipt(TX);
+    await withdrawals.receipt(TX);
+    assert.equal(receiptsAsked(chain), 2);
+
+    finalized = LOG_1008.blockNumber;
+    await withdrawals.receipt(TX);
+    await withdrawals.receipt(TX);
+    assert.equal(receiptsAsked(chain), 3);
+  });
+
+  it("is read again where DuskEVM's finalized block can't be read, and the withdrawal is still read", async () => {
+    for (const finalized of [
+      () => {
+        throw new Error("unknown block tag");
+      },
+      () => null,
+      () => ({ number: "latest" }),
+    ]) {
+      const chain = chainWith({ finalized });
+      const withdrawals = createWithdrawals(withdrawalsOn(chain));
+
+      like(await withdrawals.receipt(TX), { blockNumber: 3_090_013n, transactionHash: TX });
+      await withdrawals.receipt(TX);
+      assert.equal(receiptsAsked(chain), 2);
+    }
+  });
+
+  it("is never kept for a missing or failed transaction, one that isn't a withdrawal, or another transaction's", async () => {
+    const answers = {
+      missing: () => null,
+      failed: () => receiptOf(LOG_1008, { status: "0x0" }),
+      other: () => receiptOf(LOG_OFF_ROUTE),
+      another: () => receiptOf(LOG_CONTRACT_CREDIT),
+    };
+
+    for (const [name, receipt] of Object.entries(answers)) {
+      const chain = chainWith({ finalized: "0xffffffff", receipt });
+      const withdrawals = createWithdrawals(withdrawalsOn(chain));
+
+      for (let i = 0; i < 2; i += 1) await withdrawals.receipt(TX).catch(() => null);
+      assert.equal(receiptsAsked(chain), 2, name);
+    }
+
+    // A transaction found only later is read once it's there.
+    let mined = false;
+    const chain = chainWith({ receipt: () => (mined ? receiptOf(LOG_1008) : null) });
+    const withdrawals = createWithdrawals(withdrawalsOn(chain));
+
+    await assert.rejects(withdrawals.receipt(TX), { code: "not-found" });
+    mined = true;
+    like(await withdrawals.receipt(TX), { transactionHash: TX });
+    await withdrawals.receipt(TX);
+    assert.equal(receiptsAsked(chain), 2);
+  });
+
+  it("is read with the others read at the same time after one read of DuskEVM's finalized block, each receipt once", async () => {
+    const chain = chainWith();
+    const withdrawals = createWithdrawals(withdrawalsOn(chain));
+    const [a, b, c] = await Promise.all([withdrawals.receipt(TX), withdrawals.receipt(TX), withdrawals.receipt(OTHER_TX)]);
+
+    assert.deepEqual(a, b);
+    like(c, { transactionHash: OTHER_TX });
+    assert.equal(finalizedAsked(chain), 1);
+    assert.equal(receiptsAsked(chain), 1);
+    assert.equal(receiptsAsked(chain, OTHER_TX), 1);
+    // The finalized block, then the receipts.
+    assert.equal(chain.rpc[0].method, "eth_getBlockByNumber");
   });
 });
