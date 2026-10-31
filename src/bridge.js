@@ -12,7 +12,7 @@
 
 import { routeForAccount, routes } from "@dusk-network/networks";
 import { isAccount } from "@dusk-network/networks/account";
-import { BRIDGE_FUNCTIONS, duskEvmContracts, evmAddressOf } from "@dusk-network/networks/duskevm";
+import { BRIDGE_FUNCTIONS, decodeBridgeCall, duskEvmContracts, evmAddressOf, isBridgeContract } from "@dusk-network/networks/duskevm";
 import {
   CREDIT_WINDOW_MS,
   EVM_ADDRESS,
@@ -40,6 +40,7 @@ import {
   settle,
   triage,
   uniqueByHash,
+  urlOf,
   usedOf,
   withPast,
 } from "./bridge-common.js";
@@ -69,6 +70,8 @@ export { depositArrivalsFromExplorer } from "./bridge-explorer.js";
 /** @typedef {import("@dusk-network/networks").Network} Network */
 /** @typedef {import("@dusk-network/networks").NetworkRef} NetworkRef */
 /** @typedef {import("@dusk-network/networks").Route} Route */
+/** @typedef {import("./bridge.js").BridgeNetwork} BridgeNetwork */
+/** @typedef {import("./bridge.js").FactCache} FactCache */
 /** @typedef {import("./bridge-common.js").Credit} Credit */
 /** @typedef {import("./bridge-common.js").DepositItem} DepositItem */
 /** @typedef {import("./bridge-common.js").Queued} Queued */
@@ -993,10 +996,9 @@ async function transfersOf(archive, hashes, counter) {
  *
  * @param {Archive} archive
  * @param {ReadonlyArray<string>} hashes
- * @param {{ network?: Network, args?: boolean }} options
  * @param {{ requests: number }} counter
  */
-async function detailsOf(archive, hashes, { args = false, network }, counter) {
+async function detailsOf(archive, hashes, counter) {
   /** @type {Map<string, any>} */
   const out = new Map();
   const list = [...new Set(hashes)];
@@ -1006,10 +1008,142 @@ async function detailsOf(archive, hashes, { args = false, network }, counter) {
 
     counter.requests += 1;
 
-    for (const [hash, found] of await fetchTxDetails(archive, batch, { args: args ? new Set(batch) : undefined, network })) out.set(hash, found);
+    for (const [hash, found] of await fetchTxDetails(archive, batch)) out.set(hash, found);
   }
 
   return out;
+}
+
+/**
+ * A deposit's call, as `tx(hash) { blockHeight blockTimestamp err tx {
+ * callData { contractId fnName data } } }` gives it: whether it went
+ * through, its block's time, its function, and for a call of DuskEVM's
+ * bridge or Portal on Dusk, what it did (`bridge`, as `/history` reads it:
+ * null for one that isn't a deposit, a proof or a claim). Null for none.
+ *
+ * @param {Network} net
+ * @param {any} raw
+ * @returns {{ bridge?: { kind: string, amount?: string, to?: string } | null, fnName: string | undefined, success: boolean, timestamp: number | null } | null}
+ */
+function callOf(net, raw) {
+  if (!raw || typeof raw !== "object") return null;
+
+  const call = raw.tx?.callData;
+  const contractId = call?.contractId ? String(call.contractId) : undefined;
+  const fnName = call?.fnName ? String(call.fnName) : undefined;
+  const seconds = Number(raw.blockTimestamp);
+  /** @type {NonNullable<ReturnType<typeof callOf>>} */
+  const out = { fnName, success: !failedTx(raw), timestamp: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null };
+
+  if (isBridgeContract(net, contractId)) {
+    const done = decodeBridgeCall(net, { args: typeof call?.data === "string" ? call.data : null, contractId, fnName });
+
+    out.bridge = done === null ? null : done.kind === "deposit" ? { amount: String(done.amountLux), kind: "deposit", to: done.recipient } : { kind: done.kind };
+  }
+
+  return out;
+}
+
+/**
+ * Whether a transaction, as the archive gives it, failed.
+ *
+ * @param {any} raw
+ */
+const failedTx = (raw) => raw?.err !== null && raw?.err !== undefined && raw?.err !== "";
+
+/**
+ * Whether a deposit's call says all a match reads of it: its block, its
+ * time, and, where it went through, its contract, function and arguments.
+ * One that doesn't is asked for again: the archive may give it all later.
+ *
+ * @param {any} raw
+ */
+function wholeCall(raw) {
+  const call = raw?.tx?.callData;
+  const height = /^\d+$/.test(String(raw?.blockHeight)) ? heightOf(Number(raw.blockHeight)) : null;
+
+  return height !== null && Number(raw?.blockTimestamp) > 0 && (failedTx(raw) || (typeof call?.contractId === "string" && typeof call?.fnName === "string" && typeof call?.data === "string"));
+}
+
+/**
+ * The calls of deposits a sender's history lists, by hash, as `callOf` reads
+ * them: a batch a request, with the last finalized block. One that can't
+ * change any more, whole and in a block at or under that one, is kept in the
+ * app's `cache`, by the network, its bridge and the transaction's hash, and
+ * isn't asked for again; others are asked for each time.
+ *
+ * @param {Archive} archive
+ * @param {Network} net
+ * @param {ReadonlyArray<string>} hashes
+ * @param {FactCache | undefined} cache
+ * @param {{ requests: number }} counter
+ * @returns {Promise<Map<string, NonNullable<ReturnType<typeof callOf>>>>}
+ */
+async function depositCalls(archive, net, hashes, cache, counter) {
+  /** @type {Map<string, NonNullable<ReturnType<typeof callOf>>>} */
+  const out = new Map();
+  /** @param {string} hash */
+  const keyOf = (hash) => `deposit:${net.chainId}:${duskEvmContracts(net)?.bridge ?? ""}:${hash}`;
+  /** @type {string[]} */
+  const missing = [];
+
+  for (const hash of new Set(hashes)) {
+    const kept = cache ? keptCall(net, cache, keyOf(hash), hash) : null;
+
+    if (kept) out.set(hash, kept);
+    else missing.push(hash);
+  }
+
+  for (let i = 0; i < missing.length; i += DETAILS_BATCH) {
+    const batch = missing.slice(i, i + DETAILS_BATCH);
+
+    counter.requests += 1;
+
+    const data = await archive.query(`query { pair: lastBlockPair { json } ${batch.map((hash, j) => `t${j}: tx(hash: "${hash}") { blockHeight blockTimestamp err tx { callData { contractId fnName data } } }`).join(" ")} }`);
+    const finalized = Number(data?.pair?.json?.last_finalized_block?.[0]);
+
+    batch.forEach((hash, j) => {
+      const raw = data?.[`t${j}`];
+      const call = callOf(net, raw);
+
+      if (!call) return;
+
+      out.set(hash, call);
+
+      if (cache && wholeCall(raw) && Number.isSafeInteger(finalized) && Number(raw.blockHeight) <= finalized) {
+        try {
+          cache.set(keyOf(hash), JSON.stringify({ hash, tx: raw }));
+        } catch {
+          // Not kept: asked for again next time.
+        }
+      }
+    });
+  }
+
+  return out;
+}
+
+/**
+ * A deposit's call kept in the app's cache, as `callOf` reads it; null where
+ * none is kept, or what is kept isn't this transaction's whole call.
+ *
+ * @param {Network} net
+ * @param {FactCache} cache
+ * @param {string} key
+ * @param {string} hash
+ */
+function keptCall(net, cache, key, hash) {
+  try {
+    const text = cache.get(key);
+
+    if (typeof text !== "string" || !text) return null;
+
+    const kept = JSON.parse(text);
+
+    return kept?.hash === hash && wholeCall(kept.tx) ? callOf(net, kept.tx) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1139,17 +1273,18 @@ async function readHistories(archive, items, { account, direction, horizonMs, ke
  * (`to`, `amount`), from their calls: each with the block the app gave it
  * its credit can't be before; and those whose call or time the archive
  * doesn't give, which could be any deposit of up to what they paid, but
- * for one the app gave: its own facts tell. `calls` keeps each call read.
+ * for one the app gave: its own facts tell. `calls` keeps each call read,
+ * and the app's `cache` those that can't change any more.
  *
  * @param {Archive} archive
  * @param {Network} net
  * @param {ReadonlyArray<{ hash: string, height: number }>} found
- * @param {{ amount: bigint, to: string, bounds: ReadonlyMap<string, bigint | null>, calls: Map<string, any>, supplied: ReadonlyMap<string, DepositItem> }} group
+ * @param {{ amount: bigint, to: string, bounds: ReadonlyMap<string, bigint | null>, cache: FactCache | undefined, calls: Map<string, any>, supplied: ReadonlyMap<string, DepositItem> }} group
  * @param {{ requests: number }} counter
  */
-async function depositPeers(archive, net, found, { amount, bounds, calls, supplied, to }, counter) {
+async function depositPeers(archive, net, found, { amount, bounds, cache, calls, supplied, to }, counter) {
   const missing = found.flatMap((entry) => (calls.has(entry.hash) ? [] : [entry.hash]));
-  const read = await detailsOf(archive, missing, { args: true, network: net }, counter);
+  const read = await depositCalls(archive, net, missing, cache, counter);
 
   for (const hash of missing) calls.set(hash, read.get(hash) ?? null);
 
@@ -1297,6 +1432,7 @@ export async function depositArrivals(options) {
     archive,
     taken,
     blockTimes,
+    cache,
     now = Date.now(),
     waitMs = WAIT_MS,
     windowMs = CREDIT_WINDOW_MS,
@@ -1311,7 +1447,9 @@ export async function depositArrivals(options) {
   const read = reader(fetchFn, timeoutMs);
 
   if (evm) {
-    await onRpc(read, live, { archive, blockTimes, bridge: evm.predeploys.l2StandardBridge.toLowerCase(), list, maxWindows, net, now, past, results, url: String(rpcUrl ?? evm.rpcUrl), used, windowMs });
+    const url = urlOf(rpcUrl, evm.rpcUrl, "DuskEVM RPC");
+
+    await onRpc(read, live, { archive, blockTimes, bridge: evm.predeploys.l2StandardBridge.toLowerCase(), cache, list, maxWindows, net, now, past, results, url, used, windowMs });
   }
 
   return { arrivals: inOrder(list, results), requests: read.counter.requests };
@@ -1321,14 +1459,15 @@ export async function depositArrivals(options) {
  * Deposits followed on DuskEVM's RPC, by the bridge's events from each
  * sender's DuskEVM address: a group of equal deposits from one sender at a
  * time, with the sender's equal deposits shortly before, from its history,
- * when there's an archive; without it, with the equal ones given that are
- * past their wait just before them.
+ * when there's an archive and the network names DuskEVM's bridge on Dusk;
+ * without them, or while the archive can't be read, with the equal ones
+ * given that are past their wait just before them.
  *
  * @param {Reader} read
  * @param {DepositItem[]} live
- * @param {{ archive: Archive | undefined, blockTimes: BlockTimes | undefined, bridge: string, list: DepositItem[], maxWindows: number, net: Network, now: number, past: DepositItem[], results: Map<string, Arrival>, url: string, used: Set<string>, windowMs: number }} options
+ * @param {{ archive: Archive | undefined, blockTimes: BlockTimes | undefined, bridge: string, cache: FactCache | undefined, list: DepositItem[], maxWindows: number, net: Network, now: number, past: DepositItem[], results: Map<string, Arrival>, url: string, used: Set<string>, windowMs: number }} options
  */
-async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows, net, now, past, results, url, used, windowMs }) {
+async function onRpc(read, live, { archive, blockTimes, bridge, cache, list, maxWindows, net, now, past, results, url, used, windowMs }) {
   // Equal deposits (the same DuskEVM address and amount) from a known sender
   // first, a sender at a time, its events telling its credits apart; then
   // those whose sender isn't known, which take none from the senders of the
@@ -1365,58 +1504,66 @@ async function onRpc(read, live, { archive, blockTimes, bridge, list, maxWindows
   const supplied = new Map(list.map((item) => [item.hash, item]));
   /** @type {Map<string, any>} */
   const calls = new Map();
-  const contract = duskEvmContracts(net)?.bridge;
+  // DuskEVM's bridge on Dusk, which a sender's history lists its deposits to.
+  const contract = duskEvmContracts(net)?.bridge ?? null;
 
   for (const { items, rivals } of [...known, ...unknown]) {
     const { amount, sender, to } = items[0];
-    const vouched = Boolean(archive) && sender !== null && items.every((item) => item.height !== null);
     let given = items.map(queued).sort(byTime);
     /** @type {Queued[]} */
-    let queue;
+    let queue = [];
     /** @type {Set<string>} */
     const unsure = new Set();
     /** @type {Map<string, HistoryScan>} */
     let states = new Map();
+    // Whether the sender's history tells its equal deposits' order.
+    let vouched = false;
 
-    if (vouched) {
+    if (archive && contract && sender !== null && items.every((item) => item.height !== null)) {
       // Each deposit's own hours of its sender's history, with its sender's
       // equal deposits there, the app's no longer looked for among them.
-      /** @type {Awaited<ReturnType<typeof readHistories>>} */
-      let history;
+      /** @type {Awaited<ReturnType<typeof readHistories>> | null} */
+      let history = null;
 
       try {
         history = await readHistories(
-          /** @type {Archive} */ (archive),
+          archive,
           /** @type {Reading[]} */ ([...items].sort((a, b) => /** @type {number} */ (a.height) - /** @type {number} */ (b.height))),
           {
-            account: /** @type {string} */ (sender),
+            account: sender,
             direction: "out",
             horizonMs: DEPOSIT_HORIZON_MS,
             keep: (entry) => entry.counterparty === contract && entry.value >= amount,
             of: (item) => `${sender}:${item.height}:${amount}`,
             pages: HISTORY_PAGES,
-            peersOf: (found) => depositPeers(/** @type {Archive} */ (archive), net, found, { amount, bounds, calls, supplied, to }, read.counter),
+            peersOf: (found) => depositPeers(archive, net, found, { amount, bounds, cache, calls, supplied, to }, read.counter),
             reach: Math.ceil((3 * DEPOSIT_HORIZON_MS) / DUSK_BLOCK_MS),
           },
           read.counter
         );
-      } catch (error) {
-        for (const item of items) results.set(item.hash, { error: messageOf(error), reason: "error", state: "unknown" });
-        continue;
+      } catch {
+        // The archive can't be read now: followed as without it, its history
+        // read on by a later call from where it stopped.
+        states = new Map(items.flatMap((item) => (item.scan?.history ? [[item.hash, item.scan.history]] : [])));
       }
 
-      states = history.states;
-      waitForHistory(items, history, results);
+      if (history) {
+        vouched = true;
+        states = history.states;
+        waitForHistory(items, history, results);
 
-      if (!history.covered.length) continue;
+        if (!history.covered.length) continue;
 
-      given = history.given;
-      queue = history.queue;
+        given = history.given;
+        queue = history.queue;
 
-      // One before it whose call can't be read could be equal: the credits'
-      // order can't be told.
-      for (const item of given) if (/** @type {number[]} */ (history.unread.get(item.hash)).length) unsure.add(item.hash);
-    } else {
+        // One before it whose call can't be read could be equal: the credits'
+        // order can't be told.
+        for (const item of given) if (/** @type {number[]} */ (history.unread.get(item.hash)).length) unsure.add(item.hash);
+      }
+    }
+
+    if (!vouched) {
       queue = withPast(
         given,
         past.filter((item) => item.to === to && item.amount === amount && item.sender === sender).map(queued),
@@ -1765,7 +1912,7 @@ export async function migrationPayouts({ network, migrations, entries, archive, 
       const listed = await byMemo(archive, asked.map((item) => item.hash), counter);
       const found = [...listed.values()].flat().flatMap((raw) => payoutsIn(raw, /** @type {string} */ (account), net));
       // Their times, and whether they went through.
-      const details = await detailsOf(archive, found.map((payout) => payout.payout), {}, counter);
+      const details = await detailsOf(archive, found.map((payout) => payout.payout), counter);
 
       candidates = found.flatMap((payout) => {
         const known = details.get(payout.payout);

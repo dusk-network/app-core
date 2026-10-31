@@ -7,9 +7,12 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/bridge-explorer`: `depositArrivalsFromExplorer`, deposits followed on DuskEVM's explorer without the RPC path and `/history`, which `/bridge` exports too
+- `/bridge`: a network an app builds from its own settings, for a chain there's no network file for, its fields checked as a file's are
+- `/bridge`: `depositArrivals` takes a `cache`, where the calls of the deposits a sender's history lists are kept once their blocks are final, and read once
 
 ### Fixed
 
+- `/bridge`: on the RPC, a deposit with its sender is followed as without the archive while the archive can't be read, and is an `error` only when the RPC can't be read either
 - `/duskevm-withdrawals`: where the RPC has no finalized block, `syncWithdrawals` reads the last 1,800 blocks under the head it takes as final again on the next run, rather than counting them covered
 
 ## [0.4.1]

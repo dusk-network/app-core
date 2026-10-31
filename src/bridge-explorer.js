@@ -23,6 +23,7 @@ import {
   queued,
   reader,
   settle,
+  urlOf,
   withPast,
 } from "./bridge-common.js";
 
@@ -59,7 +60,9 @@ export async function depositArrivalsFromExplorer({
   const read = reader(fetchFn, timeoutMs);
 
   if (evm) {
-    await onExplorer(read, live, { api: String(explorerUrl ?? evm.blockscoutApiUrl), bridge: evm.predeploys.l2StandardBridge.toLowerCase(), maxPages, now, past, results, used, windowMs });
+    const api = urlOf(explorerUrl, evm.blockscoutApiUrl, "DuskEVM explorer");
+
+    await onExplorer(read, live, { api, bridge: evm.predeploys.l2StandardBridge.toLowerCase(), maxPages, now, past, results, used, windowMs });
   }
 
   return { arrivals: inOrder(list, results), requests: read.counter.requests };

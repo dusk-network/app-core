@@ -34,9 +34,12 @@
  * - The app owns all I/O and storage: it passes `fetch`, the URLs (the
  *   network's file's by default), `/history`'s archive for the Dusk side,
  *   and its own caches: the credits it gave other transfers, where the last
- *   search stopped, and the chain's block times. Nothing here keeps state
- *   outside the calls, so it runs in an extension's service worker as well
- *   as in a page.
+ *   search stopped, the chain's block times, and what can't change any
+ *   more. Nothing here keeps state outside the calls, so it runs in an
+ *   extension's service worker as well as in a page.
+ * - A network is a network file, or its chain ID; on a chain there's no
+ *   file for, one the app builds from its own settings (`NetworkSettings`),
+ *   checked as a file's fields are.
  * - An app that follows deposits on DuskEVM's explorer alone imports
  *   `depositArrivalsFromExplorer` from `/bridge-explorer`, without the RPC
  *   path and `/history`.
@@ -58,10 +61,43 @@
  * @module
  */
 
-import type { Account, EvmAddress, NetworkRef } from "@dusk-network/networks";
+import type { Account, EvmAddress, Network, NetworkRef } from "@dusk-network/networks";
 import type { Archive, Direction, EntryKind } from "./history.js";
 
 export { depositArrivalsFromExplorer, type ExplorerDepositOptions } from "./bridge-explorer.js";
+
+/**
+ * A network an app builds from its own settings, for a chain there's no
+ * network file for: its chain ID as the node gives it, and DuskEVM's bridge,
+ * RPC (for "rpc") and explorer API (for "explorer"), as a network file has
+ * them. Its fields are checked as a file's are: a TypeError for one that
+ * isn't (an address that isn't 0x and 40 hex digits, a URL that isn't
+ * http(s) or ends with a slash). It has no routes to other chains unless it
+ * gives them as a file does: transfers out and migrations on it are
+ * `no-route`.
+ */
+export type NetworkSettings = {
+  chainId: number;
+  /** DuskEVM, or null where it has none: then no deposit is followed. */
+  duskEvm?: {
+    rpcUrl?: string;
+    blockscoutApiUrl?: string;
+    predeploys: { l2StandardBridge: string };
+    /**
+     * DuskEVM's contracts on Dusk, by their names in a network file: with
+     * the bridge's and the Portal's (`l1_standard_bridge`,
+     * `optimism_portal`), a deposit's sender's history is read on "rpc".
+     */
+    contracts?: Record<string, { contractId: string; evmAddress?: string }>;
+  } | null;
+  routes?: Network["routes"];
+};
+
+/** The network a read takes: a network file, its chain ID, or one built from an app's settings. */
+export type BridgeNetwork = NetworkRef | NetworkSettings;
+
+/** The app's cache of what can't change any more, as text: a Map does. */
+export type FactCache = { get(key: string): string | null | undefined; set(key: string, value: string): unknown };
 
 /** How long before its transfer's block a credit still counts: Dusk's clock and the other chain's can differ. 2 minutes, in milliseconds. */
 export declare const CLOCK_SLACK_MS: 120000;
@@ -214,8 +250,8 @@ export type Deposit = {
 
 /** What `depositArrivals` takes. */
 export type DepositArrivalOptions = {
-  /** The Dusk network, or its chain ID: its DuskEVM, and its URLs. */
-  network: NetworkRef;
+  /** The Dusk network, its chain ID, or one built from the app's settings: its DuskEVM, and its URLs. */
+  network: BridgeNetwork;
   /** The deposits waited for: each once, by hash. */
   deposits: Iterable<Deposit>;
   /**
@@ -236,8 +272,11 @@ export type DepositArrivalOptions = {
    * looked for too, and paid first. Each deposit reads its own hours, once
    * the archive lists it there, `HISTORY_PAGES` pages a call: a deposit
    * whose history is read on in the next call waits, with its `scan`.
-   * Without it, or for a deposit without its sender and height, its credit
-   * is a deposit's only as where they can't be told apart.
+   * Without it, while it can't be read, on a network that doesn't name
+   * DuskEVM's bridge and Portal on Dusk, or for a deposit without its sender
+   * and height, its credit is a deposit's only as where they can't be told
+   * apart; a deposit is an `error` only when DuskEVM's RPC can't be read
+   * either.
    */
   archive?: Archive;
   /**
@@ -248,6 +287,12 @@ export type DepositArrivalOptions = {
   taken?: Iterable<string>;
   /** DuskEVM's block times the app keeps, for "rpc". */
   blockTimes?: BlockTimes;
+  /**
+   * Where the calls of the deposits a sender's history lists are kept, for
+   * "rpc" with the archive: each is kept once its block is final and its
+   * answer says all a match reads of it, and isn't asked for again.
+   */
+  cache?: FactCache;
   /** The clock, in milliseconds. */
   now?: number;
   /** How long a deposit is waited for; `WAIT_MS` by default. */
@@ -274,7 +319,8 @@ export type DepositArrivalOptions = {
  * from about when the first was sent, `maxWindows` windows at most (one more
  * where the search ahead takes them all while its blocks are read again).
  * A network without DuskEVM asks nothing. Throws a TypeError for a deposit
- * that isn't one, and for a network there's no file for.
+ * that isn't one, for a network that isn't one, and for one without the URL
+ * the reads go to where none is given.
  */
 export declare function depositArrivals(options: DepositArrivalOptions): Promise<{ arrivals: Map<string, Arrival>; requests: number }>;
 
@@ -298,7 +344,7 @@ export type ServiceTransfer = {
 
 /** What `serviceArrivals` takes. */
 export type ServiceArrivalOptions = {
-  network: NetworkRef;
+  network: BridgeNetwork;
   transfers: Iterable<ServiceTransfer>;
   /** `/history`'s archive: each transfer, and the route's account's history, which lists the equal ones paid before. */
   archive: Archive;
@@ -333,8 +379,8 @@ export type ServiceArrivalOptions = {
  * leaves the order unclear: unsure. Each transfer reads its own hours of
  * that history, once the archive lists it there, `HISTORY_PAGES` pages a
  * call: one whose history is read on in the next call waits, with its
- * `scan`. Throws a TypeError without an archive, and for a network there's
- * no file for.
+ * `scan`. Throws a TypeError without an archive, and for a network that
+ * isn't one.
  */
 export declare function serviceArrivals(options: ServiceArrivalOptions): Promise<{ arrivals: Map<string, Arrival>; requests: number }>;
 
@@ -374,7 +420,7 @@ export type MigrationPayout = {
 
 /** What `migrationPayouts` takes: the account's entries, or the archive and the account. */
 export type MigrationPayoutOptions = {
-  network: NetworkRef;
+  network: BridgeNetwork;
   migrations: Iterable<Migration>;
   /** The account's public history, as `/history` reads or keeps it. */
   entries?: Iterable<HistoryLike>;
@@ -454,7 +500,7 @@ export type ServiceTransferFacts = {
  * reads it: 0x and 40 hex digits, any case, nothing around them, as text. A
  * memo of bytes that aren't text (`memoBinary`) gives no address.
  */
-export declare function serviceTransferOf(entry: HistoryLike, network: NetworkRef): ServiceTransferFacts | null;
+export declare function serviceTransferOf(entry: HistoryLike, network: BridgeNetwork): ServiceTransferFacts | null;
 
 /**
  * A payout of a migration, from its entry: a transfer the account received
@@ -464,7 +510,7 @@ export declare function serviceTransferOf(entry: HistoryLike, network: NetworkRe
  * Null for any other entry, a memo of bytes that aren't text included, and
  * on a route without its payout account.
  */
-export declare function migrationPayoutOf(entry: HistoryLike, network: NetworkRef): MigrationPayout | null;
+export declare function migrationPayoutOf(entry: HistoryLike, network: BridgeNetwork): MigrationPayout | null;
 
 /**
  * The deposits that arrived, as `/activity`'s `arrivals` takes them: by the

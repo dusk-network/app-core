@@ -18,7 +18,7 @@
 import type { Arrival, DepositArrivalOptions } from "./bridge.js";
 
 /** What `depositArrivalsFromExplorer` takes: `depositArrivals`' options for the explorer. */
-export type ExplorerDepositOptions = Omit<DepositArrivalOptions, "via" | "rpcUrl" | "archive" | "blockTimes" | "maxWindows">;
+export type ExplorerDepositOptions = Omit<DepositArrivalOptions, "via" | "rpcUrl" | "archive" | "blockTimes" | "cache" | "maxWindows">;
 
 /**
  * Where each deposit arrived on DuskEVM, by its Dusk transaction's hash
@@ -27,7 +27,8 @@ export type ExplorerDepositOptions = Omit<DepositArrivalOptions, "via" | "rpcUrl
  * incoming calls are read once for all its deposits, newest first, back
  * past the oldest one waited for, at most `maxPages` pages; none is asked
  * while every deposit's window is still open. A network without DuskEVM
- * asks nothing. Throws a TypeError for a deposit that isn't one, and for a
- * network there's no file for.
+ * asks nothing. Throws a TypeError for a deposit that isn't one, for a
+ * network that isn't one, and for one without DuskEVM's explorer API where
+ * none is given.
  */
 export declare function depositArrivalsFromExplorer(options: ExplorerDepositOptions): Promise<{ arrivals: Map<string, Arrival>; requests: number }>;

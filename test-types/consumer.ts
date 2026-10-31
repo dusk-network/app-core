@@ -59,9 +59,12 @@ import {
   serviceTransferOf,
   type Arrival,
   type BlockTimes,
+  type BridgeNetwork,
   type Deposit,
+  type FactCache,
   type HistoryScan,
   type MigrationPayout,
+  type NetworkSettings,
   type NoPayout,
   type Scan,
   type ServiceTransferFacts,
@@ -346,9 +349,18 @@ const deposits: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = 
   via: "rpc",
   waitMs: WAIT_MS,
   windowMs: CREDIT_WINDOW_MS,
+  cache: new Map<string, string>(),
 });
+// A local chain there's no network file for, from the app's settings.
+const local: NetworkSettings = { chainId: 0, duskEvm: { blockscoutApiUrl: "http://127.0.0.1:4000/api/v2", predeploys: { l2StandardBridge: "0x4200000000000000000000000000000000000010" }, rpcUrl: "http://127.0.0.1:8545" } };
+const anyNetwork: BridgeNetwork[] = [local, 2, networks.testnet, { chainId: 0, duskEvm: null }];
+const keptFacts: FactCache = new Map<string, string>();
+void [anyNetwork, keptFacts, serviceArrivals({ archive, network: local, transfers: [] }), depositArrivals({ deposits: [], network: local })];
+// @ts-expect-error a network's settings name DuskEVM's bridge
+const noBridge: NetworkSettings = { chainId: 0, duskEvm: { rpcUrl: "http://127.0.0.1:8545" } };
+void noBridge;
 // An app that reads only the explorer.
-const explorerOnly: ExplorerDepositOptions = { deposits: [], fetch, maxPages: 1, network: 2, now: 1, taken: [], waitMs: Infinity };
+const explorerOnly: ExplorerDepositOptions = { deposits: [], fetch, maxPages: 1, network: local, now: 1, taken: [], waitMs: Infinity };
 const onExplorer: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = depositArrivalsFromExplorer(explorerOnly);
 const sameFunction: typeof depositArrivalsFromExplorer = fromBridge;
 void [onExplorer, sameFunction];

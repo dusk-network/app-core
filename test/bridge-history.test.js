@@ -205,6 +205,81 @@ describe("deposits to DuskEVM, on its RPC with the sender's history", () => {
     assert.equal(historyReads(node.log), reads);
   });
 
+  it("is followed as without the archive while the archive can't be read, and is an error only when DuskEVM's RPC can't be either (#28)", async () => {
+    // Its sender's history, read up to where a call stopped, with more to read.
+    const node = fakeArchive({
+      accounts: {
+        [SENDER]: {
+          receiver: [],
+          sender: [...busy(201, 9_000, { receiver: OTHER, sender: SENDER, value: 1 }), depositEntry({ hash: dusk("d1"), height: 10_000, sender: SENDER, value: TENTH })],
+        },
+      },
+      details: { [dusk("d1")]: asDeposit(1_792_981_000) },
+      finalized: 20_000,
+    });
+    const chain = fakeChain({ head: 40_000, logs: [credit(1, 1_060)] });
+    const options = { archive: node.archiveClient(), fetch: chain.fetch, network: 2, now: second(40_000), via: /** @type {const} */ ("rpc") };
+    const d1 = sent("d1", second(1_000), { height: 10_000 });
+    const kept = /** @type {any} */ ((await depositArrivals({ ...options, deposits: [d1], fetch: async () => Promise.reject(new TypeError("fetch failed")) })).arrivals.get(dusk("d1")));
+
+    assert.ok(kept.scan.history.next);
+
+    // Now the archive can't be read: its credit, alone in its window, is its own.
+    node.down = true;
+    like((await depositArrivals({ ...options, deposits: [{ ...d1, scan: kept.scan }] })).arrivals.get(dusk("d1")), { hash: evmHash(1), state: "arrived" });
+
+    // Another credit of its amount in its window could be another deposit's: unsure, with its history kept to read on.
+    chain.logs.push(credit(2, 1_090));
+
+    const unsure = /** @type {any} */ ((await depositArrivals({ ...options, deposits: [{ ...d1, scan: kept.scan }] })).arrivals.get(dusk("d1")));
+
+    like(unsure, { reason: "unsure", state: "unknown" });
+    assert.deepEqual(unsure.scan.history, kept.scan.history);
+
+    // DuskEVM's RPC can't be read either: an error.
+    like((await depositArrivals({ ...options, deposits: [{ ...d1, scan: kept.scan }], fetch: async () => Promise.reject(new TypeError("fetch failed")) })).arrivals.get(dusk("d1")), {
+      reason: "error",
+      state: "unknown",
+    });
+  });
+
+  it("asks for an earlier deposit's call once its block is final, where the app keeps a cache, and again where it isn't final", async () => {
+    // An earlier deposit of the sender's, which the app doesn't follow: its call says it's equal.
+    const history = { [SENDER]: { receiver: [], sender: [depositEntry({ hash: dusk("e1"), height: 4_990, sender: SENDER, value: TENTH }), depositEntry({ hash: dusk("d1"), height: 5_000, sender: SENDER, value: TENTH })] } };
+    const node = fakeArchive({ accounts: history, details: { [dusk("e1")]: { ...asDeposit(1_792_980_100), blockHeight: 4_990 } }, finalized: 10_000 });
+    const chain = fakeChain({ head: 2_000, logs: [credit(1, 1_900)] });
+    const cache = new Map();
+    const options = { archive: node.archiveClient(), cache, fetch: chain.fetch, network: 2, now: second(2_000), via: /** @type {const} */ ("rpc") };
+    const d1 = sent("d1", second(200), { height: 5_000 });
+    /** The deposits whose calls the archive was asked for, from `from` on in its log. */
+    const callsAsked = (/** @type {number} */ from = 0) => node.log.slice(from).flatMap((l) => [...l.query.matchAll(/tx\(hash: "([0-9a-f]{64})"\)/g)].map((m) => m[1]));
+    const first = /** @type {any} */ ((await depositArrivals({ ...options, deposits: [d1] })).arrivals.get(dusk("d1")));
+
+    // The credit is the earlier one's.
+    like(first, { state: "waiting" });
+    assert.deepEqual(callsAsked(), [dusk("e1")]);
+
+    // Asked again a minute on, its own credit there: the earlier one's call isn't asked for again.
+    const asked = node.log.length;
+
+    chain.logs.push(credit(2, 1_950));
+    like((await depositArrivals({ ...options, deposits: [{ ...d1, scan: first.scan }], now: second(2_060) })).arrivals.get(dusk("d1")), { hash: evmHash(2), state: "arrived" });
+    assert.deepEqual(callsAsked(asked), []);
+
+    // A call the node has in a block that isn't final yet is asked for each time.
+    const recent = fakeArchive({ accounts: history, details: { [dusk("e1")]: { ...asDeposit(1_792_980_100), blockHeight: 10_001 } }, finalized: 10_000 });
+    const notFinal = { ...options, archive: recent.archiveClient(), cache: new Map(), deposits: [d1] };
+    const callsOf = (/** @type {{ query: string }[]} */ log) => log.flatMap((l) => [...l.query.matchAll(/tx\(hash: "([0-9a-f]{64})"\)/g)].map((m) => m[1]));
+
+    await depositArrivals(notFinal);
+
+    const before = recent.log.length;
+
+    await depositArrivals(notFinal);
+    assert.deepEqual(callsOf(recent.log.slice(before)), [dusk("e1")]);
+    assert.equal(notFinal.cache.size, 0);
+  });
+
   it("reads further down while a run of equal deposits reaches the bottom of what it read: the run's first takes the first credit", async () => {
     // Five equal deposits 100 minutes apart, from another device: the last one's own hours hold the four before it but the first.
     const heights = [10_000, 10_600, 11_200, 11_800, 12_400];

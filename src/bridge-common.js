@@ -10,11 +10,11 @@ import { networkFor } from "@dusk-network/networks";
 import { isAccount } from "@dusk-network/networks/account";
 
 /** @typedef {import("./bridge.js").Arrival} Arrival */
+/** @typedef {import("./bridge.js").BridgeNetwork} BridgeNetwork */
 /** @typedef {import("./bridge.js").Deposit} Deposit */
 /** @typedef {import("./bridge.js").FetchLike} FetchLike */
 /** @typedef {import("./bridge.js").Scan} Scan */
 /** @typedef {import("@dusk-network/networks").Network} Network */
-/** @typedef {import("@dusk-network/networks").NetworkRef} NetworkRef */
 
 /**
  * A transfer as the matching sees it: when it was sent, the block on the
@@ -49,6 +49,10 @@ export const TIMEOUT_MS = 8_000;
 const DUSK_HASH = /^[0-9a-f]{64}$/;
 export const EVM_HASH = /^0x[0-9a-f]{64}$/;
 export const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+// As a network file's schema has them: http(s), without a trailing slash,
+// and a contract ID's 64 lower-case hex digits.
+const URL_TEXT = /^https?:\/\/[^\s]*[^/\s]$/;
+const CONTRACT_ID = /^[0-9a-f]{64}$/;
 
 // ---------------------------------------------------------------------------
 // Values
@@ -175,18 +179,68 @@ export const byTime = (a, b) =>
 // The network
 // ---------------------------------------------------------------------------
 
+/** What a network an app built from its settings doesn't say, it has none of. */
+const NO_DISPLAY = Object.freeze({ blocklist: Object.freeze([]), labels: Object.freeze({}) });
+const NO_ROUTES = Object.freeze({
+  chains: Object.freeze({}),
+  duskEvm: Object.freeze([]),
+  migrations: Object.freeze([]),
+  retired: Object.freeze([]),
+  services: Object.freeze([]),
+});
+
 /**
- * The network a reference names; a TypeError for none there's a file for.
+ * @param {boolean} ok
+ * @param {string} message
+ */
+function check(ok, message) {
+  if (!ok) throw new TypeError(message);
+}
+
+/**
+ * The network a read takes: a network file, by its chain ID or as it is, or
+ * one an app built from its own settings, for a chain there's no file for.
+ * An object's fields that the reads take are checked as a network file's
+ * are: its chain ID, and DuskEVM's bridge address, RPC and explorer API
+ * (http(s), without a trailing slash) and its contracts' IDs on Dusk; what
+ * it doesn't say, as routes to other chains, it has none of. A TypeError
+ * for anything else.
  *
- * @param {NetworkRef} network
+ * @param {BridgeNetwork} network
  * @returns {Network}
  */
 export function networkOf(network) {
-  const net = network && typeof network === "object" ? network : networkFor(/** @type {number | bigint | string} */ (network));
+  if (!network || typeof network !== "object") {
+    const net = networkFor(/** @type {number | bigint | string} */ (network));
 
-  if (!net || typeof net.chainId !== "number" || !net.routes) throw new TypeError("Not one of the networks");
+    if (!net) throw new TypeError("Not one of the networks");
 
-  return net;
+    return net;
+  }
+
+  const given = /** @type {any} */ (network);
+  const evm = given.duskEvm;
+
+  check(Number.isSafeInteger(given.chainId) && given.chainId >= 0, "A network's chainId is a whole number");
+  check(given.routes === undefined || (given.routes !== null && typeof given.routes === "object"), "A network's routes are as a network file has them");
+
+  if (evm !== undefined && evm !== null) {
+    check(typeof evm === "object", "A network's duskEvm is an object, or null");
+    check(typeof evm.predeploys?.l2StandardBridge === "string" && EVM_ADDRESS.test(evm.predeploys.l2StandardBridge), "A network's DuskEVM bridge (duskEvm.predeploys.l2StandardBridge) is 0x and 40 hex digits");
+
+    for (const key of ["rpcUrl", "blockscoutApiUrl"]) {
+      check(evm[key] === undefined || (typeof evm[key] === "string" && URL_TEXT.test(evm[key])), `A network's duskEvm.${key} is an http(s) URL, without a trailing slash`);
+    }
+
+    check(
+      evm.contracts === undefined || (evm.contracts !== null && typeof evm.contracts === "object" && Object.values(evm.contracts).every((each) => typeof each?.contractId === "string" && CONTRACT_ID.test(each.contractId))),
+      "A network's DuskEVM contracts (duskEvm.contracts) each have a contractId: 64 lower-case hex digits"
+    );
+  }
+
+  if (given.display && given.routes && evm !== undefined) return given;
+
+  return { ...given, display: given.display ?? NO_DISPLAY, duskEvm: evm ?? null, routes: given.routes ?? NO_ROUTES };
 }
 
 // ---------------------------------------------------------------------------
@@ -543,7 +597,7 @@ export const usedOf = (taken, hashOf) => new Set([...(taken ?? [])].map(hashOf).
  * the results so far, and the credits the app's other deposits arrived
  * with. A TypeError for a network or a deposit that isn't one.
  *
- * @param {{ network: NetworkRef, deposits: Iterable<Deposit> | undefined, taken: Iterable<string> | undefined, now: number, waitMs: number }} options
+ * @param {{ network: BridgeNetwork, deposits: Iterable<Deposit> | undefined, taken: Iterable<string> | undefined, now: number, waitMs: number }} options
  * @param {(scan: unknown) => Scan | null} [scanOf] how a deposit's scan is read: on the explorer, not at all
  */
 export function depositsIn({ deposits, network, now, taken, waitMs }, scanOf = () => null) {
@@ -567,3 +621,19 @@ export function depositsIn({ deposits, network, now, taken, waitMs }, scanOf = (
   };
 }
 
+/**
+ * Where a read goes: the URL the app gave, else the network's; a TypeError
+ * where there's neither.
+ *
+ * @param {unknown} given
+ * @param {unknown} network
+ * @param {string} what
+ * @returns {string}
+ */
+export function urlOf(given, network, what) {
+  const url = given ?? network;
+
+  if (url === undefined || url === null || url === "") throw new TypeError(`No ${what} to read`);
+
+  return String(url);
+}
