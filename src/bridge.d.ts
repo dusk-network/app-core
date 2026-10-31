@@ -76,7 +76,7 @@ export declare const EXPLORER_PAGES: 5;
 /** Blocks one log search asks for at once; narrower where the RPC asks for it. */
 export declare const LOG_WINDOW: 5000;
 
-/** Log searches one call makes for a group of equal transfers, by default. */
+/** Log searches one call makes for a group of equal transfers, by default: one more where the search ahead takes them all while its blocks are read again. */
 export declare const LOG_WINDOWS: 8;
 
 /** Equal deposits sent within this of each other are paid in their order: 2 hours, in milliseconds. */
@@ -113,6 +113,12 @@ export type HistoryScan = {
  * transfer it began from, the logs it searched for (`search`), and the
  * credits it found before (`seen`), which the next one counts again. A
  * search for other logs, as for another sender or amount, starts afresh.
+ * The block it began at (`start`), and its passes over the blocks it read
+ * before (`recheck`): where the one under way is (`from`, null between
+ * two), when the next one begins (`at`), how many are done, as each credit
+ * seen has the passes done before it was found (`pass`), when the search
+ * first reached the head (`since`), in milliseconds, and the widest window
+ * the blocks are read again in, where the RPC refused a wider one (`size`).
  * With the archive, how far the transfer's own history is read
  * (`history`): a history longer than one call reads is read on from there,
  * before any search. Kept by the app with the credits it was made with,
@@ -122,7 +128,9 @@ export type Scan = {
   from?: string;
   basis?: number;
   search?: string;
-  seen?: ReadonlyArray<{ hash: string; block: string; at: number; sender: string | null }>;
+  seen?: ReadonlyArray<{ hash: string; block: string; at: number; sender: string | null; pass?: number }>;
+  start?: string;
+  recheck?: { from: string | null; at: number; passes: number; since: number; size?: number };
   history?: HistoryScan;
 };
 
@@ -250,7 +258,8 @@ export type DepositArrivalOptions = {
  * deposits, newest first, back past the oldest one waited for, at most
  * `maxPages` pages; none is asked while every deposit's window is still
  * open. On the RPC, a group of equal deposits from one sender is searched
- * from about when the first was sent, `maxWindows` windows at most.
+ * from about when the first was sent, `maxWindows` windows at most (one more
+ * where the search ahead takes them all while its blocks are read again).
  * A network without DuskEVM asks nothing. Throws a TypeError for a deposit
  * that isn't one, and for a network there's no file for.
  */

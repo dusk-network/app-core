@@ -2,6 +2,13 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `/bridge`: an RPC search reads each block more than once while its transfers wait, from the first transfer's block on, rather than once
+- `/bridge`: on an RPC, an earlier one of equal transfers takes a credit a later one could have had once the blocks before it are read again, rather than at once
+
 ## [0.3.1]
 
 ### Added

@@ -9,7 +9,7 @@ import { networks } from "@dusk-network/networks";
 import { evmAddressOf } from "@dusk-network/networks/duskevm";
 
 import { depositArrivals, migrationPayoutOf, migrationPayouts, serviceArrivals, serviceTransferOf } from "../src/bridge.js";
-import { bridgeFinalized, call, depositEntry, details, fakeChain, fakeExplorer, moonlight, tokenTransfer, transferTx, withRoutes } from "./fixtures/bridge.js";
+import { bridgeFinalized, call, depositEntry, details, fakeChain, fakeExplorer, moonlight, tokenTransfer, transferTx, untilArrived, withRoutes } from "./fixtures/bridge.js";
 import { fakeArchive, like } from "./fixtures/helpers.js";
 
 const DUSK = 1_000_000_000n;
@@ -70,7 +70,8 @@ describe("deposits to DuskEVM, on its RPC", () => {
     const d1 = sent("d1", second(100), { height: 4_990 });
     const d2 = sent("d2", second(200));
     const options = { archive: node.archiveClient(), fetch: chain.fetch, network: 2, via: /** @type {const} */ ("rpc") };
-    const first = await depositArrivals({ ...options, deposits: [d1, d2], now: second(2_000) });
+    // The earlier one's once its blocks are read again: the later one's could be among them.
+    const first = await untilArrived((scans) => depositArrivals({ ...options, deposits: [d1, d2].map((d) => ({ ...d, scan: scans.get(d.hash) })), now: second(2_000) }), dusk("d1"));
     const stopped = /** @type {any} */ (first.arrivals.get(dusk("d2")));
 
     like(first.arrivals.get(dusk("d1")), { hash: evmHash(1), state: "arrived" });
@@ -310,7 +311,11 @@ describe("transfers out to another chain", () => {
     const chain = fakeChain({ head: 2_000, logs: [paid("0a", 1_500)] });
     const options = { archive: node.archiveClient(), fetch: chain.fetch, network: net };
     const later = transfer("d1", 1_792_980_200, { height: 4_001 });
-    const first = await serviceArrivals({ ...options, now: second(2_000), transfers: [transfer("e1", 1_792_980_100), later] });
+    // The earlier one's once its blocks are read again: the later one's could be among them.
+    const first = await untilArrived(
+      (scans) => serviceArrivals({ ...options, now: second(2_000), transfers: [transfer("e1", 1_792_980_100), later].map((t) => ({ ...t, scan: scans.get(t.hash) })) }),
+      dusk("e1")
+    );
     const stopped = /** @type {any} */ (first.arrivals.get(dusk("d1")));
 
     like(first.arrivals.get(dusk("e1")), { hash: evmHash("0a"), state: "arrived" });

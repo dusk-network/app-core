@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { networks, routes } from "@dusk-network/networks";
 
 import { TRANSFER_TOPIC, migrationPayoutOf, migrationPayouts, serviceArrivals, serviceTransferOf } from "../src/bridge.js";
-import { fakeChain, moonlight, tokenTransfer, topicOf, transferTx, withRoutes } from "./fixtures/bridge.js";
+import { fakeChain, moonlight, tokenTransfer, topicOf, transferTx, untilArrived, withRoutes } from "./fixtures/bridge.js";
 import { fakeArchive, like } from "./fixtures/helpers.js";
 
 const DUSK = 1_000_000_000n;
@@ -329,9 +329,9 @@ describe("transfers out to BNB Smart Chain", () => {
       ]);
       const chain = fakeChain({ head: 2_000, logs: [paid("0a", 1_500)] });
       const options = { archive: node.archiveClient(), fetch: chain.fetch, network: net, now: 1_792_982_000_000 };
-      const both = await serviceArrivals({ ...options, transfers: [transfer("ef"), transfer("ab")] });
+      const both = await untilArrived((scans) => serviceArrivals({ ...options, transfers: [transfer("ef"), transfer("ab")].map((t) => ({ ...t, scan: scans.get(t.hash) })) }), dusk("ab"));
 
-      // One payout so far: it's the first transfer's.
+      // One payout so far: it's the first transfer's, once its blocks are read again.
       like(both.arrivals.get(dusk("ab")), { hash: evmHash("0a"), state: "arrived" });
       like(both.arrivals.get(dusk("ef")), { state: "waiting" });
 
