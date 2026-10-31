@@ -2,6 +2,25 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `/bridge`: `serviceArrivals` takes `blockTimes` as a cache for each chain, by its chain ID
+
+### Changed
+
+- `/bridge`: an RPC search's windows grow up to 100,000 blocks while the RPC answers them whole, and a call reads a chain's head and pace once for all its searches
+
+### Fixed
+
+- `/bridge`: an RPC search starts 10 minutes before the transfer as the chain's pace says, at a block whose time is checked to be before it, rather than a fifth further back than the pace says
+- `/bridge`: an RPC search keeps the width of its windows in its `scan`, so one window a call moves on past an RPC that takes fewer blocks than it asked
+- `/bridge`: `serviceArrivals` uses one `blockTimes` cache only for a network whose service routes are all on one chain
+- `/bridge`: a deposit without its sender's history reads no further once its windows are over and read
+- `/duskevm-withdrawals`: `syncWithdrawals` reads the final blocks again, the newest 50,000 on each run and all of them a pass at a time once covered, rather than once
+- `/duskevm-withdrawals`: `syncWithdrawals` counts both its head's requests against `maxRequests` where the RPC has no finalized block
+
 ## [0.3.2]
 
 ### Fixed

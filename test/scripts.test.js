@@ -9,6 +9,7 @@ import { networks } from "@dusk-network/networks";
 
 import { versionProblem } from "../scripts/check-versions.js";
 import { DRIVERS_URL, DriverMismatchError, fetchDrivers } from "../scripts/fetch-drivers.js";
+import { countingFetch, readWhole } from "../scripts/measure-reads.js";
 import { releaseNotes } from "../scripts/release-notes.js";
 
 describe("the release scripts", () => {
@@ -25,6 +26,47 @@ describe("the release scripts", () => {
     assert.equal(releaseNotes(changelog, "0.1.0"), "- a");
     assert.equal(releaseNotes(changelog, "0.0.1"), null);
     assert.equal(releaseNotes(changelog, "0.3.0"), null);
+  });
+});
+
+describe("the script that counts the bridge views' requests", () => {
+  const body = JSON.stringify({ id: 1, jsonrpc: "2.0", method: "eth_getLogs", params: [] });
+
+  it("counts a request whose fetch fails or whose answer can't be read, with its bytes and time", async () => {
+    let calls = 0;
+    const { fetch, rows } = countingFetch(async () => {
+      calls += 1;
+
+      if (calls === 1) throw new TypeError("fetch failed");
+
+      // An answer cut off as it's read.
+      return new Response(
+        new ReadableStream({
+          start: (controller) => controller.error(new Error("connection reset")),
+        })
+      );
+    });
+
+    await assert.rejects(fetch("https://rpc.example/", { body, method: "POST" }), /fetch failed/);
+    await assert.rejects(fetch("https://rpc.example/", { body, method: "POST" }), /connection reset/);
+
+    const row = rows.get("rpc.example eth_getLogs");
+
+    assert.equal(row?.requests, 2);
+    assert.equal(row?.sent, 2 * Buffer.byteLength(body));
+    assert.ok((row?.ms ?? -1) >= 0);
+  });
+
+  it("syncs an account's history until it's read whole, and no more", async () => {
+    let syncs = 0;
+    const history = {
+      // As /history's sync answers: what it added, its requests and its state.
+      sync: async () => ({ added: 0, requests: 1, state: { synced: (syncs += 1) } }),
+      read: async () => ({ complete: syncs >= 3 }),
+    };
+
+    await readWhole(history);
+    assert.equal(syncs, 3);
   });
 });
 

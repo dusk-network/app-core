@@ -268,9 +268,9 @@ describe("transfers out to BNB Smart Chain", () => {
     ]).archiveClient();
     const transfer = /** @type {any} */ ({ hash: dusk("dd"), route: "dusk-to-bsc" });
     const ask = (/** @type {any} */ one, /** @type {Record<string, unknown>} */ more = {}) =>
-      serviceArrivals({ archive, fetch: chain.fetch, network: 1, now: Date.UTC(2026, 9, 28), transfers: [one], ...more });
+      serviceArrivals({ archive, fetch: chain.fetch, maxWindows: 2, network: 1, now: Date.UTC(2026, 9, 28), transfers: [one], ...more });
 
-    // A check searches a few windows, and says where it got to.
+    // A check searches a few windows, two here, and says where it got to.
     const first = /** @type {any} */ ((await ask(transfer)).arrivals.get(dusk("dd")));
     const [asked] = chain.calls.filter((c) => c.method === "eth_getLogs");
 

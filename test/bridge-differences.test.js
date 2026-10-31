@@ -180,12 +180,15 @@ describe("where the apps searched an EVM chain's logs differently", () => {
     like(arrivals.get(dusk("ab")), { hash: evmHash(7), state: "arrived" });
   });
 
-  it("an RPC that won't search 5,000 blocks at once is asked a quarter as many (WW's search failed)", async () => {
+  it("an RPC that won't search 5,000 blocks at once is asked a quarter as many as it refused (WW's search failed)", async () => {
     const chain = fakeChain({ head: 2_000, logs: [credit(7, 1_100)], maxRange: 1_000n });
     const { arrivals } = await depositArrivals({ archive: listing(sent(second(999))), deposits: [sent(second(999), { notBefore: 1_000 })], fetch: chain.fetch, network: 2, now: second(2_000), via: "rpc" });
 
     like(arrivals.get(dusk("ab")), { hash: evmHash(7), state: "arrived" });
-    assert.deepEqual(chain.ranges().slice(0, 3), [[1_000n, 2_000n], [1_000n, 2_000n], [1_000n, 1_311n]]);
+    assert.deepEqual(chain.ranges(), [
+      [1_000n, 2_000n],
+      [1_000n, 1_249n],
+    ]);
   });
 
   it("a search carries on from where it stopped only while it starts from the same transfer or a later one (WW carried on from any)", async () => {
