@@ -338,7 +338,8 @@ describe("transfers out to another chain, with the route's account's history", (
       ]
     );
     const chain = fakeChain({ head: 300_000, logs: [paid("0a", 1_500), paid("0b", 290_600)] });
-    const options = { archive: node.archiveClient(), fetch: chain.fetch, network: net, now: second(300_000), waitMs: Infinity };
+    // Two windows a call: not as far as the recent one's payout.
+    const options = { archive: node.archiveClient(), fetch: chain.fetch, maxWindows: 2, network: net, now: second(300_000), waitMs: Infinity };
     const first = await serviceArrivals({
       ...options,
       transfers: [

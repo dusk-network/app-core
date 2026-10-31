@@ -356,8 +356,9 @@ const followed = deposits.then(({ arrivals }) => {
   } else if (one?.state === "unknown") {
     const why: UnknownReason = one.reason;
     const next: Scan | undefined = one.scan;
+    const width: [number | undefined, number | undefined] = [next?.size, next?.refused];
     const error: string | undefined = one.error;
-    void [why, next, error];
+    void [why, next, width, error];
   }
 
   const input: ActivityInput["arrivals"] = forActivity;
@@ -377,6 +378,15 @@ const out: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = servi
   transfers: facts?.to && !facts.problem ? [{ fee: facts.fee, hash: facts.hash, notBefore: 1n, route: facts.route, scan: null }] : [],
   waitMs: 1,
 });
+// A cache a chain, by its chain ID.
+const timesByChain = new Map<number, BlockTimes>();
+const outByChain: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = serviceArrivals({
+  archive,
+  blockTimes: (chainId: number) => timesByChain.get(chainId),
+  network: 1,
+  transfers: [],
+});
+void outByChain;
 const sentOut: [bigint, bigint | null] | null = facts ? [facts.sent, facts.amount] : null;
 const out2 = out.then(({ arrivals }) => {
   const one = arrivals.get("ab");
@@ -493,11 +503,13 @@ try {
 }
 const start: { to: `0x${string}`; data: `0x${string}`; value: bigint } = withdrawalCall(2, { amountWei: 10n ** 18n, minGasLimit: WITHDRAWAL_MIN_GAS_LIMIT, sender: "0x00", to: "x" });
 const scan: Promise<{ found: FoundWithdrawal[]; requests: number; state: WithdrawalScan }> = syncWithdrawals({ address: "0x00", duskEvm: client, network: 2 });
+// Its passes over the final blocks again: where the one under way is, and when the next begins.
+const passes = scan.then(({ state }) => [state.recheck?.from, state.recheck?.at] satisfies [number | null | undefined, number | undefined]);
 const listed: Promise<ExplorerWithdrawal[]> = explorerWithdrawals({ address: "0x00", maxItems: EXPLORER_ITEMS, network: 2 });
 const byNonce: Promise<Map<string, ExplorerWithdrawal>> = withdrawalsByNonce({ network: 2, nonces: [1n] });
 const stageOf: WithdrawalStage | null = explorerStage("Relayed");
 const named: "finalized" = STAGE.FINALIZED;
-void [start, scan, listed, byNonce, stageOf, named, GAME_SEARCH_DEPTH, MAX_BATCH];
+void [start, scan, passes, listed, byNonce, stageOf, named, GAME_SEARCH_DEPTH, MAX_BATCH];
 // @ts-expect-error a claim sends no DUSK along
 const sendsDusk: PortalCall["deposit"] = 1n;
 // @ts-expect-error a proof is for one account
