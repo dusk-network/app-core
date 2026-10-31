@@ -58,9 +58,9 @@ const indexOf = (index) => Number(BigInt(hexOf(index)));
  * did 303,000 s after it was created. The registry the Portal asks says as
  * `proper` and `respected` do.
  *
- * @param {{ proper?: (i: number) => boolean, resolved: (i: number) => boolean, respected?: (i: number) => boolean, updatedAt?: number, registry?: boolean, maxBatch?: number, portal?: Record<string, any>, hub?: Record<string, any> }} options
+ * @param {{ proper?: (i: number) => boolean, resolved: (i: number) => boolean, respected?: (i: number) => boolean, updatedAt?: number, registry?: boolean, maxBatch?: number, portal?: Record<string, any>, hub?: Record<string, any>, factory?: Record<string, any> }} options
  */
-function walletGames({ hub = {}, maxBatch, portal: portalReads = {}, proper = () => true, registry = true, resolved, respected = () => true, updatedAt = 0 }) {
+function walletGames({ factory = {}, hub = {}, maxBatch, portal: portalReads = {}, proper = () => true, registry = true, resolved, respected = () => true, updatedAt = 0 }) {
   const COUNT = 400;
   const tip = { height: 1_000_000n, timestamp: 2_000_000n };
   const created = (/** @type {number} */ i) => 2_000_000 - (COUNT - 1 - i) * 1_800;
@@ -91,6 +91,7 @@ function walletGames({ hub = {}, maxBatch, portal: portalReads = {}, proper = ()
       gameCount: () => u256(COUNT),
       gameMetadataAtIndex: (/** @type {number[]} */ index) => ({ extraData: [], l2SequenceNumber: u256(l2Block(indexOf(index))), rootClaim }),
       virtualGameHubId: () => Array(32).fill(0xd5),
+      ...factory,
     },
     drivers: { disputeGameFactory: jsonDriver(), optimismPortal: jsonDriver(portal) },
     hub: {
@@ -153,6 +154,26 @@ describe("the game a proof goes against, as the web wallet chose it", withDriver
     assert.deepEqual(/** @type {any[]} */ (prepared.call.args)[1], u256(229));
     assert.equal(prepared.call.gasLimit, 51_000_000n);
     like(prepared.call.decoded, { disputeGameIndex: 229n, kind: "prove" });
+  });
+
+  it("is a resolved one once the factory names its game type's hub, which isn't kept before (review)", async () => {
+    let named = 0;
+    const { withdrawals } = walletGames({
+      factory: { virtualGameHubId: () => Array(32).fill(named) },
+      // No hub at the all-zero contract ID.
+      hub: { maxClockDuration: (/** @type {unknown} */ _, /** @type {string} */ id) => (/^0+$/.test(id) ? assert.fail("No such contract") : 302_400n) },
+      resolved: OLD,
+    });
+
+    // No hub for its type yet: none old enough is found, and the newest covering game is it.
+    like((await withdrawals.prepareProof(TX, { submitter: SUBMITTER })).proof, { disputeGameIndex: 399n });
+
+    named = 0xd5;
+
+    const prepared = await withdrawals.prepareProof(TX, { submitter: SUBMITTER });
+
+    like(prepared.proof, { disputeGameIndex: 229n });
+    like(prepared.claim, { exact: true });
   });
 
   it("is the newest covering game when none has resolved, its date the earliest", async () => {

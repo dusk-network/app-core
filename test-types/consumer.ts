@@ -59,14 +59,19 @@ import {
   serviceTransferOf,
   type Arrival,
   type BlockTimes,
+  type BridgeNetwork,
   type Deposit,
+  type FactCache,
   type HistoryScan,
   type MigrationPayout,
+  type NetworkSettings,
   type NoPayout,
   type Scan,
   type ServiceTransferFacts,
   type UnknownReason,
+  depositArrivalsFromExplorer as fromBridge,
 } from "@dusk-network/app-core/bridge";
+import { depositArrivalsFromExplorer, type ExplorerDepositOptions } from "@dusk-network/app-core/bridge-explorer";
 import {
   DECOYS_PER_HEIGHT,
   HEIGHTS_PER_REQUEST,
@@ -344,7 +349,23 @@ const deposits: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = 
   via: "rpc",
   waitMs: WAIT_MS,
   windowMs: CREDIT_WINDOW_MS,
+  cache: new Map<string, string>(),
 });
+// A local chain there's no network file for, from the app's settings.
+const local: NetworkSettings = { chainId: 0, duskEvm: { blockscoutApiUrl: "http://127.0.0.1:4000/api/v2", predeploys: { l2StandardBridge: "0x4200000000000000000000000000000000000010" }, rpcUrl: "http://127.0.0.1:8545" } };
+const anyNetwork: BridgeNetwork[] = [local, 2, networks.testnet, { chainId: 0, duskEvm: null }];
+const keptFacts: FactCache = new Map<string, string>();
+void [anyNetwork, keptFacts, serviceArrivals({ archive, network: local, transfers: [] }), depositArrivals({ deposits: [], network: local })];
+// @ts-expect-error a network's settings name DuskEVM's bridge
+const noBridge: NetworkSettings = { chainId: 0, duskEvm: { rpcUrl: "http://127.0.0.1:8545" } };
+void noBridge;
+// An app that reads only the explorer.
+const explorerOnly: ExplorerDepositOptions = { deposits: [], fetch, maxPages: 1, network: local, now: 1, taken: [], waitMs: Infinity };
+const onExplorer: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = depositArrivalsFromExplorer(explorerOnly);
+const sameFunction: typeof depositArrivalsFromExplorer = fromBridge;
+void [onExplorer, sameFunction];
+// @ts-expect-error the explorer's reads take no RPC
+depositArrivalsFromExplorer({ deposits: [], network: 2, rpcUrl: "https://rpc.example" });
 const followed = deposits.then(({ arrivals }) => {
   const one: Arrival | undefined = arrivals.get("ab");
   // `/activity`'s input.
@@ -505,11 +526,13 @@ const start: { to: `0x${string}`; data: `0x${string}`; value: bigint } = withdra
 const scan: Promise<{ found: FoundWithdrawal[]; requests: number; state: WithdrawalScan }> = syncWithdrawals({ address: "0x00", duskEvm: client, network: 2 });
 // Its passes over the final blocks again: where the one under way is, and when the next begins.
 const passes = scan.then(({ state }) => [state.recheck?.from, state.recheck?.at] satisfies [number | null | undefined, number | undefined]);
+// The blocks to read again, where the RPC has no finalized block.
+const reread = scan.then(({ state }) => state.open satisfies number[][] | undefined);
 const listed: Promise<ExplorerWithdrawal[]> = explorerWithdrawals({ address: "0x00", maxItems: EXPLORER_ITEMS, network: 2 });
 const byNonce: Promise<Map<string, ExplorerWithdrawal>> = withdrawalsByNonce({ network: 2, nonces: [1n] });
 const stageOf: WithdrawalStage | null = explorerStage("Relayed");
 const named: "finalized" = STAGE.FINALIZED;
-void [start, scan, passes, listed, byNonce, stageOf, named, GAME_SEARCH_DEPTH, MAX_BATCH];
+void [start, scan, passes, reread, listed, byNonce, stageOf, named, GAME_SEARCH_DEPTH, MAX_BATCH];
 // @ts-expect-error a claim sends no DUSK along
 const sendsDusk: PortalCall["deposit"] = 1n;
 // @ts-expect-error a proof is for one account

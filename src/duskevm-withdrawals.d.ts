@@ -90,7 +90,11 @@ export declare const L2_WINDOW: 100000;
 /** Log searches one run of `syncWithdrawals` makes, the head's included, by default. */
 export declare const L2_RUN_REQUESTS: 8;
 
-/** DuskEVM blocks under the head counted as final where the RPC has no "finalized" block: about an hour. */
+/**
+ * DuskEVM blocks under the head counted as final where the RPC has no
+ * "finalized" block: about an hour. The blocks a run reads within that
+ * margin under it are read again once they're under a later run's.
+ */
 export declare const UNFINALIZED_MARGIN: 1800;
 
 /** Pages of an address's transactions `explorerWithdrawals` reads at most, by default. */
@@ -360,9 +364,9 @@ export type WithdrawalsOptions = {
   /** How many of the newest games a proof is looked for among: 64 by default, and for anything but a positive whole number. */
   gameSearchDepth?: number | bigint;
   /**
-   * Where the deployment's fixed facts are kept: each game's hub, each game
-   * type's hub, each hub's clock limit, and each withdrawal's receipt once
-   * its DuskEVM block is final.
+   * Where the deployment's fixed facts are kept: each game's hub and each
+   * game type's hub, once the factory names one, each hub's clock limit, and
+   * each withdrawal's receipt once its DuskEVM block is final.
    */
   cache?: FactCache;
   /** The clock, in milliseconds. */
@@ -463,6 +467,13 @@ export type FoundWithdrawal = {
 export type WithdrawalScan = {
   /** The final blocks covered, as ranges, highest first. */
   covered: number[][];
+  /**
+   * Where the RPC has no finalized block: the blocks covered within
+   * `UNFINALIZED_MARGIN` under the head a run read them under, as ranges,
+   * highest first, the newest 16, read again once they're under a later
+   * run's margin. Older ones are left to the passes over all the blocks.
+   */
+  open?: number[][];
   /** What was found, by hash. */
   entries: Record<string, FoundWithdrawal>;
   /** The final head the last run read under. */
@@ -489,7 +500,14 @@ export type WithdrawalScan = {
  * take though in half its requests at most (while older blocks are still to
  * be read, only once the final head has moved), and carries on below; under
  * a final head lower than the last run's, what was covered and found above
- * it is dropped, and read again. Once all the final blocks are
+ * it is dropped, and read again. Where the RPC has no finalized block, the
+ * final head is the latest less `UNFINALIZED_MARGIN`, and the blocks a run
+ * reads within that margin under it are read again once they're under a
+ * later run's (`open`): among the newest blocks a run reads again, or, once
+ * all the final blocks are covered, before the passes over them, with the
+ * requests a run has left. A deeper reorg there is found, and older blocks
+ * are read as they would be without it.
+ * Once all the final blocks are
  * covered, they're read again from the newest down, a pass at a time with
  * the requests a run has left: the first an hour later, each after as long
  * again as it has been since. A withdrawal is found once: one read again

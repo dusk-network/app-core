@@ -7,6 +7,7 @@
     "./shielded": "./src/shielded.js",
     "./activity": "./src/activity.js",
     "./bridge": "./src/bridge.js",
+    "./bridge-explorer": "./src/bridge-explorer.js",
     "./duskevm-withdrawals": "./src/duskevm-withdrawals.js"
   },
   "imports": {

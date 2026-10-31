@@ -240,14 +240,14 @@ describe("deposits to DuskEVM, on its RPC", () => {
     like(past.arrivals.get(dusk("a7")), { reason: "expired", state: "unknown" });
     assert.notEqual(past.arrivals.get(dusk("b7"))?.state, "arrived");
 
-    // The known one's sender's history can't be read.
+    // The known one's sender's history can't be read: it's followed as without it (#28).
     const node = fakeArchive({ accounts: {}, details: {}, finalized: 10_000 });
 
     node.down = true;
 
     const unread = await depositArrivals({ archive: node.archiveClient(), deposits: [known, unknown], fetch: fakeChain({ head: 2_150, logs }).fetch, network: 2, now: second(2_150), via: "rpc" });
 
-    like(unread.arrivals.get(dusk("a7")), { reason: "error", state: "unknown" });
+    like(unread.arrivals.get(dusk("a7")), { hash: evmHash(7), state: "arrived" });
     assert.notEqual(unread.arrivals.get(dusk("b7"))?.state, "arrived");
   });
 });

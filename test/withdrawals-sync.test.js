@@ -34,15 +34,15 @@ const withdrawalLog = (n, block) => ({
 
 /**
  * DuskEVM as a sync reads it: its final head (`final`), and the address's
- * logs in the blocks asked, 100,000 at most; `rate` of the answers come back
- * without their logs, at random, the same ones for the same `seed`, and the
- * next `held` answers for a range holding a block `hold` names. `asked`
- * keeps each request's method.
+ * logs in the blocks asked, `range` at most (100,000 by default); `rate` of
+ * the answers come back without their logs, at random, the same ones for
+ * the same `seed`, and the next `held` answers for a range holding a block
+ * `hold` names. `asked` keeps each request's method.
  *
  * @param {ReturnType<typeof withdrawalLog>[]} logs
- * @param {{ final: number, rate?: number, seed?: number, hold?: Map<number, number>, finalized?: boolean }} options
+ * @param {{ final: number, rate?: number, seed?: number, hold?: Map<number, number>, finalized?: boolean, range?: number }} options
  */
-function duskEvmOf(logs, { final, finalized = true, hold = new Map(), rate = 0, seed = 1 }) {
+function duskEvmOf(logs, { final, finalized = true, hold = new Map(), range = L2_WINDOW, rate = 0, seed = 1 }) {
   let drawn = 0;
   const random = () => createHash("sha256").update(`${seed}:${(drawn += 1)}`).digest().readUInt32BE(0) / 4_294_967_296;
   const chain = {
@@ -64,7 +64,7 @@ function duskEvmOf(logs, { final, finalized = true, hold = new Map(), rate = 0, 
       const [{ fromBlock, toBlock }] = params;
       const [from, to] = [Number(fromBlock), Number(toBlock)];
 
-      if (to - from + 1 > L2_WINDOW) throw new Error("query exceeds max block range 100000");
+      if (to - from + 1 > range) throw new Error(`query exceeds max block range ${range}`);
 
       const held = [...hold].filter(([block, times]) => times > 0 && block >= from && block <= to);
 
@@ -80,20 +80,22 @@ function duskEvmOf(logs, { final, finalized = true, hold = new Map(), rate = 0, 
 
 /**
  * Syncs as an app does, every `every` milliseconds for `runs` runs, the
- * final head `step` blocks on each time, with the state the last run gave:
- * each withdrawal found, by hash, with how many times it was, and each
- * run's requests.
+ * final head `step` blocks on each time, with the state the last run gave,
+ * from `kept` first: each withdrawal found, by hash, with how many times it
+ * was, each run's requests, and the lowest block covered after each run.
  *
  * @param {ReturnType<typeof duskEvmOf>} duskEvm
- * @param {{ runs: number, every: number, step: number, maxRequests?: number }} options
+ * @param {{ runs: number, every: number, step: number, maxRequests?: number, kept?: any }} options
  */
-async function syncs(duskEvm, { every, maxRequests, runs, step }) {
+async function syncs(duskEvm, { every, kept = null, maxRequests, runs, step }) {
   /** @type {Map<string, number>} */
   const found = new Map();
   /** @type {number[]} */
   const requests = [];
+  /** @type {number[]} */
+  const reached = [];
   /** @type {any} */
-  let state = null;
+  let state = kept;
   let clock = 1_793_000_000_000;
 
   for (let run = 0; run < runs; run += 1) {
@@ -104,11 +106,12 @@ async function syncs(duskEvm, { every, maxRequests, runs, step }) {
     for (const entry of sync.found) found.set(entry.hash, (found.get(entry.hash) ?? 0) + 1);
     requests.push(sync.requests);
     state = sync.state;
+    reached.push(Math.min(...state.covered.map((/** @type {number[]} */ [lo]) => lo)));
     clock += every;
     duskEvm.final += step;
   }
 
-  return { found, requests, state };
+  return { found, reached, requests, state };
 }
 
 describe("a sync of an address's withdrawals", () => {
@@ -118,6 +121,55 @@ describe("a sync of an address's withdrawals", () => {
 
     assert.deepEqual(duskEvm.asked, ["eth_getBlockByNumber", "eth_blockNumber", "eth_getLogs"]);
     assert.equal(sync.requests, 3);
+  });
+
+  it("reads the last 1,800 blocks under a head the RPC didn't call final again on the next run, so a deeper reorg there is found (#32)", async () => {
+    // No finalized block: the latest less 1,800 is taken as final, 300,000 here. Synced up to 299,550 before.
+    /** @type {ReturnType<typeof withdrawalLog>[]} */
+    const logs = [];
+    const duskEvm = duskEvmOf(logs, { final: 300_000, finalized: false });
+    const clock = 1_793_000_000_000;
+    const first = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, now: () => clock, state: { covered: [[0, 299_550]], entries: {}, target: 299_550, window: L2_WINDOW } });
+
+    // A reorg deeper than the margin puts a withdrawal in a block the run read under that head, without it.
+    logs.push(withdrawalLog(1, 299_000));
+    // The next run is 150,000 blocks on: the newest blocks it reads don't reach back there.
+    duskEvm.final = 450_000;
+
+    const next = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, now: () => clock + 15 * MINUTE, state: first.state });
+
+    assert.deepEqual(
+      next.found.map((entry) => [entry.hash, entry.blockNumber]),
+      [[h(1), 299_000]]
+    );
+    // Each run keeps the blocks it read within 1,800 under its head open. The
+    // second's requests: the head's two, the newest blocks, the new ones under
+    // them, then the first's open blocks.
+    assert.equal(first.state.target, 300_000);
+    assert.deepEqual([first.state.covered, first.state.open], [[[0, 300_000]], [[298_201, 300_000]]]);
+    assert.equal(next.requests, 5);
+    assert.deepEqual([next.state.covered, next.state.open], [[[0, 450_000]], [[448_201, 450_000]]]);
+
+    // Found once: the run after reads those blocks again, and gives it no more.
+    duskEvm.final += 450;
+
+    const after = await syncWithdrawals({ address: EVM, duskEvm, network: TESTNET, now: () => clock + 30 * MINUTE, state: next.state });
+
+    assert.deepEqual(after.found, []);
+    assert.ok(after.state.entries[h(1)]);
+  });
+
+  it("reads older blocks on each run as before, where the RPC has no finalized block and takes few blocks at once (#32, review)", async () => {
+    // Windows of 390 blocks, as an RPC that takes 500 at most leaves them; covered from 200,000 up, a withdrawal at 195,000 not read yet.
+    const duskEvm = duskEvmOf([withdrawalLog(1, 195_000)], { final: 300_000, finalized: false, range: 500 });
+    const kept = { covered: [[200_000, 300_000]], entries: {}, target: 300_000, window: 390 };
+    // The head 450 blocks on each run, as every 15 minutes.
+    const { found, reached, requests } = await syncs(duskEvm, { every: 15 * MINUTE, kept, runs: 10, step: 450 });
+
+    assert.deepEqual([...found], [[h(1), 1]]);
+    // Older blocks are read on each run, three windows at least after the first, which has the head's six.
+    for (let run = 1; run < reached.length; run += 1) assert.ok(reached[run] <= reached[run - 1] - 3 * 390, `run ${run}: down to ${reached[run]}`);
+    assert.ok(Math.max(...requests) <= 8);
   });
 
   it("finds a withdrawal an answer left out, reading the blocks again an hour after it covered them all (#40)", async () => {
