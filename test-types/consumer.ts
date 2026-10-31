@@ -66,7 +66,9 @@ import {
   type Scan,
   type ServiceTransferFacts,
   type UnknownReason,
+  depositArrivalsFromExplorer as fromBridge,
 } from "@dusk-network/app-core/bridge";
+import { depositArrivalsFromExplorer, type ExplorerDepositOptions } from "@dusk-network/app-core/bridge-explorer";
 import {
   DECOYS_PER_HEIGHT,
   HEIGHTS_PER_REQUEST,
@@ -345,6 +347,13 @@ const deposits: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = 
   waitMs: WAIT_MS,
   windowMs: CREDIT_WINDOW_MS,
 });
+// An app that reads only the explorer.
+const explorerOnly: ExplorerDepositOptions = { deposits: [], fetch, maxPages: 1, network: 2, now: 1, taken: [], waitMs: Infinity };
+const onExplorer: Promise<{ arrivals: Map<string, Arrival>; requests: number }> = depositArrivalsFromExplorer(explorerOnly);
+const sameFunction: typeof depositArrivalsFromExplorer = fromBridge;
+void [onExplorer, sameFunction];
+// @ts-expect-error the explorer's reads take no RPC
+depositArrivalsFromExplorer({ deposits: [], network: 2, rpcUrl: "https://rpc.example" });
 const followed = deposits.then(({ arrivals }) => {
   const one: Arrival | undefined = arrivals.get("ab");
   // `/activity`'s input.

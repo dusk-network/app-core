@@ -6,13 +6,46 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./history", "./shielded", "./activity", "./bridge", "./duskevm-withdrawals"];
+const ENTRIES = ["./history", "./shielded", "./activity", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+/** The modules the entry points share, which aren't entry points. */
+const SHARED = ["./src/bridge-common.js"];
 /** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
 const VIEM_ENTRY = "./duskevm-withdrawals";
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 /** @param {string} file */
 const source = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+
+/**
+ * A module's code without its comments, and what it imports and exports
+ * from other modules.
+ *
+ * @param {string} file
+ */
+function moduleOf(file) {
+  const code = source(file)
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const from = [...new Set([...code.matchAll(/^(?:import|export)\b[^;]*?\bfrom\s+"([^"]+)";/gm)].map((m) => m[1]))];
+
+  return { code, from };
+}
+
+/**
+ * The package's own modules an entry point loads, itself among them, by
+ * their paths under the package.
+ *
+ * @param {string} file
+ */
+function loads(file) {
+  const seen = new Set([file]);
+
+  for (const each of seen) {
+    for (const from of moduleOf(each).from) if (from.startsWith("./")) seen.add(`./src/${from.slice(2)}`);
+  }
+
+  return [...seen].sort();
+}
 
 describe("the package", () => {
   it("is an ES module under MPL-2.0 whose one runtime dependency, the networks' rules, is pinned exactly", () => {
@@ -71,9 +104,12 @@ describe("the package", () => {
     assert.deepEqual(activityRows(), []);
     assert.deepEqual(settleSends(), { drop: [], keep: [] });
 
-    const { arrivalsOf, depositArrivals, migrationPayouts, serviceArrivals } = await import("@dusk-network/app-core/bridge");
+    const { arrivalsOf, depositArrivals, depositArrivalsFromExplorer, migrationPayouts, serviceArrivals } = await import("@dusk-network/app-core/bridge");
+    const explorer = await import("@dusk-network/app-core/bridge-explorer");
 
     assert.equal(typeof depositArrivals, "function");
+    assert.deepEqual(Object.keys(explorer), ["depositArrivalsFromExplorer"]);
+    assert.equal(explorer.depositArrivalsFromExplorer, depositArrivalsFromExplorer);
     assert.equal(typeof migrationPayouts, "function");
     assert.equal(typeof serviceArrivals, "function");
     assert.deepEqual(arrivalsOf(new Map()), new Map());
@@ -114,33 +150,36 @@ describe("the package", () => {
   });
 
   it("runs in an extension's service worker and older browsers: no page, no browser storage, no code loaded at runtime", () => {
-    for (const entry of ENTRIES) {
+    const own = new Set([...Object.values(pkg.exports).map((target) => (typeof target === "string" ? target : target.default)), ...SHARED]);
+
+    for (const file of [...ENTRIES.map((entry) => pkg.exports[entry].default), ...SHARED]) {
+      const entry = ENTRIES.find((each) => pkg.exports[each].default === file);
       // The code, without its comments.
-      const code = source(pkg.exports[entry].default)
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/^\s*\/\/.*$/gm, "");
+      const { code, from } = moduleOf(file);
 
       // The page's globals (a sync's `window` is its span of blocks), and browser storage.
-      assert.doesNotMatch(code, /(?<![\w$.])(?:window|document|chrome|browser)\s*[.[]/, entry);
-      assert.doesNotMatch(code, /\b(?:localStorage|sessionStorage|indexedDB)\b/, entry);
-      assert.doesNotMatch(code, /\bimport\s*\(/, entry);
-      assert.doesNotMatch(code, /^await\b/m, entry);
+      assert.doesNotMatch(code, /(?<![\w$.])(?:window|document|chrome|browser)\s*[.[]/, file);
+      assert.doesNotMatch(code, /\b(?:localStorage|sessionStorage|indexedDB)\b/, file);
+      assert.doesNotMatch(code, /\bimport\s*\(/, file);
+      assert.doesNotMatch(code, /^await\b/m, file);
       // Nor a lookbehind, which older Safari can't parse.
-      assert.doesNotMatch(code, /\(\?<[=!]/, entry);
-      // Its imports are the networks' rules, the package's own entry points,
+      assert.doesNotMatch(code, /\(\?<[=!]/, file);
+      // Its imports are the networks' rules and the package's own modules,
       // and for DuskEVM's withdrawals viem, which no other entry point takes.
-      const imports = [...new Set([...code.matchAll(/^import\b[^;]*?\bfrom\s+"([^"]+)";/gm)].map((m) => m[1]))];
-      const own = Object.values(pkg.exports).map((target) => (typeof target === "string" ? target : target.default).replace(/^\.\/src\//, "./"));
-
-      assert.ok(imports.length > 0, entry);
-      assert.equal(imports.length, [...code.matchAll(/^import\b/gm)].length, `${entry}: every import is read`);
-      for (const from of imports) {
+      assert.ok(from.length > 0, file);
+      assert.equal([...code.matchAll(/^import\b/gm)].length, [...code.matchAll(/^import\b[^;]*?\bfrom\s+"[^"]+";/gm)].length, `${file}: every import is read`);
+      for (const each of from) {
         assert.ok(
-          from.split("/").slice(0, 2).join("/") === "@dusk-network/networks" || own.includes(from) || (from === "viem" && entry === VIEM_ENTRY),
-          `${entry}: ${from}`
+          each.split("/").slice(0, 2).join("/") === "@dusk-network/networks" || own.has(`./src/${each.slice(2)}`) || (each === "viem" && entry === VIEM_ENTRY),
+          `${file}: ${each}`
         );
       }
     }
+  });
+
+  it("lets an app that follows deposits on the explorer alone load just that: /bridge-explorer loads neither the RPC path nor /history", () => {
+    assert.deepEqual(loads(pkg.exports["./bridge-explorer"].default), ["./src/bridge-common.js", "./src/bridge-explorer.js"]);
+    assert.ok(loads(pkg.exports["./bridge"].default).includes("./src/history.js"));
   });
 
   it("keeps viem to DuskEVM's withdrawals, and the entries they import free of it", () => {
@@ -163,6 +202,9 @@ describe("the package", () => {
       "package.json",
       "src/activity.d.ts",
       "src/activity.js",
+      "src/bridge-common.js",
+      "src/bridge-explorer.d.ts",
+      "src/bridge-explorer.js",
       "src/bridge.d.ts",
       "src/bridge.js",
       "src/duskevm-withdrawals.d.ts",

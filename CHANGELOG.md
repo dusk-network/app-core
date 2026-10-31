@@ -4,6 +4,10 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+
+- `/bridge-explorer`: `depositArrivalsFromExplorer`, deposits followed on DuskEVM's explorer without the RPC path and `/history`, which `/bridge` exports too
+
 ### Fixed
 
 - `/duskevm-withdrawals`: where the RPC has no finalized block, `syncWithdrawals` reads the last 1,800 blocks under the head it takes as final again on the next run, rather than counting them covered

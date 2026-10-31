@@ -31,6 +31,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
 | `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); and the arrivals as `/activity` takes them (`arrivalsOf`) |
+| `@dusk-network/app-core/bridge-explorer` | Where a deposit to DuskEVM arrived, on DuskEVM's explorer alone (`depositArrivalsFromExplorer`): `/bridge`'s explorer path, for an app that reads nothing else, without the RPC path and `/history` |
 | `@dusk-network/app-core/duskevm-withdrawals` | A DuskEVM withdrawal's life, signing aside: its start on DuskEVM (`withdrawalCall`), finding an address's withdrawals (`syncWithdrawals`, `explorerWithdrawals`, `withdrawalsByNonce`), and on Dusk where each is, its proof and its claim, ready for the app's wallet to sign (`createWithdrawals`) |
 
 Every entry point has its `.d.ts`. The one runtime dependency is `@dusk-network/networks`. `/duskevm-withdrawals` also takes [viem](https://viem.sh) (`^2.55.2`), an optional peer: an app installs it to use that entry, and no other entry imports it.
@@ -201,6 +202,8 @@ const { arrivals } = await depositArrivals({
 // arrivals.get(hash): { state: "arrived", hash: "0x029e…", at: 1793080333000, amount: 500000000n, block: 3951755 }
 arrivalsOf(arrivals); // Map { hash => { hash: "0x029e…", at: 1793080333000 } }: `/activity`'s `arrivals`
 ```
+
+An app that follows deposits on DuskEVM's explorer alone imports `depositArrivalsFromExplorer` from `@dusk-network/app-core/bridge-explorer`: the same reads and results as `depositArrivals` with `via: "explorer"`, without the RPC path and `/history`. `/bridge` exports it too.
 
 - Each credit pays one transfer. Equal transfers (the same route, recipient and payout) are paid in the order they were sent: the oldest takes the first credit after it, from 2 minutes before its block, as the chains' clocks differ. The app passes the transfers it still waits for, and the credits its others arrived with (`taken`): none of those pays a waiting one, though an earlier transfer read from the chain takes its own back, as one given but not looked for does.
 - A transfer's time is its Dusk block's, never the device's clock. One without it yet isn't looked for. One sent more than a week ago (`waitMs`) is unknown, and isn't asked about.

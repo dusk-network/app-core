@@ -37,6 +37,9 @@
  *   search stopped, and the chain's block times. Nothing here keeps state
  *   outside the calls, so it runs in an extension's service worker as well
  *   as in a page.
+ * - An app that follows deposits on DuskEVM's explorer alone imports
+ *   `depositArrivalsFromExplorer` from `/bridge-explorer`, without the RPC
+ *   path and `/history`.
  *
  * @example
  * ```js
@@ -57,6 +60,8 @@
 
 import type { Account, EvmAddress, NetworkRef } from "@dusk-network/networks";
 import type { Archive, Direction, EntryKind } from "./history.js";
+
+export { depositArrivalsFromExplorer, type ExplorerDepositOptions } from "./bridge-explorer.js";
 
 /** How long before its transfer's block a credit still counts: Dusk's clock and the other chain's can differ. 2 minutes, in milliseconds. */
 export declare const CLOCK_SLACK_MS: 120000;

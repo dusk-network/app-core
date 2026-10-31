@@ -10,10 +10,44 @@
  * @module
  */
 
-import { networkFor, routeForAccount, routes } from "@dusk-network/networks";
+import { routeForAccount, routes } from "@dusk-network/networks";
 import { isAccount } from "@dusk-network/networks/account";
 import { BRIDGE_FUNCTIONS, duskEvmContracts, evmAddressOf } from "@dusk-network/networks/duskevm";
+import {
+  CREDIT_WINDOW_MS,
+  EVM_ADDRESS,
+  EVM_HASH,
+  TIMEOUT_MS,
+  WAIT_MS,
+  WEI_PER_LUX,
+  addressOf,
+  allOpen,
+  byTime,
+  depositsIn,
+  duskHashOf,
+  evmHashOf,
+  groupBy,
+  heightOf,
+  inOrder,
+  luxOf,
+  messageOf,
+  msOf,
+  networkOf,
+  pays,
+  quantityOf,
+  queued,
+  reader,
+  settle,
+  triage,
+  uniqueByHash,
+  usedOf,
+  withPast,
+} from "./bridge-common.js";
+import { depositArrivalsFromExplorer } from "./bridge-explorer.js";
 import { DETAILS_BATCH, TRANSFER_CONTRACT, fetchTxDetails, historyRange } from "./history.js";
+
+export { CREDIT_WINDOW_MS, EXPLORER_PAGES, WAIT_MS } from "./bridge-common.js";
+export { depositArrivalsFromExplorer } from "./bridge-explorer.js";
 
 /** @typedef {import("./bridge.js").Arrival} Arrival */
 /** @typedef {import("./bridge.js").BlockTimes} BlockTimes */
@@ -35,34 +69,13 @@ import { DETAILS_BATCH, TRANSFER_CONTRACT, fetchTxDetails, historyRange } from "
 /** @typedef {import("@dusk-network/networks").Network} Network */
 /** @typedef {import("@dusk-network/networks").NetworkRef} NetworkRef */
 /** @typedef {import("@dusk-network/networks").Route} Route */
-
-/**
- * A transfer as the matching sees it: when it was sent, the block on the
- * other chain its credit can't be before, and whether it is one of the
- * app's own (`given`) or one read from the chain.
- *
- * @typedef {{ hash: string, at: number, notBefore: bigint | null, given: boolean, scan: Scan | null }} Queued
- */
-
-/**
- * A credit on the other chain: its transaction, its block and time, its
- * amount in wei, whether it went through, and the address it came from as
- * its log names it (lower case; null where it isn't named). Found by an RPC
- * search, the passes over its blocks again done before it was (`pass`).
- *
- * @typedef {{ hash: string, block: bigint | null, at: number, wei: bigint, success: boolean, from: string | null, pass?: number }} Credit
- */
-
-/**
- * What a group's matching gave each transfer.
- *
- * @typedef {"arrived" | "waiting" | "unsure" | "late"} Verdict
- */
+/** @typedef {import("./bridge-common.js").Credit} Credit */
+/** @typedef {import("./bridge-common.js").DepositItem} DepositItem */
+/** @typedef {import("./bridge-common.js").Queued} Queued */
+/** @typedef {import("./bridge-common.js").Reader} Reader */
+/** @typedef {import("./bridge-common.js").Rules} Rules */
 
 export const CLOCK_SLACK_MS = 120_000;
-export const CREDIT_WINDOW_MS = 120_000;
-export const WAIT_MS = 7 * 24 * 60 * 60_000;
-export const EXPLORER_PAGES = 5;
 export const LOG_WINDOW = 5_000;
 export const LOG_WINDOWS = 8;
 export const DEPOSIT_HORIZON_MS = 2 * 60 * 60_000;
@@ -71,9 +84,6 @@ export const HISTORY_PAGES = 4;
 export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 export const ETH_BRIDGE_FINALIZED_TOPIC = "0x31b2166ff604fc5672ea5df08a78081d2bc6d746cadce880747f3643d819e83d";
 
-const WEI_PER_LUX = 1_000_000_000n;
-const MAX_U64 = (1n << 64n) - 1n;
-const TIMEOUT_MS = 8_000;
 // About one Dusk block every 10 seconds: how far back a sender's history is read.
 const DUSK_BLOCK_MS = 10_000;
 // The blocks the chain's pace is read over, from a block rounded down to a
@@ -99,83 +109,11 @@ const RECHECK_MS = 60_000;
 const CONFIRM_PASSES = 8;
 // What an RPC says when it won't search that many blocks at once.
 const RANGE_REFUSED = /limit|range|too many|exceed/i;
-const DUSK_HASH = /^[0-9a-f]{64}$/;
-const EVM_HASH = /^0x[0-9a-f]{64}$/;
-const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const WORDS = /^0x(?:[0-9a-fA-F]{64})+$/;
 
 // ---------------------------------------------------------------------------
 // Values
 // ---------------------------------------------------------------------------
-
-/**
- * Lux from a bigint, a safe integer or its decimal text: null for anything
- * else, and past a u64.
- *
- * @param {unknown} value
- * @returns {bigint | null}
- */
-function luxOf(value) {
-  /** @type {bigint} */
-  let n;
-
-  if (typeof value === "bigint") n = value;
-  else if (typeof value === "number" && Number.isSafeInteger(value)) n = BigInt(value);
-  else if (typeof value === "string" && /^\d+$/.test(value.trim())) n = BigInt(value.trim());
-  else return null;
-
-  return n >= 0n && n <= MAX_U64 ? n : null;
-}
-
-/**
- * A block number or a time as JSON-RPC writes it (hex), or as decimal: null
- * for anything else.
- *
- * @param {unknown} value
- * @returns {bigint | null}
- */
-function quantityOf(value) {
-  if (typeof value === "bigint") return value >= 0n ? value : null;
-  if (typeof value === "number") return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
-
-  const text = String(value ?? "").trim();
-
-  return /^0x[0-9a-fA-F]+$/.test(text) || /^\d+$/.test(text) ? BigInt(text) : null;
-}
-
-/**
- * A Dusk transaction's hash, lower case, without 0x; "" for anything else.
- *
- * @param {unknown} value
- */
-const duskHashOf = (value) => {
-  const hash = String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/^0x/, "");
-
-  return DUSK_HASH.test(hash) ? hash : "";
-};
-
-/**
- * An EVM transaction's hash, lower case; "" for anything else.
- *
- * @param {unknown} value
- */
-const evmHashOf = (value) => {
-  const hash = String(value ?? "")
-    .trim()
-    .toLowerCase();
-
-  return EVM_HASH.test(hash) ? hash : "";
-};
-
-/**
- * An EVM address, lower case; "" for anything else.
- *
- * @param {unknown} value
- */
-const addressOf = (value) => (typeof value === "string" && EVM_ADDRESS.test(value) ? value.toLowerCase() : "");
 
 /**
  * An address as an indexed log topic: 32 bytes, lower case.
@@ -186,33 +124,6 @@ const topicOf = (address) => `0x${address.slice(2).toLowerCase().padStart(64, "0
 
 /** @param {bigint} n */
 const hex = (n) => `0x${n.toString(16)}`;
-
-/**
- * @param {unknown} error
- * @returns {string}
- */
-const messageOf = (error) => String(/** @type {any} */ (error)?.message ?? error ?? "");
-
-/**
- * A Blockscout time ("2026-10-27T05:52:13.000000Z") in milliseconds.
- *
- * @param {unknown} text
- */
-const timeOf = (text) => Date.parse(String(text ?? "").replace(/(\.\d{3})\d+/, "$1"));
-
-/**
- * A time in milliseconds, or null.
- *
- * @param {unknown} value
- */
-const msOf = (value) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null);
-
-/**
- * A height, or null.
- *
- * @param {unknown} value
- */
-const heightOf = (value) => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null);
 
 /**
  * How far a transfer's history is read, as a result gave it; null for
@@ -294,284 +205,14 @@ function scanOf(value) {
 }
 
 /**
- * The network a reference names; a TypeError for none there's a file for.
- *
- * @param {NetworkRef} network
- * @returns {Network}
- */
-function networkOf(network) {
-  const net = network && typeof network === "object" ? network : networkFor(/** @type {number | bigint | string} */ (network));
-
-  if (!net || typeof net.chainId !== "number" || !net.routes) throw new TypeError("Not one of the networks");
-
-  return net;
-}
-
-/**
- * @template T
- * @param {Iterable<T>} items
- * @param {(item: T) => string} keyOf
- * @returns {Map<string, T[]>}
- */
-function groupBy(items, keyOf) {
-  /** @type {Map<string, T[]>} */
-  const out = new Map();
-
-  for (const item of items) {
-    const key = keyOf(item);
-
-    out.set(key, [...(out.get(key) ?? []), item]);
-  }
-
-  return out;
-}
-
-/**
- * Oldest first, then by hash, so the order is the same everywhere.
- *
- * @param {{ at: number, hash: string, block?: bigint | null }} a
- * @param {{ at: number, hash: string, block?: bigint | null }} b
- */
-const byTime = (a, b) =>
-  a.at - b.at || (a.block !== undefined && b.block !== undefined && a.block !== null && b.block !== null && a.block !== b.block ? (a.block < b.block ? -1 : 1) : 0) || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0);
-
-/**
  * @param {ReadonlyArray<bigint>} list
  * @returns {bigint}
  */
 const minOf = (list) => list.reduce((a, b) => (b < a ? b : a));
 
 // ---------------------------------------------------------------------------
-// Requests
-// ---------------------------------------------------------------------------
-
-/**
- * @param {string} url
- * @returns {string}
- */
-function hostOf(url) {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
-/**
- * The app's fetch, each request within `timeoutMs`, counted.
- *
- * @param {FetchLike | undefined} fetchFn
- * @param {number} timeoutMs
- */
-function reader(fetchFn, timeoutMs) {
-  const counter = { requests: 0 };
-
-  /**
-   * @param {string} url
-   * @param {{ method: "GET" | "POST", headers: Record<string, string>, body?: string }} init
-   * @returns {Promise<{ ok: boolean, status: number, body: any, host: string }>}
-   */
-  async function exchange(url, init) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const host = hostOf(url);
-
-    counter.requests += 1;
-
-    try {
-      const send = fetchFn ?? globalThis.fetch;
-      const response = await send(url, { ...init, signal: controller.signal });
-      const text = await response.text();
-      /** @type {any} */
-      let body;
-
-      try {
-        body = JSON.parse(text);
-      } catch {
-        throw new Error(response.ok ? `${host} didn't answer with JSON` : `${host} answers with HTTP ${response.status}`);
-      }
-
-      return { body, host, ok: response.ok, status: response.status };
-    } catch (error) {
-      if (controller.signal.aborted) throw new Error(`${host} didn't answer within ${Math.round(timeoutMs / 100) / 10} s`);
-
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  return {
-    counter,
-    // What a call reads once for all its searches, by what and where: a
-    // chain's head and pace.
-    /** @type {Map<string, Promise<any>>} */
-    once: new Map(),
-
-    /**
-     * @param {string} url
-     * @returns {Promise<any>}
-     */
-    async getJson(url) {
-      const answer = await exchange(url, { headers: { accept: "application/json" }, method: "GET" });
-
-      if (!answer.ok) throw new Error(`${answer.host} answers with HTTP ${answer.status}`);
-
-      return answer.body;
-    },
-
-    /**
-     * One JSON-RPC call; its error's message, with its code, when it refuses.
-     *
-     * @param {string} url
-     * @param {string} method
-     * @param {unknown[]} params
-     * @returns {Promise<any>}
-     */
-    async rpc(url, method, params) {
-      const answer = await exchange(url, {
-        body: JSON.stringify({ id: 1, jsonrpc: "2.0", method, params }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      const error = answer.body?.error;
-
-      if (error) throw Object.assign(new Error(String(error.message ?? `${method} was refused`)), { code: error.code });
-      if (!answer.ok) throw new Error(`${answer.host} answers ${method} with HTTP ${answer.status}`);
-
-      return answer.body?.result;
-    },
-  };
-}
-
-/** @typedef {ReturnType<typeof reader>} Reader */
-
-// ---------------------------------------------------------------------------
 // Matching: each credit pays one transfer, in the order they were sent
 // ---------------------------------------------------------------------------
-
-/**
- * Transfers whose windows touch, each window from `windowMs` before its
- * time to `windowMs` after: a credit in one could be another's.
- *
- * @param {ReadonlyArray<Queued>} queue oldest first
- * @param {number} windowMs
- * @returns {Queued[][]}
- */
-function clustersOf(queue, windowMs) {
-  /** @type {Queued[][]} */
-  const out = [];
-
-  for (const item of queue) {
-    const last = out[out.length - 1];
-
-    if (last && item.at - windowMs <= last[last.length - 1].at + windowMs) last.push(item);
-    else out.push([item]);
-  }
-
-  return out;
-}
-
-/**
- * Whether every window of the queue is still open: nothing in it can be
- * told apart yet.
- *
- * @param {ReadonlyArray<Queued>} queue
- * @param {number} windowMs
- * @param {number} now
- */
-const allOpen = (queue, windowMs, now) => clustersOf(queue, windowMs).every((cluster) => now < cluster[cluster.length - 1].at + windowMs);
-
-/**
- * How a group's credits are matched: see `settle`.
- *
- * @typedef {{ guarded: boolean, now: number, slackMs: number, used: ReadonlySet<string>, windowMs: number, rivals?: ReadonlySet<string> }} Rules
- */
-
-/**
- * Whether a credit could pay a transfer, whether or not another one took it:
- * it went through, isn't one the app gave another of its transfers when
- * this one is the app's, comes from none of `rivals`, and is in the
- * transfer's time and at or after the block it can't be before.
- *
- * @param {Queued} item
- * @param {Credit} credit
- * @param {Rules} rules
- */
-function pays(item, credit, { guarded, rivals = new Set(), slackMs, used, windowMs }) {
-  const lo = item.at - (guarded ? windowMs : slackMs);
-  const hi = guarded ? item.at + windowMs : Infinity;
-
-  return (
-    credit.success &&
-    (!item.given || !used.has(credit.hash)) &&
-    (credit.from === null || !rivals.has(credit.from)) &&
-    credit.at >= lo &&
-    credit.at <= hi &&
-    (item.notBefore === null || credit.block === null || credit.block >= item.notBefore)
-  );
-}
-
-/**
- * Each transfer of a queue of equal ones, oldest first, takes the first
- * credit that went through after it that no earlier one took: from
- * `slackMs` before it on, and at or after the block it can't be before.
- * None comes from an address of `rivals`: the senders of other transfers
- * the app gave, whose credits these could be. A credit the app gave another
- * of its transfers (`used`) is none of the app's own waiting ones; a
- * transfer read from the chain may have it, as the one it paid comes back
- * among them.
- *
- * Where the queue may not hold every transfer that could have made the
- * credits (`guarded`), a credit is a transfer's only within `windowMs`
- * either side of it, and once the windows that touch its own are over,
- * only when every payment of its amount in them (those that failed too) is
- * one of those transfers' credits, or one the app gave another. Otherwise
- * it could be another transfer's: unsure. A transfer whose windows closed
- * without a credit is late: one coming later can't be told apart.
- *
- * @param {ReadonlyArray<Queued>} queue oldest first
- * @param {ReadonlyArray<Credit>} credits
- * @param {Rules} rules
- * @returns {{ assigned: Map<string, Credit>, verdicts: Map<string, Verdict> }}
- */
-function settle(queue, credits, rules) {
-  const { guarded, now, used, windowMs } = rules;
-  const sorted = [...credits].sort(byTime);
-  /** @type {Map<string, Credit>} */
-  const assigned = new Map();
-  const taken = new Set();
-  /** @type {Map<string, Verdict>} */
-  const verdicts = new Map();
-
-  for (const item of queue) {
-    const credit = sorted.find((c) => !taken.has(c.hash) && pays(item, c, rules));
-
-    if (credit) {
-      assigned.set(item.hash, credit);
-      taken.add(credit.hash);
-    }
-  }
-
-  if (!guarded) {
-    for (const item of queue) verdicts.set(item.hash, assigned.has(item.hash) ? "arrived" : "waiting");
-
-    return { assigned, verdicts };
-  }
-
-  for (const cluster of clustersOf(queue, windowMs)) {
-    const lo = cluster[0].at - windowMs;
-    const hi = cluster[cluster.length - 1].at + windowMs;
-    const own = new Set(cluster.flatMap((item) => (assigned.has(item.hash) ? [/** @type {Credit} */ (assigned.get(item.hash)).hash] : [])));
-    const stray = sorted.some((c) => c.at >= lo && c.at <= hi && !used.has(c.hash) && !own.has(c.hash));
-
-    for (const item of cluster) {
-      verdicts.set(item.hash, now < hi ? "waiting" : stray ? "unsure" : assigned.has(item.hash) ? "arrived" : "late");
-    }
-  }
-
-  return { assigned, verdicts };
-}
 
 /**
  * The queue of equal transfers: the app's, and those read from the chain
@@ -593,25 +234,6 @@ function queueOf(given, read, horizonMs) {
   }
 
   return all.filter((_, i) => kept[i]);
-}
-
-/**
- * A queue of equal transfers where the credits can't be told apart, with
- * the ones the app gave but no longer looks for (waited for too long) whose
- * windows touch theirs: those were sent first, and take their credits
- * first.
- *
- * @param {ReadonlyArray<Queued>} given
- * @param {ReadonlyArray<Queued>} past
- * @param {number} windowMs
- * @returns {Queued[]}
- */
-function withPast(given, past, windowMs) {
-  const polled = new Set(given.map((item) => item.hash));
-
-  return clustersOf([...given, ...past].sort(byTime), windowMs)
-    .filter((cluster) => cluster.some((item) => polled.has(item.hash)))
-    .flat();
 }
 
 /**
@@ -1619,39 +1241,6 @@ function withHistory(hash, arrival, given, states) {
 // ---------------------------------------------------------------------------
 
 /**
- * A deposit as given, checked.
- *
- * @typedef {{ amount: bigint, at: number | null, hash: string, height: number | null, notBefore: bigint | null, scan: Scan | null, sender: string | null, to: string }} DepositItem
- */
-
-/**
- * @param {Deposit} deposit
- * @returns {DepositItem}
- */
-function depositIn(deposit) {
-  const hash = duskHashOf(deposit?.hash);
-  const amount = luxOf(deposit?.amount);
-  const to = addressOf(deposit?.to);
-  const sender = deposit?.sender ?? null;
-
-  if (!hash) throw new TypeError("A deposit's hash is its Dusk transaction's: 64 hex digits");
-  if (amount === null || amount === 0n) throw new TypeError("A deposit's amount is lux: more than 0, at most a u64");
-  if (!to) throw new TypeError("A deposit pays a DuskEVM address: 0x and 40 hex digits");
-  if (sender !== null && !isAccount(sender)) throw new TypeError("A deposit's sender is a Dusk account");
-
-  return {
-    amount,
-    at: msOf(deposit.at),
-    hash,
-    height: heightOf(deposit.height),
-    notBefore: quantityOf(deposit.notBefore),
-    scan: scanOf(deposit.scan),
-    sender: /** @type {string | null} */ (sender),
-    to,
-  };
-}
-
-/**
  * A transfer out as given, checked: its route, the fee the app gives where
  * it gives one, and where an earlier search stopped.
  *
@@ -1690,63 +1279,6 @@ function transferIn(transfer, services) {
  */
 const horizonOf = (route) => Math.max(SERVICE_HORIZON_MS, 4 * (route.typicalSeconds ?? 0) * 1000);
 
-/**
- * @param {{ hash: string, at: number | null, notBefore: bigint | null, scan: Scan | null }} item
- * @returns {Queued}
- */
-const queued = (item) => ({ at: /** @type {number} */ (item.at), given: true, hash: item.hash, notBefore: item.notBefore, scan: item.scan });
-
-/**
- * Sorts out the transfers that aren't looked for: without their block's
- * time yet, waiting; sent longer ago than they're waited for, unknown.
- *
- * @template {{ hash: string, at: number | null }} T
- * @param {ReadonlyArray<T>} list
- * @param {Map<string, Arrival>} results
- * @param {{ now: number, waitMs: number }} options
- * @returns {T[]}
- */
-function triage(list, results, { now, waitMs }) {
-  /** @type {T[]} */
-  const live = [];
-
-  for (const item of list) {
-    if (item.at === null) results.set(item.hash, { state: "waiting" });
-    else if (now - item.at > waitMs) results.set(item.hash, { reason: "expired", state: "unknown" });
-    else live.push(item);
-  }
-
-  return live;
-}
-
-/**
- * Each item once, by hash: the first.
- *
- * @template {{ hash: string }} T
- * @param {ReadonlyArray<T>} list
- * @returns {T[]}
- */
-function uniqueByHash(list) {
-  const seen = new Set();
-
-  return list.filter((item) => !seen.has(item.hash) && Boolean(seen.add(item.hash)));
-}
-
-/**
- * The results in the order the transfers came.
- *
- * @param {ReadonlyArray<{ hash: string }>} list
- * @param {Map<string, Arrival>} results
- * @returns {Map<string, Arrival>}
- */
-const inOrder = (list, results) => new Map(list.map((item) => [item.hash, /** @type {Arrival} */ (results.get(item.hash))]));
-
-/**
- * @param {Iterable<string> | undefined} taken
- * @param {(value: unknown) => string} hashOf
- */
-const usedOf = (taken, hashOf) => new Set([...(taken ?? [])].map(hashOf).filter(Boolean));
-
 // ---------------------------------------------------------------------------
 // Deposits to DuskEVM
 // ---------------------------------------------------------------------------
@@ -1755,169 +1287,34 @@ const usedOf = (taken, hashOf) => new Set([...(taken ?? [])].map(hashOf).filter(
  * @param {DepositArrivalOptions} options
  * @returns {Promise<{ arrivals: Map<string, Arrival>, requests: number }>}
  */
-export async function depositArrivals({
-  network,
-  deposits,
-  via = "explorer",
-  fetch: fetchFn,
-  explorerUrl,
-  rpcUrl,
-  archive,
-  taken,
-  blockTimes,
-  now = Date.now(),
-  waitMs = WAIT_MS,
-  windowMs = CREDIT_WINDOW_MS,
-  maxPages = EXPLORER_PAGES,
-  maxWindows = LOG_WINDOWS,
-  timeoutMs = TIMEOUT_MS,
-}) {
+export async function depositArrivals(options) {
+  const {
+    network,
+    deposits,
+    via = "explorer",
+    fetch: fetchFn,
+    rpcUrl,
+    archive,
+    taken,
+    blockTimes,
+    now = Date.now(),
+    waitMs = WAIT_MS,
+    windowMs = CREDIT_WINDOW_MS,
+    maxWindows = LOG_WINDOWS,
+    timeoutMs = TIMEOUT_MS,
+  } = options;
+
   if (via !== "explorer" && via !== "rpc") throw new RangeError('A deposit is followed on the "explorer" or the "rpc"');
+  if (via === "explorer") return depositArrivalsFromExplorer(options);
 
-  const net = networkOf(network);
-  const list = uniqueByHash(Array.from(deposits ?? [], depositIn));
+  const { evm, list, live, net, past, results, used } = depositsIn({ deposits, network, now, taken, waitMs }, scanOf);
   const read = reader(fetchFn, timeoutMs);
-  /** @type {Map<string, Arrival>} */
-  const results = new Map();
-  const evm = net.duskEvm;
 
-  if (!evm) {
-    for (const item of list) results.set(item.hash, { reason: "no-route", state: "unknown" });
-
-    return { arrivals: inOrder(list, results), requests: 0 };
-  }
-
-  const used = usedOf(taken, evmHashOf);
-  const live = triage(list, results, { now, waitMs });
-  // Waited for too long: not looked for, though still before the newer ones.
-  const past = list.filter((item) => item.at !== null && now - item.at > waitMs);
-  const bridge = evm.predeploys.l2StandardBridge.toLowerCase();
-  const rules = { now, past, results, used, windowMs };
-
-  if (via === "explorer") {
-    await onExplorer(read, live, { ...rules, api: String(explorerUrl ?? evm.blockscoutApiUrl), bridge, maxPages });
-  } else {
-    await onRpc(read, live, { ...rules, archive, blockTimes, bridge, list, maxWindows, net, url: String(rpcUrl ?? evm.rpcUrl) });
+  if (evm) {
+    await onRpc(read, live, { archive, blockTimes, bridge: evm.predeploys.l2StandardBridge.toLowerCase(), list, maxWindows, net, now, past, results, url: String(rpcUrl ?? evm.rpcUrl), used, windowMs });
   }
 
   return { arrivals: inOrder(list, results), requests: read.counter.requests };
-}
-
-/**
- * The L2 bridge's payments to an address, as DuskEVM's explorer lists its
- * incoming calls: newest first, a page at a time (the explorer's
- * `next_page_params`), back past `since`, at most `maxPages`. `complete`
- * once they reach it, or there are no more.
- *
- * @param {Reader} read
- * @param {{ api: string, bridge: string, maxPages: number, since: number, to: string }} ask
- * @returns {Promise<{ complete: boolean, payments: Credit[] }>}
- */
-async function explorerPayments(read, { api, bridge, maxPages, since, to }) {
-  const base = `${api.replace(/\/+$/, "")}/addresses/${to}/internal-transactions`;
-  /** @type {any[]} */
-  const items = [];
-  /** @type {Record<string, unknown> | null} */
-  let next = null;
-  let complete = false;
-
-  for (let page = 0; page < Math.max(1, Math.floor(maxPages)) && !complete; page += 1) {
-    const query = new URLSearchParams({ filter: "to" });
-
-    for (const [key, value] of Object.entries(next ?? {})) query.set(key, String(value));
-
-    const body = await read.getJson(`${base}?${query}`);
-    const calls = Array.isArray(body?.items) ? body.items : [];
-    const oldest = Math.min(...calls.map((/** @type {any} */ call) => timeOf(call?.timestamp)).filter(Number.isFinite));
-
-    items.push(...calls);
-    next = body?.next_page_params && typeof body.next_page_params === "object" ? body.next_page_params : null;
-    complete = !next || !calls.length || oldest < since;
-  }
-
-  /** @type {Map<string, Credit>} */
-  const payments = new Map();
-
-  for (const call of items) {
-    const hash = evmHashOf(call?.transaction_hash);
-    const at = timeOf(call?.timestamp);
-    const value = String(call?.value ?? "");
-    const payee = call?.to?.hash;
-
-    if (!hash || payments.has(hash) || !Number.isFinite(at) || !/^\d+$/.test(value)) continue;
-    if (String(call?.from?.hash ?? "").toLowerCase() !== bridge) continue;
-    if (payee !== undefined && payee !== null && String(payee).toLowerCase() !== to) continue;
-
-    payments.set(hash, { at, block: quantityOf(call?.block_number), from: null, hash, success: call?.success !== false, wei: BigInt(value) });
-  }
-
-  return { complete, payments: [...payments.values()] };
-}
-
-/**
- * Deposits followed on DuskEVM's explorer: each recipient's incoming calls
- * read once for all its deposits, and matched as where the credits can't be
- * told apart, as they don't say who deposited. Equal deposits past their
- * wait just before them take their payments first, their results kept.
- *
- * @param {Reader} read
- * @param {DepositItem[]} live
- * @param {{ api: string, bridge: string, maxPages: number, now: number, past: DepositItem[], results: Map<string, Arrival>, used: Set<string>, windowMs: number }} options
- */
-async function onExplorer(read, live, { api, bridge, maxPages, now, past, results, used, windowMs }) {
-  for (const [to, items] of groupBy(live, (item) => item.to)) {
-    const polled = new Set(items.map((item) => item.hash));
-    const groups = [...groupBy(items, (item) => item.amount.toString()).values()].map((group) => ({
-      queue: withPast(
-        group.map(queued),
-        past.filter((item) => item.to === to && item.amount === group[0].amount).map(queued),
-        windowMs
-      ),
-      wei: group[0].amount * WEI_PER_LUX,
-    }));
-
-    // Nothing can be told apart before a window is over: nothing is asked.
-    if (groups.every(({ queue }) => allOpen(queue, windowMs, now))) {
-      for (const item of items) results.set(item.hash, { state: "waiting" });
-      continue;
-    }
-
-    /** @type {{ complete: boolean, payments: Credit[] }} */
-    let page;
-
-    try {
-      page = await explorerPayments(read, { api, bridge, maxPages, since: Math.min(...groups.flatMap(({ queue }) => queue.map((item) => item.at))) - windowMs, to });
-    } catch (error) {
-      for (const item of items) results.set(item.hash, { error: messageOf(error), reason: "error", state: "unknown" });
-      continue;
-    }
-
-    // Not back to the oldest: a payment of an older one may be a newer one's.
-    if (!page.complete) {
-      for (const item of items) results.set(item.hash, { reason: "beyond", state: "unknown" });
-      continue;
-    }
-
-    for (const { queue, wei } of groups) {
-      const { assigned, verdicts } = settle(
-        queue,
-        page.payments.filter((payment) => payment.wei === wei),
-        { guarded: true, now, slackMs: windowMs, used, windowMs }
-      );
-
-      for (const item of queue.filter((each) => polled.has(each.hash))) {
-        const credit = assigned.get(item.hash);
-        const verdict = verdicts.get(item.hash);
-
-        if (credit && verdict === "arrived") {
-          used.add(credit.hash);
-          results.set(item.hash, { amount: credit.wei / WEI_PER_LUX, at: credit.at, block: credit.block === null ? null : Number(credit.block), hash: credit.hash, state: "arrived" });
-        } else {
-          results.set(item.hash, verdict === "waiting" ? { state: "waiting" } : { reason: verdict === "unsure" ? "unsure" : "late", state: "unknown" });
-        }
-      }
-    }
-  }
 }
 
 /**

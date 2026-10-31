@@ -25,6 +25,10 @@
       "types": "./src/bridge.d.ts",
       "default": "./src/bridge.js"
     },
+    "./bridge-explorer": {
+      "types": "./src/bridge-explorer.d.ts",
+      "default": "./src/bridge-explorer.js"
+    },
     "./duskevm-withdrawals": {
       "types": "./src/duskevm-withdrawals.d.ts",
       "default": "./src/duskevm-withdrawals.js"

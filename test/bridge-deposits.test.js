@@ -5,6 +5,7 @@ import { networks } from "@dusk-network/networks";
 import { evmAddressOf } from "@dusk-network/networks/duskevm";
 
 import { ETH_BRIDGE_FINALIZED_TOPIC, arrivalsOf, depositArrivals, depositOf } from "../src/bridge.js";
+import { depositArrivalsFromExplorer } from "../src/bridge-explorer.js";
 import { activityRows } from "../src/activity.js";
 import { fetchTxDetails, historyEntry, parseHistoryEntry } from "../src/history.js";
 import { BRIDGE, EXPLORER_API, L2_BRIDGE, bridgeFinalized, call, depositEntry, details, fakeChain, fakeExplorer, hex, moonlight, topicOf, untilArrived } from "./fixtures/bridge.js";
@@ -68,6 +69,28 @@ describe("a deposit's arrival, on DuskEVM's explorer", () => {
     assert.equal(result.requests, 1);
     // In the order given.
     assert.deepEqual([...result.arrivals.keys()], [dusk("a2"), dusk("a1")]);
+  });
+
+  it("is the same from /bridge-explorer, which an app that reads only the explorer imports (#26)", async () => {
+    const pages = [
+      [
+        call(l2(14), "2026-10-27T05:51:40.000000Z"),
+        call(l2(12), "2026-10-27T05:51:00Z", { value: "400000000000000000" }),
+        call(l2(13), "2026-10-27T05:50:40.000000Z"),
+      ],
+      [call(l2(10), "2026-10-27T05:40:00Z")],
+    ];
+    const deposits = [deposit("a2", AT + 60_000), deposit("a1", AT), deposit("a3", AT + 30_000, { amount: 400_000_000n }), deposit("a4", null), deposit("a5", AT - 8 * 24 * 3_600_000)];
+    const options = { deposits, network: 2, now: LATER, taken: [l2(12)] };
+    const both = await depositArrivals({ ...options, fetch: fakeExplorer(pages, { more: true }).fetch });
+    const alone = await depositArrivalsFromExplorer({ ...options, fetch: fakeExplorer(pages, { more: true }).fetch });
+
+    assert.deepEqual(alone, both);
+    // Each its own payment, one whose payment another deposit took, one without its block's time yet, and one sent too long ago.
+    assert.deepEqual(
+      [...alone.arrivals.values()].map((arrival) => (arrival.state === "arrived" ? arrival.hash : arrival.state === "unknown" ? arrival.reason : arrival.state)),
+      [l2(14), l2(13), "late", "waiting", "expired"]
+    );
   });
 
   it("isn't there without a payment of its amount after it that no other deposit has", async () => {
