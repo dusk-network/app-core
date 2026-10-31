@@ -206,6 +206,15 @@ const shieldedStore: ShieldedStore = {
     shieldedRecord = next;
   },
 };
+// One that keeps the decoys in one transaction.
+const updatingStore: ShieldedStore = {
+  ...shieldedStore,
+  update: async (change) => {
+    shieldedRecord = change(shieldedRecord);
+
+    return shieldedRecord;
+  },
+};
 let keptHeights: TreeHeights | null = null;
 const treeHeights: TreeHeightsStore = {
   get: async () => keptHeights,
@@ -220,7 +229,7 @@ const shielded: Promise<ShieldedHistory> = shieldedHistory({
   isCurrent: () => true,
   notes: async () => [owned],
   random: () => 1,
-  store: shieldedStore,
+  store: updatingStore,
   synced: true,
   tree,
   treeHeights,
@@ -248,7 +257,7 @@ const blocks: Promise<Map<number, ShieldedBlock>> = fetchShieldedBlocks(archive,
 const position: { height: number; pos: bigint } = leafInfo(owned.leaf);
 const made: ShieldedEntry[] = shieldedEntries({ blocks: new Map(), notes: [{ ...owned, value: 1n }] });
 const layout: number[] = [LEAF_BYTES, NOTE_BYTES, LEAF_POS_OFFSET, LEAF_HEIGHT_OFFSET, HEIGHTS_PER_REQUEST];
-void [shown, tapped, tapHeights, heightsKept, heightsRead, picked, blocks, position, made, layout];
+void [shieldedStore, shown, tapped, tapHeights, heightsKept, heightsRead, picked, blocks, position, made, layout];
 // @ts-expect-error a shielded history needs to know whether the notes are all found
 shieldedHistory({ archive, notes: () => [], store: shieldedStore, tree, treeHeights, valueOf: () => 1n });
 // @ts-expect-error an entry's amounts are text, as kept

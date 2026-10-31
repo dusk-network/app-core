@@ -371,11 +371,11 @@ describe("the wallets' kept shielded history", () => {
       status: "executed",
       timestamp: 1_782_131_528_000,
     },
-    // The notes it spent, as it received them.
+    // The notes it spent, as it received them: from an unshield's outputs, and a shield.
     ...[
-      { amount: "500000000", blockHeight: 226951, hash: MADE_LEAF_1, timestamp: 1_747_065_974_000 },
-      { amount: "10000000000", blockHeight: 184423, hash: MADE_LEAF_0, timestamp: 1_746_640_694_000 },
-    ].map((row) => ({ ...row, direction: "in", error: undefined, feePaid: undefined, kind: "shield", privacy: "shielded", source: "shielded", status: "executed" })),
+      { amount: "500000000", blockHeight: 226951, hash: MADE_LEAF_1, kind: "unshield", timestamp: 1_747_065_974_000 },
+      { amount: "10000000000", blockHeight: 184423, hash: MADE_LEAF_0, kind: "shield", timestamp: 1_746_640_694_000 },
+    ].map((row) => ({ ...row, direction: "in", error: undefined, feePaid: undefined, privacy: "shielded", source: "shielded", status: "executed" })),
   ];
   const KEY = "testnet::profile";
 

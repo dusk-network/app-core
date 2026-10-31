@@ -133,7 +133,7 @@ const { entries, pending } = await shieldedHistory({
 - `isCurrent` is asked between every two steps, before each request and write, and once more after the history is kept: once the wallet, the profile or the node changed, the read asks and keeps nothing more and rejects. A node that answered without the archive is asked nothing for an hour, its tree included.
 - The blocks come 15 heights a request, through the archive of `/history`.
 
-An entry is facts, not text: `kind` (the kinds of `/history`), `direction` for the profile's notes ("in", "out", or "self" when what they spent came back but the fee), `value` and `fee` in lux as decimal strings (a fee only where the profile's notes paid it), `success` and `error`, and its block's `timestamp`. It stores as JSON as it is.
+An entry is facts, not text: `kind` (the kinds of `/history`; a conversion's by where its value went, as its event says), `direction` for the profile's notes ("in", "out", or "self" when what they spent came back but the fee), `value` and `fee` in lux as decimal strings (a fee only where the profile's notes paid it), `success` and `error`, and its block's `timestamp`. It stores as JSON as it is.
 
 ### The stores and the tree
 
@@ -143,6 +143,7 @@ The app keeps the history where it wants, under its own keys, and reads its note
 |---|---|
 | `store.get()` | The profile's kept history, `{ fingerprint, entries, decoys }`, or null. Reject when it can't be read: the read then asks nothing rather than draw new decoys. |
 | `store.put(record)` | Keeps it in place of the one kept. A put that rejects, as one bound to a wallet that has been reset since, rejects the read. A store that can't keep a history for want of room may pass over it: the read gives it anyway, and the next one works it out again among the same decoys. |
+| `store.update(change)` | Optional: keeps `change(kept)` in place of the record kept now, in one transaction, and gives what it kept. The decoys are then drawn from those kept and kept at once, so two reads of a profile at once ask among the same ones. Without it, two such reads can each draw their own. It rejects and passes over a history as `put` does. |
 | `treeHeights.get()`, `treeHeights.put({ heights, notes })` | The note tree's distinct heights from its first `notes` leaves, shared by the network's profiles. A put that fails is passed over. |
 | `tree.size()` | How many leaves the node's note tree has (the transfer contract's `num_notes`). |
 | `tree.leaves(from)` | Its leaves from position `from` on (`leaves_from_pos`): a stream of their bytes, or an answer whose body is one. |

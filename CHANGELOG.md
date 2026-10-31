@@ -8,10 +8,16 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 - `/history`: `memoBinary` on an entry whose memo is bytes given as 0x hex, rather than typed 0x text
 - `/history`: a `check` for the store's `patch` and `clear` to make in the same transaction, so a run after a reset leaves another run's history of the new chain alone
+- `/shielded`: an optional `update` on the store, which keeps the decoys in one transaction, so two reads at once ask among the same ones
 
 ### Changed
 
 - `/history`: a details request that fails in `sync()` ends the run's details and resolves it with `detailsError`, rather than rejecting the run
+
+### Fixed
+
+- `/shielded`: a conversion is a shield or an unshield as its event says, also for a profile that only got its change
+- `/shielded`: two notes a block made for one shielded address go to a transaction each, rather than both to the first
 
 ## [0.3.2]
 

@@ -8,10 +8,10 @@
  *   and the block at that height says which transaction made it: a
  *   `phoenix` event lists the nullifiers its transaction spent and the
  *   notes it made, byte for byte as the leaves hold them, and an event
- *   paying a shielded receiver from a public account or a contract names
- *   part of the note. A transaction that spends notes always makes change
- *   for its sender, so the notes' heights hold every transaction that spent
- *   the profile's notes too.
+ *   paying a shielded receiver from a public account or a contract makes
+ *   one note, and names its address and value. A transaction that spends
+ *   notes always makes change for its sender, so the notes' heights hold
+ *   every transaction that spent the profile's notes too.
  * - Asking for the blocks at those heights alone would tell the node where
  *   the profile's transactions are, so each one is asked for among four
  *   other heights that hold notes, drawn from the note tree's heights. The
@@ -133,7 +133,12 @@ export type ShieldedEntry = {
   /** The transaction's hash: 64 lower-case hex digits. */
   hash: string;
   blockHeight: number;
-  /** What it did: a transfer, a shield or an unshield, a contract call, or a stake operation. */
+  /**
+   * What it did: a transfer, a shield or an unshield, a contract call, or a
+   * stake operation. A conversion is a shield or an unshield by where its
+   * value went, as its event says, also for a profile that only got its
+   * change.
+   */
   kind: EntryKind;
   /**
    * Which way the value went for the profile's notes: "in" for what they
@@ -182,6 +187,15 @@ export type ShieldedStore = {
    * the same decoys.
    */
   put(record: ShieldedRecord): Promise<void> | void;
+  /**
+   * Optional: keep `change(kept)` in place of the record kept now, in one
+   * transaction, and give what was kept. With it, the decoys are drawn from
+   * those kept and kept at once, so two reads of the profile at once (two
+   * pages, a popup and a page) ask among the same decoys; without it, they
+   * are put, then read back, and two such reads can still draw their own.
+   * It rejects and passes over a history as `put` does.
+   */
+  update?(change: (kept: ShieldedRecord | null) => ShieldedRecord): Promise<ShieldedRecord | void> | ShieldedRecord | void;
 };
 
 /** The note tree's distinct heights, from its first `notes` leaves. */
@@ -333,7 +347,8 @@ export declare function fetchShieldedBlocks(
  * first. A transaction that spent the profile's notes sent what they held,
  * less what came back to them (change, the fee's refund) and the fee; one
  * that only made notes is what they received. A note no event of its block
- * names is left out, and reverted events don't count.
+ * names is left out, and reverted events don't count; two notes a block
+ * made for one address go to a transaction each, by their values.
  */
 export declare function shieldedEntries(input: {
   notes: ReadonlyArray<ValuedNote>;
