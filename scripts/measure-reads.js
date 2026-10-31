@@ -20,8 +20,13 @@
  * - bsc: one transfer out to BNB Smart Chain on mainnet, from about its
  *   payout's block.
  *
+ * A request that fails counts as one, with the bytes it sent. A scenario's
+ * time leaves out what it reads, uncounted, to set itself up.
+ *
  *   node scripts/measure-reads.js [--only=name,...] [--minutes=5] [--json]
  */
+
+import { pathToFileURL } from "node:url";
 
 import { networks } from "@dusk-network/networks";
 
@@ -77,8 +82,14 @@ function kindOf(url, body) {
   return url.pathname.replace(/0x[0-9a-fA-F]{64}/g, "{hash}").replace(/0x[0-9a-fA-F]{40}/g, "{address}");
 }
 
-/** A fetch that counts each request, with the bytes each way and the time. */
-function countingFetch() {
+/**
+ * A fetch that counts each request `send` makes, with the bytes each way and
+ * the time: one that fails, or whose answer can't be read, too, as far as
+ * it got.
+ *
+ * @param {(input: string | URL | Request, init?: RequestInit) => Promise<Response>} [send]
+ */
+export function countingFetch(send = (input, init) => fetch(input, init)) {
   /** @type {Map<string, { requests: number, sent: number, received: number, ms: number }>} */
   const rows = new Map();
 
@@ -87,23 +98,26 @@ function countingFetch() {
     const url = new URL(input instanceof Request ? input.url : String(input));
     const body = typeof init.body === "string" ? init.body : "";
     const key = `${url.host} ${kindOf(url, body)}`;
-    const started = performance.now();
-    const response = await fetch(input, init);
-    const text = await response.text();
     const row = rows.get(key) ?? { ms: 0, received: 0, requests: 0, sent: 0 };
+    const started = performance.now();
 
+    rows.set(key, row);
     row.requests += 1;
     row.sent += Buffer.byteLength(body);
-    row.received += Buffer.byteLength(text);
-    row.ms += performance.now() - started;
-    rows.set(key, row);
 
-    const headers = new Headers(response.headers);
+    try {
+      const response = await send(input, init);
+      const text = await response.text();
+      const headers = new Headers(response.headers);
 
-    headers.delete("content-encoding");
-    headers.delete("content-length");
+      row.received += Buffer.byteLength(text);
+      headers.delete("content-encoding");
+      headers.delete("content-length");
 
-    return new Response(text, { headers, status: response.status, statusText: response.statusText });
+      return new Response(text, { headers, status: response.status, statusText: response.statusText });
+    } finally {
+      row.ms += performance.now() - started;
+    }
   };
 
   return { fetch: counted, rows };
@@ -144,6 +158,20 @@ function memoryStore() {
 }
 
 /**
+ * Syncs an account's history until it's read whole, as its read says: 40
+ * syncs at most.
+ *
+ * @param {{ sync: (options: { maxDetailRequests: number, maxRequests: number }) => Promise<unknown>, read: (options?: { limit?: number }) => Promise<{ complete: boolean }> }} history
+ */
+export async function readWhole(history) {
+  for (let run = 0; run < 40; run += 1) {
+    await history.sync({ maxDetailRequests: 8, maxRequests: 8 });
+
+    if ((await history.read({ limit: 1 })).complete) break;
+  }
+}
+
+/**
  * An account's deposits to DuskEVM, as its history gives them once read
  * whole: not counted.
  *
@@ -153,8 +181,7 @@ async function depositsOf(account) {
   const store = memoryStore();
   const history = createHistory({ account, archive: createArchive({ url: testnet.urls.node }), network: testnet, store: /** @type {any} */ (store) });
 
-  for (let run = 0; run < 40; run += 1) if ((await history.sync({ maxDetailRequests: 8, maxRequests: 8 })).complete) break;
-
+  await readWhole(history);
   await history.fillDetails(store.list({ limit: Infinity }));
 
   const { entries } = await history.read({ limit: 10_000 });
@@ -162,7 +189,9 @@ async function depositsOf(account) {
   return { deposits: entries.flatMap((entry) => depositOf(/** @type {any} */ (entry), account) ?? []), entries };
 }
 
-/** @type {Record<string, (fetch: ReturnType<typeof countingFetch>["fetch"]) => Promise<string>>} */
+// Each scenario, given the counting fetch and `begin`, which starts its clock
+// after what it reads uncounted to set itself up.
+/** @type {Record<string, (fetch: ReturnType<typeof countingFetch>["fetch"], begin: () => void) => Promise<string>>} */
 const scenarios = {
   // The bridge site's My transfers, on a first visit and the next.
   "my-transfers": async (fetch) => {
@@ -188,9 +217,12 @@ const scenarios = {
   },
 
   // The web wallet's Bridge activity: the deposits on their way, all at once, and the withdrawals on the explorer.
-  "bridge-activity": async (fetch) => {
+  "bridge-activity": async (fetch, begin) => {
     const { deposits } = await depositsOf(USER2);
     const blockTimes = new Map();
+
+    begin();
+
     const { arrivals } = await depositArrivals({ archive: createArchive({ fetch, url: testnet.urls.node }), blockTimes, deposits, fetch, network: testnet, via: "rpc", waitMs: Infinity });
     const listed = await explorerWithdrawals({ address: USER2_EVM, fetch, maxItems: 50, network: testnet });
 
@@ -198,8 +230,11 @@ const scenarios = {
   },
 
   // The extension's arrivals: the account's deposits on their way, as its popup asks.
-  arrivals: async (fetch) => {
+  arrivals: async (fetch, begin) => {
     const { deposits } = await depositsOf(USER1);
+
+    begin();
+
     const { arrivals } = await depositArrivals({ archive: createArchive({ fetch, url: testnet.urls.node }), blockTimes: new Map(), deposits, fetch, network: testnet, via: "rpc" });
 
     return `${[...arrivals.values()].filter((a) => a.state === "arrived").length} of ${deposits.length} deposits arrived`;
@@ -226,7 +261,7 @@ const scenarios = {
   },
 
   // One deposit waiting for its arrival, checked every 15 s: its credit is another's here.
-  waiting: async (fetch) => {
+  waiting: async (fetch, begin) => {
     const { deposits } = await depositsOf(USER1);
     const [deposit] = deposits;
     const first = await depositArrivals({ archive: createArchive({ url: testnet.urls.node }), deposits: [deposit], network: testnet, via: "rpc", waitMs: Infinity });
@@ -237,6 +272,8 @@ const scenarios = {
     let scan;
     let checks = 0;
     const until = Date.now() + minutes * 60_000;
+
+    begin();
 
     while (Date.now() < until) {
       const { arrivals } = await depositArrivals({ archive, blockTimes, deposits: [{ ...deposit, scan }], fetch, network: testnet, taken: credit ? [credit] : [], via: "rpc", waitMs: Infinity });
@@ -264,22 +301,26 @@ const scenarios = {
   },
 };
 
-/** @type {Record<string, { outcome: string, ms: number, rows: Record<string, { requests: number, sent: number, received: number, ms: number }> }>} */
-const report = {};
+/** Each scenario asked, counted: its outcome, its requests by where they went and what they asked, and its time. */
+async function main() {
+  /** @type {Record<string, { outcome: string, ms: number, rows: Record<string, { requests: number, sent: number, received: number, ms: number }> }>} */
+  const report = {};
 
-for (const [name, scenario] of Object.entries(scenarios)) {
-  if (only.length && !only.includes(name)) continue;
+  for (const [name, scenario] of Object.entries(scenarios)) {
+    if (only.length && !only.includes(name)) continue;
 
-  const counter = countingFetch();
-  const started = performance.now();
-  const outcome = await scenario(counter.fetch).catch((error) => `failed: ${error?.message ?? error}`);
+    const counter = countingFetch();
+    let started = performance.now();
+    const outcome = await scenario(counter.fetch, () => (started = performance.now())).catch((error) => `failed: ${error?.message ?? error}`);
 
-  report[name] = { ms: Math.round(performance.now() - started), outcome, rows: Object.fromEntries([...counter.rows].sort(([a], [b]) => a.localeCompare(b))) };
-}
+    report[name] = { ms: Math.round(performance.now() - started), outcome, rows: Object.fromEntries([...counter.rows].sort(([a], [b]) => a.localeCompare(b))) };
+  }
 
-if (json) {
-  console.log(JSON.stringify(report, null, 1));
-} else {
+  if (json) {
+    console.log(JSON.stringify(report, null, 1));
+    return;
+  }
+
   for (const [name, { ms, outcome, rows }] of Object.entries(report)) {
     const total = Object.values(rows).reduce((sum, row) => ({ received: sum.received + row.received, requests: sum.requests + row.requests, sent: sum.sent + row.sent }), { received: 0, requests: 0, sent: 0 });
 
@@ -289,3 +330,5 @@ if (json) {
     }
   }
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
