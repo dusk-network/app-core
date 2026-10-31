@@ -127,6 +127,11 @@ const U32_MAX = (1n << 32n) - 1n;
 /** The low 240 bits of a withdrawal's nonce: its count, under its version. */
 const NONCE_COUNT = (1n << 240n) - 1n;
 
+// The newest final blocks a sync reads again on each run, below the new
+// ones, and how long after it first covered all the final blocks it reads
+// them all again: each pass after waits as long again as it has been since.
+const L2_OVERLAP = 50_000;
+const L2_RECHECK_MS = 60 * 60_000;
 // Answers a read is sent again for, a quarter second, then half a second later.
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const ATTEMPTS = 3;
@@ -2086,20 +2091,41 @@ function withdrawalFromLog(log) {
 const tooWide = (error) => /range|limit|too many|exceed/i.test(asError(error).message);
 
 /**
- * The highest DuskEVM block that can't be reorged away.
+ * The highest DuskEVM block that can't be reorged away, and the requests it
+ * took.
  *
  * @param {(method: string, params?: unknown[]) => Promise<any>} rpc
+ * @returns {Promise<{ head: number, requests: number }>}
  */
 async function finalHead(rpc) {
   try {
     const block = await rpc("eth_getBlockByNumber", ["finalized", false]);
 
-    if (block?.number) return Number(BigInt(block.number));
+    if (block?.number) return { head: Number(BigInt(block.number)), requests: 1 };
   } catch {
     // An RPC without "finalized": the latest block, less a margin.
   }
 
-  return Math.max(0, Number(BigInt(await rpc("eth_blockNumber", []))) - UNFINALIZED_MARGIN);
+  return { head: Math.max(0, Number(BigInt(await rpc("eth_blockNumber", []))) - UNFINALIZED_MARGIN), requests: 2 };
+}
+
+/**
+ * A sync's passes over the blocks it covered, as a state gave them, the one
+ * under way no higher than `target`; null for anything else.
+ *
+ * @param {unknown} value
+ * @param {number} target
+ * @returns {NonNullable<WithdrawalScan["recheck"]> | null}
+ */
+function recheckOf(value, target) {
+  const kept = /** @type {any} */ (value);
+  /** @param {unknown} ms */
+  const time = (ms) => typeof ms === "number" && Number.isFinite(ms);
+
+  if (!kept || !time(kept.at) || !time(kept.since)) return null;
+  if (kept.from !== null && !(Number.isSafeInteger(kept.from) && kept.from >= 0)) return null;
+
+  return { at: kept.at, from: kept.from === null ? null : Math.min(kept.from, target), since: kept.since };
 }
 
 /**
@@ -2114,7 +2140,8 @@ export async function syncWithdrawals({ address, bridge, duskEvm, maxRequests = 
   if (!contract) throw new TypeError("No DuskEVM bridge to read");
 
   const rpc = evmRpc(duskEvm, net);
-  const target = await finalHead(rpc);
+  const { head: target, requests: asked } = await finalHead(rpc);
+  const time = now();
   // Coverage kept above the final head, as an older run read the latest, is
   // read again, and what was found there is dropped with it: it may have
   // been reorged away, or into another block.
@@ -2124,45 +2151,80 @@ export async function syncWithdrawals({ address, bridge, duskEvm, maxRequests = 
   const entries = Object.fromEntries(Object.entries(state?.entries ?? {}).filter(([, entry]) => Number(entry?.blockNumber) <= target));
   /** @type {FoundWithdrawal[]} */
   const found = [];
-  let requests = 1;
+  let requests = asked;
+  let recheck = recheckOf(state?.recheck, target);
   const topics = [ETH_BRIDGE_INITIATED_TOPIC, pad(sender)];
 
-  while (requests < maxRequests) {
-    const gap = topGap(covered, target);
-
-    if (!gap) break;
-
-    const [a, b] = gap;
-    const lo = Math.max(a, b - window + 1);
+  /**
+   * The address's withdrawals in blocks `lo` to `hi`, those blocks covered;
+   * false where the RPC asks for a narrower window, which it then is.
+   *
+   * @param {number} lo
+   * @param {number} hi
+   */
+  const read = async (lo, hi) => {
     /** @type {any[]} */
     let logs;
 
     requests += 1;
 
     try {
-      logs = await rpc("eth_getLogs", [{ address: contract, fromBlock: toHex(lo), toBlock: toHex(b), topics }]);
+      logs = await rpc("eth_getLogs", [{ address: contract, fromBlock: toHex(lo), toBlock: toHex(hi), topics }]);
     } catch (error) {
       if (window > 1_000 && tooWide(error)) {
         window = Math.floor(window / 4);
-        continue;
+        return false;
       }
 
       throw error;
     }
 
     for (const log of logs ?? []) {
+      // One found before, read again, is kept as it was.
+      if (entries[String(log?.transactionHash).toLowerCase()]) continue;
+
       const entry = withdrawalFromLog(log);
 
-      if (!entry || entries[entry.hash]) continue;
+      if (!entry) continue;
 
       entries[entry.hash] = entry;
       found.push(entry);
     }
 
-    covered = addCoverage(covered, lo, b);
+    covered = addCoverage(covered, lo, hi);
+
+    return true;
+  };
+
+  while (requests < maxRequests) {
+    const gap = topGap(covered, target);
+
+    if (gap) {
+      const [a, b] = gap;
+      // What is new above what was covered: with the newest blocks under it,
+      // read again on each run.
+      const floor = b === target && a > 0 ? Math.max(0, a - L2_OVERLAP) : a;
+
+      await read(Math.max(floor, b - window + 1), b);
+      continue;
+    }
+
+    // All the final blocks covered: they're read again, a pass at a time,
+    // from the newest down, with what a run has left.
+    if (recheck === null) recheck = { at: time + L2_RECHECK_MS, from: null, since: time };
+    if (recheck.from === null && time < recheck.at) break;
+
+    const from = recheck.from ?? target;
+    const lo = Math.max(0, from - window + 1);
+
+    if (!(await read(lo, from))) continue;
+
+    recheck = lo > 0 ? { ...recheck, from: lo - 1 } : { at: time + Math.max(L2_RECHECK_MS, time - recheck.since), from: null, since: recheck.since };
   }
 
-  return { found, requests, state: { covered, entries, target, updatedAt: now(), window } };
+  if (recheck === null && !topGap(covered, target)) recheck = { at: time + L2_RECHECK_MS, from: null, since: time };
+
+  return { found, requests, state: { covered, entries, ...(recheck ? { recheck } : {}), target, updatedAt: now(), window } };
 }
 
 /**

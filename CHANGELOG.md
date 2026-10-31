@@ -18,6 +18,8 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/bridge`: an RPC search keeps the width of its windows in its `scan`, so one window a call moves on past an RPC that takes fewer blocks than it asked
 - `/bridge`: `serviceArrivals` uses one `blockTimes` cache only for a network whose service routes are all on one chain
 - `/bridge`: a deposit without its sender's history reads no further once its windows are over and read
+- `/duskevm-withdrawals`: `syncWithdrawals` reads the final blocks again, the newest 50,000 on each run and all of them a pass at a time once covered, rather than once
+- `/duskevm-withdrawals`: `syncWithdrawals` counts both its head's requests against `maxRequests` where the RPC has no finalized block
 
 ## [0.3.2]
 

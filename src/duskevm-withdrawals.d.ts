@@ -458,6 +458,13 @@ export type WithdrawalScan = {
   target: number | null;
   /** The blocks one search asks for. */
   window: number;
+  /**
+   * Its passes over the final blocks, read again once they're all covered:
+   * the highest block the one under way reads next, downwards (`from`, null
+   * between two), when the next one begins (`at`), and when the blocks were
+   * first all covered (`since`), in milliseconds.
+   */
+  recheck?: { from: number | null; at: number; since: number };
   updatedAt?: number;
 };
 
@@ -465,10 +472,15 @@ export type WithdrawalScan = {
  * One run over an address's withdrawals, from the bridge's own event
  * (`ETHBridgeInitiated`, by its sender), the newest final blocks first, a
  * window at a time, narrower where the RPC asks for it, within
- * `maxRequests`. Only final blocks count as covered: those above can still
- * be reorged away. The next run carries on below and reads only what is
- * new above; under a final head lower than the last run's, what was
- * covered and found above it is dropped, and read again.
+ * `maxRequests`, the head's requests among them. Only final blocks count as
+ * covered: those above can still be reorged away. The next run carries on
+ * below and reads what is new above, with the 50,000 final blocks under it
+ * again; under a final head lower than the last run's, what was covered and
+ * found above it is dropped, and read again. Once all the final blocks are
+ * covered, they're read again from the newest down, a pass at a time with
+ * the requests a run has left: the first an hour later, each after as long
+ * again as it has been since. A withdrawal is found once: one read again
+ * isn't found again.
  */
 export declare function syncWithdrawals(options: {
   /** The DuskEVM address that sent them. */

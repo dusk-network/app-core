@@ -248,7 +248,7 @@ const claimCall = await withdrawals.claimCall(txHash, { submitter: account }); /
 
 ### Finding withdrawals
 
-- `syncWithdrawals({ address, duskEvm, network, state })` reads an address's withdrawals from the bridge's own `ETHBridgeInitiated` events, the newest final blocks first, a window of 100,000 blocks at a time (narrower where the RPC asks for it), 8 requests a run. It gives the app the state to keep, and the next run carries on below and reads only what is new above. Under a final head lower than the last run's, what it covered and found above it is dropped, and read again.
+- `syncWithdrawals({ address, duskEvm, network, state })` reads an address's withdrawals from the bridge's own `ETHBridgeInitiated` events, the newest final blocks first, a window of 100,000 blocks at a time (narrower where the RPC asks for it), 8 requests a run, the head's among them. It gives the app the state to keep, and the next run carries on below and reads what is new above, with the 50,000 final blocks under it again. Under a final head lower than the last run's, what it covered and found above it is dropped, and read again. It reads each final block more than once: once it has covered them all, it reads them again from the newest down, a pass at a time with the requests a run has left, the first an hour later and each one after as long again as it has been since. A withdrawal is found once.
 - `explorerWithdrawals({ address, network, fetch })` lists the address's own calls of the bridge on DuskEVM's explorer, each with the explorer's word for it (`explorerStage`), and `withdrawalsByNonce({ nonces, network, fetch })` finds the DuskEVM transactions of withdrawals known by the nonces their proofs and claims on Dusk carry.
 
 ### Reads and caches
