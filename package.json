@@ -45,11 +45,10 @@
   "devEngines": {
     "packageManager": {
       "name": "npm",
-      "version": "11.18.0",
+      "version": ">=11.18.0",
       "onFail": "error"
     }
   },
-  "packageManager": "npm@11.18.0",
   "allowScripts": {},
   "scripts": {
     "test": "node --test test/*.test.js",
