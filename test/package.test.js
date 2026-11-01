@@ -192,7 +192,8 @@ describe("the package", () => {
 
   it("packs only the code, the types and the docs", () => {
     // npm 11 prints an array of packages, newer npm an object keyed by name.
-    const report = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, encoding: "utf8" }));
+    // It counts this folder as a directory package, which .npmrc refuses elsewhere.
+    const report = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts", "--allow-directory=all"], { cwd: root, encoding: "utf8" }));
     const packed = Array.isArray(report) ? report[0] : report[pkg.name];
 
     assert.deepEqual(packed.files.map((/** @type {{ path: string }} */ f) => f.path).sort(), [

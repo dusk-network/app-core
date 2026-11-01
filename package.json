@@ -42,6 +42,15 @@
   "engines": {
     "node": ">=20.10"
   },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": "11.18.0",
+      "onFail": "error"
+    }
+  },
+  "packageManager": "npm@11.18.0",
+  "allowScripts": {},
   "scripts": {
     "test": "node --test test/*.test.js",
     "typecheck": "npx --yes --package=typescript@5.9.3 -- tsc -p test-types",
