@@ -42,15 +42,27 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
 
+      - name: Validate package release ages
+        run: node scripts/verify-package-release-ages.js --days 7
+
+      - name: Pin npm
+        run: npm install --global npm@11.18.0 --ignore-scripts
+        working-directory: ${{ runner.temp }}
+
       - name: Check the tag matches package.json and jsr.json
         run: node scripts/check-versions.js "$GITHUB_REF_NAME"
 
       - name: Take the release notes from CHANGELOG.md
         run: node scripts/release-notes.js "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
 
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Verify registry signatures
+        run: npm audit signatures
+
       - name: Test
         run: |
-          npm ci
           npm run fetch:drivers
           npm test
           npm run typecheck
@@ -73,7 +85,8 @@ jobs:
           if npm view "@dusk-network/app-core@${version}" version >/dev/null 2>&1; then
             echo "npm already has @dusk-network/app-core@${version}"
           else
-            npm publish --provenance --access public
+            # npm counts this folder as a directory package, which .npmrc refuses elsewhere.
+            npm publish --provenance --access public --allow-directory=all
           fi
 
       - name: Create the GitHub release

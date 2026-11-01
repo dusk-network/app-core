@@ -13,10 +13,20 @@ jobs:
     runs-on: core
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: latest
-      - run: npm ci
+      - name: Validate package release ages
+        run: node scripts/verify-package-release-ages.js --days 7
+      - name: Pin npm
+        run: npm install --global npm@11.18.0 --ignore-scripts
+        working-directory: ${{ runner.temp }}
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Verify registry signatures
+        run: npm audit signatures
       # The withdrawal tests run the network's data drivers, which git doesn't
       # keep: fetched from their pinned URL, and checked against the hashes
       # the network's file pins. A fetch that fails, or a driver that isn't
