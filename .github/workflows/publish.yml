@@ -41,6 +41,8 @@ jobs:
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
+          # Our steps pin npm themselves; auto-caching would run the runner's npm here first.
+          package-manager-cache: false
 
       - name: Validate package release ages
         run: node scripts/verify-package-release-ages.js --days 0.5
