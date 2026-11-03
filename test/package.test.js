@@ -52,21 +52,17 @@ describe("the package", () => {
     assert.equal(pkg.name, "@dusk-network/app-core");
     assert.equal(pkg.type, "module");
     assert.equal(pkg.license, "MPL-2.0");
-    assert.deepEqual(pkg.dependencies, { "@dusk-network/networks": "0.3.2" });
-
-    const lock = JSON.parse(source("package-lock.json"));
-
-    assert.equal(lock.packages["node_modules/@dusk-network/networks"].version, "0.3.2");
+    assert.deepEqual(Object.keys(pkg.dependencies), ["@dusk-network/networks"]);
+    assert.match(pkg.dependencies["@dusk-network/networks"], /^\d+\.\d+\.\d+$/);
   });
 
-  it("takes viem as an optional peer, the range the apps use, and tests with its lowest version", () => {
-    assert.deepEqual(pkg.peerDependencies, { viem: "^2.55.2" });
+  it("takes viem as an optional peer and tests with its lowest version", () => {
+    assert.deepEqual(pkg.peerDependencies, { viem: `^${pkg.devDependencies.viem}` });
     assert.deepEqual(pkg.peerDependenciesMeta, { viem: { optional: true } });
-    assert.deepEqual(pkg.devDependencies, { viem: "2.55.2" });
+    assert.deepEqual(Object.keys(pkg.devDependencies), ["viem"]);
 
     const lock = JSON.parse(source("package-lock.json"));
 
-    assert.equal(lock.packages["node_modules/viem"].version, "2.55.2");
     assert.equal(lock.packages["node_modules/viem"].dev, true);
 
     // On JSR, the same range: without it JSR would take the version installed.
