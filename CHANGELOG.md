@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.5.1]
+
+### Changed
+
+- `@dusk-network/networks` 0.3.1, with mainnet's and testnet's explorers on their own domains
+
 ## [0.5.0]
 
 ### Added
