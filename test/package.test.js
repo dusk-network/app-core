@@ -52,11 +52,11 @@ describe("the package", () => {
     assert.equal(pkg.name, "@dusk-network/app-core");
     assert.equal(pkg.type, "module");
     assert.equal(pkg.license, "MPL-2.0");
-    assert.deepEqual(pkg.dependencies, { "@dusk-network/networks": "0.3.1" });
+    assert.deepEqual(pkg.dependencies, { "@dusk-network/networks": "0.3.2" });
 
     const lock = JSON.parse(source("package-lock.json"));
 
-    assert.equal(lock.packages["node_modules/@dusk-network/networks"].version, "0.3.1");
+    assert.equal(lock.packages["node_modules/@dusk-network/networks"].version, "0.3.2");
   });
 
   it("takes viem as an optional peer, the range the apps use, and tests with its lowest version", () => {
