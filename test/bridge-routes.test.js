@@ -306,7 +306,7 @@ describe("transfers out to BNB Smart Chain", () => {
     const chain = fakeChain({ head: 16, timeAt: () => 16 });
     const node = routeArchive(TO_BSC.account, [{ byte: "dd", height: 4_000_000, memo: EVM, seconds: SENT_AT / 1000, value: 200_001n * DUSK }]);
 
-    like((await serviceArrivals({ archive: node.archiveClient(), fetch: chain.fetch, network: 1, transfers: [{ hash: dusk("dd"), route: "dusk-to-bsc" }] })).arrivals.get(dusk("dd")), { state: "waiting" });
+    like((await serviceArrivals({ archive: node.archiveClient(), fetch: chain.fetch, network: 1, now: SENT_AT + 60_000, transfers: [{ hash: dusk("dd"), route: "dusk-to-bsc" }] })).arrivals.get(dusk("dd")), { state: "waiting" });
     assert.deepEqual(chain.methods(), ["eth_getBlockByNumber", "eth_getBlockByNumber", "eth_getLogs"]);
     // Its transaction, and the route's account's history.
     assert.deepEqual([node.log.length, node.historyQueries().length], [2, 1]);
