@@ -538,3 +538,11 @@ const sendsDusk: PortalCall["deposit"] = 1n;
 // @ts-expect-error a proof is for one account
 void withdrawals.prepareProof("0x00", {});
 void sendsDusk;
+
+import { amountForField, amountLocale, decimalSeparator, formatDusk, formatDuskPlain, groupDigits, normalizeAmount, parseDusk, unclearAmount } from "@dusk-network/app-core/amounts";
+
+const shownAmount: { text: string; exact: string } = formatDusk(1n, { mode: "short", round: "up", locale: amountLocale("nl-NL") });
+const plainAmount: string = amountForField(formatDuskPlain(1n), decimalSeparator());
+const readLux: bigint | null = parseDusk(normalizeAmount(groupDigits(1n), ","));
+const eitherAmount: { grouped: string; decimal: string } | null = unclearAmount("1.001", ",");
+void [shownAmount, plainAmount, readLux, eitherAmount];

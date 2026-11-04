@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./history", "./shielded", "./activity", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./history", "./shielded", "./activity", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
 const SHARED = ["./src/bridge-common.js"];
 /** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
@@ -162,7 +162,7 @@ describe("the package", () => {
       assert.doesNotMatch(code, /\(\?<[=!]/, file);
       // Its imports are the networks' rules and the package's own modules,
       // and for DuskEVM's withdrawals viem, which no other entry point takes.
-      assert.ok(from.length > 0, file);
+      assert.ok(from.length > 0 || entry === "./amounts", file);
       assert.equal([...code.matchAll(/^import\b/gm)].length, [...code.matchAll(/^import\b[^;]*?\bfrom\s+"[^"]+";/gm)].length, `${file}: every import is read`);
       for (const each of from) {
         assert.ok(
@@ -199,6 +199,8 @@ describe("the package", () => {
       "package.json",
       "src/activity.d.ts",
       "src/activity.js",
+      "src/amounts.d.ts",
+      "src/amounts.js",
       "src/bridge-common.js",
       "src/bridge-explorer.d.ts",
       "src/bridge-explorer.js",
