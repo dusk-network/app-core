@@ -1,6 +1,6 @@
 # @dusk-network/app-core
 
-Shared logic for the Dusk apps: public and shielded history, activity rows, bridge arrivals and DuskEVM withdrawals.
+Shared logic for the Dusk apps: amounts, public and shielded history, activity rows, bridge arrivals and DuskEVM withdrawals.
 
 It has no framework and runs in a browser extension's service worker. Each part is its own entry point, so an app loads only what it uses. Apps pass in their own fetch, batching and storage; the package never chooses storage keys.
 
@@ -27,6 +27,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 
 | Import | What it gives |
 |---|---|
+| `@dusk-network/app-core/amounts` | Amounts of DUSK as the apps write and read them, in the browser's language: `formatDusk`, `formatDuskPlain`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits` |
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |

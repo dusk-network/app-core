@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.6.0]
+
+### Added
+
+- `/amounts`: `formatDusk` and `formatDuskPlain`, moved from `@dusk-network/networks/format`, and reading amounts in the browser's language
+
 ## [0.5.2]
 
 ### Changed
