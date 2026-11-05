@@ -106,6 +106,20 @@ async function fileOf(account, input, options = {}) {
  */
 const recordedFile = (account, height, options) => fileOf(account, { public: [recorded(account, height)] }, options);
 
+describe("the days of a period", () => {
+  it("starts on the day itself where the clocks skip midnight", () => {
+    const { from } = datesPeriod("2026-09-06", "2026-09-06", { timeZone: "America/Santiago" });
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago" }).format(from);
+
+    assert.equal(day, "2026-09-06");
+  });
+
+  it("refuses a day that doesn't exist", () => {
+    assert.throws(() => datesPeriod("2026-02-29", "2026-03-01"), RangeError);
+    assert.throws(() => datesPeriod("2026-13-01", "2026-13-02"), RangeError);
+  });
+});
+
 describe("the format", () => {
   it("has Koinly's universal columns, its twelve first and by their exact names", () => {
     assert.deepEqual(CSV_COLUMNS.slice(0, 12), [
@@ -344,6 +358,14 @@ describe("what's only a fee", () => {
     assert.equal(records[0]["Sent Amount"], "0.000069945");
     assert.equal(records[0].Description, "Transfer to the account itself · extension test");
     assert.equal(records[0].Memo, "extension test");
+  });
+
+  it("counts a shield received from someone else as money coming in", async () => {
+    const received = { amount: "5000000000", direction: "in", fee: null, hash: hash(0x77), kind: "shield", success: true, timestamp: 1_790_000_000, value: "5000000000" };
+    const { records } = await fileOf(B, { shielded: [received] }, { profile: { account: B, address: "shieldedB", name: SOFIA } });
+
+    assert.equal(records.length, 1);
+    assert.equal(records[0]["Received Amount"], "5");
   });
 
   it("is a shield to the profile's own address, which moves nothing out of it", async () => {

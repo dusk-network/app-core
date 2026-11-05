@@ -388,3 +388,41 @@ describe("a read of a route's status", () => {
     assert.deepEqual([...chainUrls], ["https://my.rpc"]);
   });
 });
+
+describe("a read that can't finish", () => {
+  it("doesn't call a list too full to read to its end a route with no payouts", async () => {
+    // Plain transfers fill every page, and pages run oldest first.
+    const sent = Array.from({ length: 400 }, (_, i) => {
+      const entry = structuredClone(mainnet.sent[0]);
+
+      entry.block_height -= 400 - i;
+      for (const event of entry.events ?? []) if (event.data?.memo !== undefined) event.data.memo = "";
+
+      return entry;
+    });
+    const status = await bridgeStatus({ fetch: bscRoute({ sent }).fetch, network: 1, now: NOW, route: "bsc-to-dusk" });
+
+    assert.equal(status.lastPayout, null);
+    assert.equal(status.readSince, null);
+    assert.equal(status.paying, "unknown");
+  });
+
+  it("finds a payout in a stretch a narrowed read didn't reach, on the reads after", async () => {
+    const start = BigInt(mainnet.bsc.head);
+    const cache = new Map();
+    const at = start + 30_000n;
+    const logs = [...mainnet.bsc.logs.map(chainLog), { ...chainLog(PAYOUT), block: at, hash: `0x${"ab".repeat(32)}` }];
+
+    await bridgeStatus({ cache, fetch: bscRoute({ head: start, logs: mainnet.bsc.logs.map(chainLog) }).fetch, network: 1, now: NOW, route: "dusk-to-bsc" });
+
+    let status;
+
+    for (let read = 1; read <= 12; read += 1) {
+      status = await bridgeStatus({ cache, fetch: bscRoute({ head: start + 90_000n, logs, maxRange: 5_000n }).fetch, network: 1, now: NOW + read * (STATUS_MAX_AGE_MS + 1), route: "dusk-to-bsc" });
+
+      if (status.lastPayout?.block === Number(at)) break;
+    }
+
+    assert.equal(status?.lastPayout?.block, Number(at));
+  });
+});

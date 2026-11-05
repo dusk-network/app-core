@@ -12,6 +12,16 @@ import { like } from "./fixtures/helpers.js";
 // A real shielded address, as a shield of the recording names it.
 const SHIELDED = /** @type {string} */ (activityRows({ public: [recorded(B, 2517213)], account: B, network: 2 })[0].counterparty);
 
+describe("an amount given in lux", () => {
+  it("refuses a number that has already lost its last digits", () => {
+    const made = makePaymentLink({ amountLux: 18_100_000_000_000_008, network: "mainnet", to: "public-abc" });
+
+    assert.equal(made.ok, false);
+    assert.equal(made.problems.amount, "That amount is too large.");
+    assert.ok(makePaymentLink({ amountLux: 18_100_000_000_000_008n, network: "mainnet", to: "public-abc" }).lux === 18_100_000_000_000_008n);
+  });
+});
+
 describe("a dusk: link, as wallets have read them", () => {
   it("reads a public link", () => {
     like(parsePaymentLink("dusk:public-abc123"), { amountDusk: "", chainId: "", form: "dusk", kind: "public", memo: "", to: "abc123" });

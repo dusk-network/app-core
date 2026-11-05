@@ -234,6 +234,9 @@ export function parsePaymentLink(input, { walletUrl } = {}) {
  * @returns {{ lux: bigint | null, problem: string | null }}
  */
 function readLux(amount) {
+  // A number past the safe integers has already lost its last digits.
+  if (typeof amount === "number" && !Number.isSafeInteger(amount)) return { lux: null, problem: "That amount is too large." };
+
   const text = String(amount).trim();
   const lux = /^\d+$/.test(text) ? BigInt(text) : null;
 

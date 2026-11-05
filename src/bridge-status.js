@@ -29,6 +29,8 @@ const DUSK_WINDOWS = Object.freeze([8_640, 60_480, 259_200]);
 /** Each of an account's lists is read so far at most, before its newest is taken as near enough. */
 const PAGE = 50;
 const MAX_PAGES = 3;
+/** How many times a list too full to read is narrowed to a newer stretch. */
+const MAX_NARROWINGS = 2;
 /** Log searches one read makes, and the blocks each covers, as public RPCs take. */
 const LOG_WINDOWS = 8;
 const LOG_SIZE = 50_000n;
@@ -61,7 +63,7 @@ const topicOf = (address) => `0x${address.slice(2).toLowerCase().padStart(64, "0
  *
  * @param {Archive} archive
  * @param {{ account: string, side: "sender" | "receiver", finalized: number, isOne: (entry: HistoryEntry) => boolean }} ask
- * @returns {Promise<HistoryEntry[]>}
+ * @returns {Promise<{ entries: HistoryEntry[], complete: boolean }>} `complete` says whether the newest was really reached
  */
 async function newestOn(archive, { account, finalized, isOne, side }) {
   /** @param {number} blocks @param {number} page */
@@ -70,12 +72,9 @@ async function newestOn(archive, { account, finalized, isOne, side }) {
   /** @param {any} list */
   const entriesOf = (list) => (Array.isArray(list) ? list : []).flatMap((raw) => parseHistoryEntry(account, raw) ?? []).filter(isOne);
 
-  for (const [i, blocks] of DUSK_WINDOWS.entries()) {
-    const first = data?.[`w${i}`]?.json;
+  /** @param {number} blocks @param {any} first */
+  const pages = async (blocks, first) => {
     let found = entriesOf(first);
-
-    if (!found.length && !(Array.isArray(first) && first.length >= PAGE)) continue;
-
     let last = first;
 
     for (let page = 2; page <= MAX_PAGES && Array.isArray(last) && last.length >= PAGE; page += 1) {
@@ -83,10 +82,35 @@ async function newestOn(archive, { account, finalized, isOne, side }) {
       found = [...found, ...entriesOf(last)];
     }
 
-    if (found.length) return found.reverse();
+    return { capped: Array.isArray(last) && last.length >= PAGE, found };
+  };
+
+  for (const [i, blocks] of DUSK_WINDOWS.entries()) {
+    const first = data?.[`w${i}`]?.json;
+
+    if (!entriesOf(first).length && !(Array.isArray(first) && first.length >= PAGE)) continue;
+
+    let { capped, found } = await pages(blocks, first);
+    let complete = !capped;
+    let narrow = blocks;
+
+    // Lists run oldest first, so one still full at the last page hasn't reached
+    // its newest: read a newer, narrower stretch.
+    for (let round = 0; capped && round < MAX_NARROWINGS; round += 1) {
+      narrow = Math.floor(narrow / 4);
+
+      const more = await pages(narrow, (await archive.query(`query { w: moonlightHistory(${field(narrow, 1)}) { json } }`))?.w?.json);
+
+      if (more.found.length) found = more.found;
+
+      capped = more.capped;
+      complete = !more.capped && more.found.length > 0;
+    }
+
+    if (found.length || !complete) return { complete, entries: found.reverse() };
   }
 
-  return [];
+  return { complete: true, entries: [] };
 }
 
 /**
@@ -209,24 +233,13 @@ async function newestPayment(read, { address, further, kept, topics, url }) {
   let size = known?.size ?? LOG_SIZE;
   let left = LOG_WINDOWS;
   let last = known?.last ?? null;
-  // The lowest block read, and the search's place: above what was read, if
-  // anything was, then below.
   let low = known ? known.from : head + 1n;
-  let to = head;
-  let floor = known ? known.to + 1n : 0n;
-  let above = Boolean(known);
+  // How far up it's been read with no gap: what's newer than the last read is
+  // read upward from there, so a read that runs out leaves no stretch unread.
+  let top = known ? known.to : head;
 
-  while (left > 0) {
-    if (to < floor) {
-      if (!above || last || !further || !known || known.from === 0n) break;
-
-      above = false;
-      to = known.from - 1n;
-      floor = 0n;
-      continue;
-    }
-
-    const from = to - size + 1n > floor ? to - size + 1n : floor;
+  /** @param {bigint} from @param {bigint} to */
+  const search = async (from, to) => {
     /** @type {any} */
     let logs;
 
@@ -237,19 +250,45 @@ async function newestPayment(read, { address, further, kept, topics, url }) {
     } catch (error) {
       if (size > MIN_LOG_SIZE && RANGE_REFUSED.test(messageOf(error))) {
         size = size / 4n > MIN_LOG_SIZE ? size / 4n : MIN_LOG_SIZE;
-        continue;
+
+        return null;
       }
 
       throw error;
     }
 
-    if (above && from > floor && left === 0) low = from;
-    else if (from < low) low = from;
-
     const found = (Array.isArray(logs) ? logs : []).flatMap((log) => paymentOf(log, { address, topics }) ?? []);
 
+    return found;
+  };
+  /** @param {any[]} found */
+  const newest = (found) => found.reduce((best, each) => (/** @type {number} */ (each.block) >= /** @type {number} */ (best.block) ? each : best));
+
+  if (known) {
+    while (left > 0 && top < head) {
+      const to = top + size < head ? top + size : head;
+      const found = await search(top + 1n, to);
+
+      if (found === null) continue;
+      if (found.length) last = newest(found);
+
+      top = to;
+    }
+
+    if (top < head || last || !further || known.from === 0n) return { from: low, head, last, size, to: top };
+  }
+
+  let to = known ? known.from - 1n : head;
+
+  while (left > 0) {
+    const from = to - size + 1n > 0n ? to - size + 1n : 0n;
+    const found = await search(from, to);
+
+    if (found === null) continue;
+    if (from < low) low = from;
+
     if (found.length) {
-      last = found.reduce((newest, each) => (/** @type {number} */ (each.block) >= /** @type {number} */ (newest.block) ? each : newest));
+      last = newest(found);
       break;
     }
 
@@ -258,7 +297,7 @@ async function newestPayment(read, { address, further, kept, topics, url }) {
     to = from - 1n;
   }
 
-  return { from: low, head, last, size, to: head };
+  return { from: low, head, last, size, to: top };
 }
 
 /**
@@ -356,11 +395,13 @@ async function readRoute(route, net, { archive, kept, nodeUrl, now, read, rpcUrl
       const finalized = await tryTo(() => finalizedOf(archive()));
 
       if (finalized !== null) {
-        const found = await tryTo(async () =>
-          newestThatWent(archive(), await newestOn(archive(), { account, finalized, isOne: (entry) => entry.direction === "out" && entry.value > 0n && entry.memoBinary !== true && EVM_HASH.test(entry.memo.trim().toLowerCase()), side: "sender" }))
-        );
+        const seen = await tryTo(() => newestOn(archive(), { account, finalized, isOne: (entry) => entry.direction === "out" && entry.value > 0n && entry.memoBinary !== true && EVM_HASH.test(entry.memo.trim().toLowerCase()), side: "sender" }));
+        const found = seen && (await tryTo(() => newestThatWent(archive(), seen.entries)));
 
-        if (found !== null || !errors.length) since = found ? null : now - DUSK_WINDOWS[DUSK_WINDOWS.length - 1] * 10_000;
+        // A list too full to read to its end says nothing of there being no payouts.
+        if (found === null && (!seen || !seen.complete)) since = null;
+        else if (found !== null || !errors.length) since = found ? null : now - DUSK_WINDOWS[DUSK_WINDOWS.length - 1] * 10_000;
+
         lastPayout = found;
       }
 
@@ -389,7 +430,7 @@ async function readRoute(route, net, { archive, kept, nodeUrl, now, read, rpcUrl
         finalized === null
           ? null
           : await tryTo(async () =>
-              newestThatWent(archive(), await newestOn(archive(), { account: route.account, finalized, isOne: (entry) => entry.direction === "in" && entry.value > route.feeLux && entry.memoBinary !== true && EVM_ADDRESS.test(entry.memo), side: "receiver" }))
+              newestThatWent(archive(), (await newestOn(archive(), { account: route.account, finalized, isOne: (entry) => entry.direction === "in" && entry.value > route.feeLux && entry.memoBinary !== true && EVM_ADDRESS.test(entry.memo), side: "receiver" })).entries)
             );
 
       if (newest?.at && (!lastPayout?.at || lastPayout.at < newest.at)) waitingSince = newest.at;

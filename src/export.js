@@ -100,8 +100,17 @@ function offsetAt(at, timeZone) {
  */
 function dayStart(year, month, day, timeZone) {
   const utc = Date.UTC(year, month - 1, day);
+  const DAY = 86_400_000;
+  // The zone's offset on either side of the day, as a clock change at midnight
+  // can skip that midnight or have it twice: the first moment of that very day.
+  const moments = [utc - offsetAt(utc - DAY, timeZone), utc - offsetAt(utc + DAY, timeZone)]
+    .filter((at) => {
+      const local = new Date(at + offsetAt(at, timeZone));
 
-  return utc - offsetAt(utc - offsetAt(utc, timeZone), timeZone);
+      return local.getUTCFullYear() === new Date(utc).getUTCFullYear() && local.getUTCMonth() === new Date(utc).getUTCMonth() && local.getUTCDate() === new Date(utc).getUTCDate();
+    });
+
+  return moments.length ? Math.min(...moments) : utc - offsetAt(utc, timeZone);
 }
 
 /**
@@ -131,7 +140,12 @@ export function datesPeriod(from, to, { timeZone } = {}) {
 
     if (!match) throw new RangeError("A day is written 2026-10-01");
 
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
+    const [year, month, date] = [Number(match[1]), Number(match[2]), Number(match[3])];
+    const real = new Date(Date.UTC(year, month - 1, date));
+
+    if (real.getUTCMonth() !== month - 1 || real.getUTCDate() !== date) throw new RangeError(`There's no day ${text}`);
+
+    return [year, month, date];
   };
   const [fromYear, fromMonth, fromDay] = day(from);
   const [toYear, toMonth, toDay] = day(to);
@@ -285,8 +299,10 @@ function linesOf(row, { address, facts, own, self }) {
   if (row.kind === "shield" || row.kind === "unshield") {
     const word = row.kind === "shield" ? "Shield" : "Unshield";
     // A shield to the profile's own address, where the app says which that is,
-    // and an unshield the profile's shielded history has.
-    const within = row.kind === "shield" ? !address || !row.counterparty || self.has(row.counterparty) : row.privacy === "shielded";
+    // and an unshield the profile's shielded history has. A shield received
+    // from anyone else is money coming in.
+    const fromElsewhere = row.direction === "in" && !(row.counterparty && self.has(row.counterparty));
+    const within = row.kind === "shield" ? !fromElsewhere && (!address || !row.counterparty || self.has(row.counterparty)) : row.privacy === "shielded";
 
     return within ? onlyFee(`${word} of ${formatDuskPlain(row.value)} DUSK, within the profile`) : [{ ...moved(row), fee, words: other ? `${word} ${row.direction === "in" ? "from" : "to"} own profile ${other}` : word }];
   }
