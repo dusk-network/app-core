@@ -609,3 +609,13 @@ const exportFile: Promise<ExportResult> = accountingCsv({
 } satisfies ExportOptions);
 const exportText = exportFile.then(({ csv, fileName, left, unpriced }) => [csv, fileName, left.pending, left.notRead, left.outOfPeriod, unpriced]);
 void [dates, exportText, CSV_COLUMNS];
+
+// /bridge's ledger
+import { transferLedger, type LedgerInput, type LedgerLine, type TransferLedger } from "@dusk-network/app-core/bridge";
+
+const ledgerInput: LedgerInput = { arrival: null, bridgeFee: 1n, gasWei: "1", locale: "en", network: 1, networkFee: [1n, null, "2"], received: 1, route: "dusk-to-bsc", sent: 2n };
+const ledger: TransferLedger | null = transferLedger(ledgerInput);
+const ledgerLines: LedgerLine[] | undefined = ledger?.lines;
+const ledgerExact: string | undefined = ledger?.received?.exact;
+const ledgerFromRow: TransferLedger | null = transferLedger({ row: readRows[0] });
+void [ledgerLines, ledgerExact, ledgerFromRow];

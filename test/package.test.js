@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
 const ENTRIES = ["./amounts", "./text", "./payment-links", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
-const SHARED = ["./src/bridge-common.js"];
+const SHARED = ["./src/bridge-common.js", "./src/bridge-ledger.js"];
 /** The entry points that need nothing from anywhere. */
 const SELF_CONTAINED = ["./amounts", "./text"];
 /** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
@@ -131,6 +131,10 @@ describe("the package", () => {
     assert.equal(sozuPosition().putIn, 0n);
     assert.equal(sozuRateLine({}), null);
 
+    const { transferLedger } = await import("@dusk-network/app-core/bridge");
+
+    assert.equal(transferLedger(), null);
+
     const { WithdrawalError, createWithdrawals, explorerStage, parseWithdrawalReceipt, withdrawalCall } = await import("@dusk-network/app-core/duskevm-withdrawals");
 
     assert.equal(typeof createWithdrawals, "function");
@@ -225,6 +229,7 @@ describe("the package", () => {
       "src/bridge-common.js",
       "src/bridge-explorer.d.ts",
       "src/bridge-explorer.js",
+      "src/bridge-ledger.js",
       "src/bridge.d.ts",
       "src/bridge.js",
       "src/duskevm-withdrawals.d.ts",

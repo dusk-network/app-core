@@ -43,6 +43,7 @@
  * - An app that follows deposits on DuskEVM's explorer alone imports
  *   `depositArrivalsFromExplorer` from `/bridge-explorer`, without the RPC
  *   path and `/history`.
+ * - `transferLedger` says one transfer's amounts, the same in every app.
  *
  * @example
  * ```js
@@ -61,7 +62,8 @@
  * @module
  */
 
-import type { Account, EvmAddress, Network, NetworkRef } from "@dusk-network/networks";
+import type { Account, EvmAddress, Network, NetworkRef, Route } from "@dusk-network/networks";
+import type { ActivityRow } from "./activity.js";
 import type { Archive, Direction, EntryKind } from "./history.js";
 
 export { depositArrivalsFromExplorer, type ExplorerDepositOptions } from "./bridge-explorer.js";
@@ -520,3 +522,74 @@ export declare function migrationPayoutOf(entry: HistoryLike, network: BridgeNet
  * deposit's hash, the DuskEVM transaction that paid it and when.
  */
 export declare function arrivalsOf(arrivals: ReadonlyMap<string, Arrival>): Map<string, { hash: string; at: number | null }>;
+
+/**
+ * One amount of a transfer: `amount` in units of `decimals` decimals, of
+ * `coin`, as a row writes it (`text`: short, by `formatAmount`'s rule of
+ * `/amounts`) and as its detail writes it (`exact`).
+ */
+export type LedgerLine = {
+  key: "sent" | "bridgeFee" | "networkFee" | "received" | "gas";
+  amount: bigint;
+  decimals: number;
+  /** "DUSK", "BEP20 DUSK", "ERC20 DUSK", or the gas coin, "ETH" or "BNB". */
+  coin: string;
+  text: string;
+  exact: string;
+  /** Worked out from what was sent: what will arrive, not yet what did. */
+  expected: boolean;
+};
+
+/**
+ * One transfer in amounts, the same in every app: each is null where it isn't
+ * known, and a route without such a fee has none. `lines` are those known, in
+ * their order: sent, bridge fee, network fee, received, gas.
+ */
+export type TransferLedger = {
+  route: string | null;
+  kind: Route["kind"];
+  /** It failed on Dusk: nothing moved, and its fee stands alone. */
+  failed: boolean;
+  /** What arrived is known: `received` isn't worked out. */
+  arrived: boolean;
+  sent: LedgerLine | null;
+  /** The bridge's own fee, taken from what's sent. */
+  bridgeFee: LedgerLine | null;
+  /** What the transfer's transactions on Dusk paid, the proof's and the claim's together for a withdrawal. */
+  networkFee: LedgerLine | null;
+  received: LedgerLine | null;
+  /** What it paid in the other chain's coin, for its own gas. */
+  gas: LedgerLine | null;
+  lines: LedgerLine[];
+};
+
+/** What `transferLedger` takes: a row of `/activity`, what the app keeps of the transfer, or both. What's given goes before what the row says. */
+export type LedgerInput = {
+  /** The transfer's row of `/activity`: a transfer with a route's account, or a call of DuskEVM's bridge or Portal. */
+  row?: ActivityRow | null;
+  /** The route: as the network's file gives it (a row's `route`), or its ID with `network`. */
+  route?: Route | string | { id: string } | null;
+  network?: BridgeNetwork | null;
+  /** What was sent, in lux. */
+  sent?: bigint | number | string | null;
+  /** What the bridge took, in lux: the route's fee, unless given. */
+  bridgeFee?: bigint | number | string | null;
+  /** What it paid on Dusk, in lux: a withdrawal's proof and claim, as a list. */
+  networkFee?: bigint | number | string | null | ReadonlyArray<bigint | number | string | null | undefined>;
+  /** What arrived, in lux, where the app has it; else `arrival`, or worked out. */
+  received?: bigint | number | string | null;
+  /** What `/bridge` found of it on the other side. */
+  arrival?: Arrival | null;
+  /** The gas it paid on the other chain, in wei: `gasUsed` × `effectiveGasPrice` of its receipt. */
+  gasWei?: bigint | number | string | null;
+  /** It failed on Dusk: the row's status says, unless given. */
+  failed?: boolean;
+  /** Whose separators the amounts are written in; `amountLocale()`'s by default. */
+  locale?: string;
+};
+
+/**
+ * A transfer's ledger, for all three apps to show the same numbers: a row shows
+ * a line's `text`, its detail `exact`. Null for a row that's no bridge transfer.
+ */
+export declare function transferLedger(input?: LedgerInput): TransferLedger | null;

@@ -49,6 +49,7 @@ import { DETAILS_BATCH, TRANSFER_CONTRACT, fetchTxDetails, historyRange } from "
 
 export { CREDIT_WINDOW_MS, EXPLORER_PAGES, WAIT_MS } from "./bridge-common.js";
 export { depositArrivalsFromExplorer } from "./bridge-explorer.js";
+export { transferLedger } from "./bridge-ledger.js";
 
 /** @typedef {import("./bridge.js").Arrival} Arrival */
 /** @typedef {import("./bridge.js").BlockTimes} BlockTimes */
