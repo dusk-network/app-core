@@ -420,6 +420,10 @@ describe("a read that can't finish", () => {
     for (let read = 1; read <= 12; read += 1) {
       status = await bridgeStatus({ cache, fetch: bscRoute({ head: start + 90_000n, logs, maxRange: 5_000n }).fetch, network: 1, now: NOW + read * (STATUS_MAX_AGE_MS + 1), route: "dusk-to-bsc" });
 
+      // Reading on doesn't lose the payout already known, nor say a route is late while it's still behind.
+      assert.notEqual(status.lastPayout, null);
+      assert.notEqual(status.paying, "late");
+
       if (status.lastPayout?.block === Number(at)) break;
     }
 

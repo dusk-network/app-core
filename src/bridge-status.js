@@ -49,7 +49,7 @@ const topicOf = (address) => `0x${address.slice(2).toLowerCase().padStart(64, "0
 
 /**
  * @typedef {{ at: number | null, hash: string, amount: bigint, block: number | null }} Payout
- * @typedef {{ from: bigint, to: bigint, size: bigint, last: Payout | null }} LogScan
+ * @typedef {{ from: bigint, to: bigint, size: bigint, last: Payout | null, head?: bigint }} LogScan
  */
 
 // ---------------------------------------------------------------------------
@@ -229,7 +229,10 @@ async function newestPayment(read, { address, further, kept, topics, url }) {
 
   if (head === null) throw new Error("The chain gave no head");
 
-  const known = kept && kept.to <= head && head - kept.to <= BigInt(LOG_WINDOWS) * kept.size ? kept : null;
+  // A scan that ran out on its way up carries on from there, as long as it's
+  // anywhere near: its narrowed size says nothing of how stale it is.
+  const unfinished = kept && kept.head !== undefined && kept.to < kept.head;
+  const known = kept && kept.to <= head && head - kept.to <= BigInt(LOG_WINDOWS) * (unfinished ? LOG_SIZE : kept.size) ? kept : null;
   let size = known?.size ?? LOG_SIZE;
   let left = LOG_WINDOWS;
   let last = known?.last ?? null;
@@ -382,6 +385,8 @@ async function readRoute(route, net, { archive, kept, nodeUrl, now, read, rpcUrl
   let waitingSince = null;
   /** @type {LogScan | null} */
   let scan = kept?.scan ?? null;
+  // Whether newer blocks are still unread, so nothing can be said of what isn't there.
+  let behind = false;
   /** @type {"balance" | "mints"} */
   let limit = "mints";
   const typicalMs = (route.typicalSeconds ?? 0) * 1000;
@@ -418,6 +423,7 @@ async function readRoute(route, net, { archive, kept, nodeUrl, now, read, rpcUrl
       if (onChain) {
         lastPayout = onChain.last;
         scan = onChain.scan;
+        behind = onChain.scan.to < onChain.scan.head;
         since = onChain.since;
       }
 
@@ -445,6 +451,7 @@ async function readRoute(route, net, { archive, kept, nodeUrl, now, read, rpcUrl
       if (onChain) {
         lastPayout = onChain.last;
         scan = onChain.scan;
+        behind = onChain.scan.to < onChain.scan.head;
         since = onChain.since;
       }
     }
@@ -458,9 +465,9 @@ async function readRoute(route, net, { archive, kept, nodeUrl, now, read, rpcUrl
   }
 
   const overdueAfter = typicalMs > 0 ? 2 * typicalMs : NO_USUAL_MS;
-  const overdue = waitingSince !== null && now - waitingSince > overdueAfter && (lastPayout !== null || (since !== null && since <= waitingSince));
+  const overdue = !behind && waitingSince !== null && now - waitingSince > overdueAfter && (lastPayout !== null || (since !== null && since <= waitingSince));
   const recent = lastPayout?.at && now - lastPayout.at <= Math.max(WEEK_MS, 4 * typicalMs);
-  const paying = route.kind === "duskevm-withdrawal" ? "on-claim" : overdue ? "late" : recent ? "yes" : lastPayout || since !== null ? "quiet" : "unknown";
+  const paying = route.kind === "duskevm-withdrawal" ? "on-claim" : overdue ? "late" : recent ? "yes" : behind ? "unknown" : lastPayout || since !== null ? "quiet" : "unknown";
 
   return {
     scan,
