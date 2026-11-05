@@ -22,10 +22,13 @@ const LINE_BREAK = /[\n\r]/u;
 const CONTROL = /\p{Cc}/u;
 const REPLACEMENT = "\ufffd";
 // What the scripts written right to left have, which turns what's beside it
-// around: the blocks Unicode keeps for them.
-const RIGHT_TO_LEFT = /^[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]$/u;
+// around: the blocks Unicode keeps for them, their unassigned points too,
+// which read right to left as well. U+FEFF is a format control, shown as its
+// code.
+const RIGHT_TO_LEFT = /^[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefe\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]$/u;
 const DIGIT = /^\p{Nd}$/u;
 const MARK = /^\p{M}$/u;
+const LEFT_TO_RIGHT_ISOLATE = "\u2066";
 const FIRST_STRONG_ISOLATE = "\u2068";
 const POP_DIRECTIONAL_ISOLATE = "\u2069";
 
@@ -41,7 +44,9 @@ const visible = (char) => Array.from({ length: char.length }, (_, i) => `\\u${ch
 
 /**
  * What's shown, with each run of right-to-left letters, and each run of their
- * digits, in an isolate of its own: a mark keeps to the run it follows.
+ * digits, in an isolate of its own: a mark keeps to the run it follows. Each
+ * line is in a left-to-right isolate too, so it reads in the order of its
+ * bytes whatever the text around it.
  *
  * @param {string[]} shown Its characters, and the codes in place of hidden ones
  */
@@ -49,8 +54,22 @@ function isolated(shown) {
   let text = "";
   /** @type {Run} */
   let open = "";
+  let inLine = false;
 
   for (const piece of shown) {
+    // A line break ends every isolate: each line has its own.
+    if (LINE_BREAK.test(piece)) {
+      text += `${open ? POP_DIRECTIONAL_ISOLATE : ""}${inLine ? POP_DIRECTIONAL_ISOLATE : ""}${piece}`;
+      open = "";
+      inLine = false;
+      continue;
+    }
+
+    if (!inLine) {
+      text += LEFT_TO_RIGHT_ISOLATE;
+      inLine = true;
+    }
+
     /** @type {Run} */
     const kind = MARK.test(piece) ? open : !RIGHT_TO_LEFT.test(piece) ? "" : DIGIT.test(piece) ? "digits" : "letters";
 
@@ -62,7 +81,7 @@ function isolated(shown) {
     text += piece;
   }
 
-  return open ? `${text}${POP_DIRECTIONAL_ISOLATE}` : text;
+  return `${text}${open ? POP_DIRECTIONAL_ISOLATE : ""}${inLine ? POP_DIRECTIONAL_ISOLATE : ""}`;
 }
 
 /**

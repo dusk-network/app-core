@@ -80,22 +80,27 @@ describe("text a person must trust", () => {
   });
 
   it("sets right-to-left words and Arabic digits apart where asked, so the rest reads in the order of its bytes", () => {
-    const [open, close] = ["⁨", "⁩"];
+    const [open, close, line] = ["⁨", "⁩", "⁦"];
     const apart = (/** @type {string} */ text) => `${open}${text}${close}`;
+    const ltr = (/** @type {string} */ text) => `${line}${text}${close}`;
     const ALEF = "א";
 
     // Marek's: on a screen this reads "Pay א 1000 א 10 א DUSK".
     assert.deepEqual(displayText(`Pay ${ALEF} 10 ${ALEF} 1000 ${ALEF} DUSK`, { isolate: true }), {
       flags: [],
       neutralized: false,
-      text: `Pay ${apart(ALEF)} 10 ${apart(ALEF)} 1000 ${apart(ALEF)} DUSK`,
+      text: ltr(`Pay ${apart(ALEF)} 10 ${apart(ALEF)} 1000 ${apart(ALEF)} DUSK`),
     });
+    // Unassigned points of the right-to-left blocks read right to left too.
+    assert.equal(displayText("Pay \ufefd 10 \ufefe 1000 DUSK", { isolate: true }).text, ltr(`Pay ${apart("\ufefd")} 10 ${apart("\ufefe")} 1000 DUSK`));
+    // Each line on its own left to right, whatever is around it; a break ends every isolate.
+    assert.equal(displayText(`${ALEF} 10\r\n\n1000 ${ALEF}`, { isolate: true, lineBreaks: true }).text, `${ltr(`${apart(ALEF)} 10`)}\r\n\n${ltr(`1000 ${apart(ALEF)}`)}`);
     // Arabic digits move what's between them as letters do: each number on its own.
-    assert.equal(displayText("Pay ١٠ב١٠٠٠ DUSK", { isolate: true }).text, `Pay ${apart("١٠")}${apart("ב")}${apart("١٠٠٠")} DUSK`);
+    assert.equal(displayText("Pay ١٠ב١٠٠٠ DUSK", { isolate: true }).text, ltr(`Pay ${apart("١٠")}${apart("ב")}${apart("١٠٠٠")} DUSK`));
     // A word keeps its marks, and controls show as their codes as ever.
-    assert.equal(displayText("pay ‮0001‬ שָׁלוֹם א́", { isolate: true }).text, `pay \\u202e0001\\u202c ${apart("שָׁלוֹם")} ${apart("א́")}`);
+    assert.equal(displayText("pay ‮0001‬ שָׁלוֹם א́", { isolate: true }).text, ltr(`pay \\u202e0001\\u202c ${apart("שָׁלוֹם")} ${apart("א́")}`));
     // Cut first, by the characters given.
-    assert.deepEqual(displayText(`${ALEF}בג x`, { isolate: true, maxChars: 2 }), { flags: ["truncated"], neutralized: false, text: apart(`${ALEF}ב`) });
+    assert.deepEqual(displayText(`${ALEF}בג x`, { isolate: true, maxChars: 2 }), { flags: ["truncated"], neutralized: false, text: ltr(apart(`${ALEF}ב`)) });
 
     // Whatever mixes them, nothing outside a run set apart reads right to left, and no run holds digits and letters both.
     const rightToLeft = /[֐-ࣿיִ-﷿ﹰ-ﻼ\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]/u;
