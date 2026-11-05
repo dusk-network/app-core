@@ -235,7 +235,7 @@ const { drop, keep } = settleSends({ public: entries, shielded, pending: sends }
 // keep: the others the chain has the outcome of, marked settled, to keep for what they add.
 ```
 
-By default a send adds the name typed for its recipient, or a shielded send's recipient or memo, which the shielded history doesn't have; `keeps(send)` says what else does. A failed send that tried to move an amount is always kept: the chain's row says it moved nothing.
+By default a send adds the name typed for its recipient, a shielded send's recipient or memo, which the shielded history doesn't have, or a token's amount and recipient (`asset`), which the public one doesn't; `keeps(send)` says what else does. A failed send that tried to move an amount is always kept: the chain's row says it moved nothing.
 
 ## Export
 
@@ -261,6 +261,7 @@ The file is [Koinly's universal CSV](https://support.koinly.io/en/articles/94899
 - A transfer between the person's own profiles has no tag, so it can't read as income: its description and `Internal Transfer` say what it is, and each profile's file has it with the same time, amount and hash, which is what Koinly merges.
 - Rewards claimed are tagged `reward`. A native stake and an unstake are tagged `stake` and `unstake`, which Koinly leaves out of its reports, and their fees are on lines of their own, as `cost`, which stay in; so are the fees of what moved nothing, or failed.
 - A stake with Sozu is a trade of DUSK for stDUSK, and an unstake the trade back, once `facts` says its stDUSK, with its deposit fee and what a stDUSK was worth in the description. Until then, it's what moved under the staking tags.
+- A token's transfer is what it moved, with its amount, currency and recipient in the same columns, from the wallet's record of it (`sent.asset`, which `settleSends` keeps), with no value in fiat. An allowance is its fee, saying what it allows and to whom. What the wallet has no record of stays what the chain says: a call, and its fee.
 - A memo with commas, quotes and line breaks comes through, with nothing in it that hides or reorders what it says, and is never read as a formula.
 - `rows` must be all of the period's: read the history down to it first. What was left out is counted: on its way, not looked up yet, or outside the period.
 

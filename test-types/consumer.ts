@@ -326,6 +326,8 @@ void [status, category, moved, paid, step, arrivedAt, onRoute, sozuStep, reserve
 const wrong: ActivityStatus = "submitted";
 // @ts-expect-error a send needs its hash
 const noHash: SentTransaction = { kind: "transfer" };
+const tokenSend: SentTransaction = { asset: { decimals: 9, op: "transfer", symbol: "TKN", to: "account", type: "DRC20", valueUnits: "1" }, hash: "" };
+void tokenSend;
 void [wrong, noHash];
 
 // What happened on the other side of the bridge's routes.

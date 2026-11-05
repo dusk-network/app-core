@@ -2,6 +2,13 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.7.1]
+
+### Fixed
+
+- `/export`: a token's transfer has its amount, currency and recipient in the file's own columns, from the wallet's record of it, and an allowance says what it allows and to whom
+- `/activity`: `settleSends` keeps a token's record by default, for what the chain's row doesn't say
+
 ## [0.7.0]
 
 ### Added
