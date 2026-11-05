@@ -17,6 +17,10 @@
       "types": "./src/text.d.ts",
       "default": "./src/text.js"
     },
+    "./payment-links": {
+      "types": "./src/payment-links.d.ts",
+      "default": "./src/payment-links.js"
+    },
     "./history": {
       "types": "./src/history.d.ts",
       "default": "./src/history.js"

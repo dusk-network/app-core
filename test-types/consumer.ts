@@ -558,3 +558,19 @@ import { displayText, type TextFlag } from "@dusk-network/app-core/text";
 
 const safe: { text: string; neutralized: boolean; flags: TextFlag[] } = displayText("memo", { lineBreaks: true, maxChars: 10 });
 void safe;
+
+// /payment-links
+import { MAX_MEMO_BYTES, chainLabel, makePaymentLink, networkMismatch, parsePaymentLink, recipientKind, type MadePaymentLink, type PaymentLink, type PaymentRequest } from "@dusk-network/app-core/payment-links";
+
+const request: PaymentRequest = { amount: "0,15", label: "Estudio", language: "es-ES", memo: "Factura 33", network: networks.mainnet, to: "account", walletUrl: "https://wallet.example" };
+const madeLinks: MadePaymentLink = makePaymentLink(request);
+const madeProblem: string | undefined = madeLinks.problems.amount ?? madeLinks.problems.memo ?? madeLinks.problems.to;
+const madeLink: string | null = madeLinks.https;
+const readLink: PaymentLink | null = parsePaymentLink(madeLinks.dusk, { walletUrl: "https://wallet.example" });
+const linkForm: "dusk" | "https" | "raw" | undefined = readLink?.form;
+const linkLux: bigint | null | undefined = readLink?.lux;
+const memoLimit: 512 = MAX_MEMO_BYTES;
+const linkTexts: string[] = [chainLabel("dusk:1"), networkMismatch("dusk:1", 2), recipientKind("x")];
+void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
+// @ts-expect-error a request needs its recipient
+void makePaymentLink({ amount: "1" });

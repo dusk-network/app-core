@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./amounts", "./text", "./history", "./shielded", "./activity", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./text", "./payment-links", "./history", "./shielded", "./activity", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
 const SHARED = ["./src/bridge-common.js"];
 /** The entry points that need nothing from anywhere. */
@@ -116,6 +116,11 @@ describe("the package", () => {
 
     assert.deepEqual(displayText("plain"), { flags: [], neutralized: false, text: "plain" });
 
+    const { makePaymentLink, parsePaymentLink } = await import("@dusk-network/app-core/payment-links");
+
+    assert.equal(parsePaymentLink(""), null);
+    assert.equal(makePaymentLink({ to: "" }).ok, false);
+
     const { WithdrawalError, createWithdrawals, explorerStage, parseWithdrawalReceipt, withdrawalCall } = await import("@dusk-network/app-core/duskevm-withdrawals");
 
     assert.equal(typeof createWithdrawals, "function");
@@ -216,6 +221,8 @@ describe("the package", () => {
       "src/duskevm-withdrawals.js",
       "src/history.d.ts",
       "src/history.js",
+      "src/payment-links.d.ts",
+      "src/payment-links.js",
       "src/shielded.d.ts",
       "src/shielded.js",
       "src/text.d.ts",
