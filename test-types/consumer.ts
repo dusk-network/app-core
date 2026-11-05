@@ -539,10 +539,16 @@ const sendsDusk: PortalCall["deposit"] = 1n;
 void withdrawals.prepareProof("0x00", {});
 void sendsDusk;
 
-import { amountForField, amountLocale, decimalSeparator, formatDusk, formatDuskPlain, groupDigits, normalizeAmount, parseDusk, unclearAmount } from "@dusk-network/app-core/amounts";
+import { amountExample, amountForField, amountLocale, decimalSeparator, formatAmount, formatDusk, formatDuskPlain, groupDigits, normalizeAmount, parseDusk, readAmount, unclearAmount } from "@dusk-network/app-core/amounts";
 
 const shownAmount: { text: string; exact: string } = formatDusk(1n, { mode: "short", round: "up", locale: amountLocale("nl-NL") });
 const plainAmount: string = amountForField(formatDuskPlain(1n), decimalSeparator());
 const readLux: bigint | null = parseDusk(normalizeAmount(groupDigits(1n), ","));
 const eitherAmount: { grouped: string; decimal: string } | null = unclearAmount("1.001", ",");
 void [shownAmount, plainAmount, readLux, eitherAmount];
+
+const weiShown: { text: string; exact: string } = formatAmount(10n ** 18n, { decimals: 18, locale: "en", mode: "exact", round: "down" });
+const hint: string = amountExample("10.5", "fr-FR");
+const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 000,5", "fr-FR");
+const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
+void [weiShown, hint, readTyped, readFrench];
