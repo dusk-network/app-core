@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./amounts", "./history", "./shielded", "./activity", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./text", "./payment-links", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
-const SHARED = ["./src/bridge-common.js"];
+const SHARED = ["./src/bridge-common.js", "./src/bridge-ledger.js", "./src/bridge-status.js"];
+/** The entry points that need nothing from anywhere. */
+const SELF_CONTAINED = ["./amounts", "./text"];
 /** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
 const VIEM_ENTRY = "./duskevm-withdrawals";
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -110,6 +112,30 @@ describe("the package", () => {
     assert.equal(typeof serviceArrivals, "function");
     assert.deepEqual(arrivalsOf(new Map()), new Map());
 
+    const { displayText } = await import("@dusk-network/app-core/text");
+
+    assert.deepEqual(displayText("plain"), { flags: [], neutralized: false, text: "plain" });
+
+    const { makePaymentLink, parsePaymentLink } = await import("@dusk-network/app-core/payment-links");
+
+    assert.equal(parsePaymentLink(""), null);
+    assert.equal(makePaymentLink({ to: "" }).ok, false);
+
+    const { accountingCsv, quarterPeriod } = await import("@dusk-network/app-core/export");
+
+    assert.equal(typeof accountingCsv, "function");
+    assert.equal(quarterPeriod(2026, 4, { timeZone: "UTC" }).label, "2026-q4");
+
+    const { sozuPosition, sozuRateLine } = await import("@dusk-network/app-core/sozu");
+
+    assert.equal(sozuPosition().putIn, 0n);
+    assert.equal(sozuRateLine({}), null);
+
+    const { bridgeStatus, transferLedger } = await import("@dusk-network/app-core/bridge");
+
+    assert.equal(typeof bridgeStatus, "function");
+    assert.equal(transferLedger(), null);
+
     const { WithdrawalError, createWithdrawals, explorerStage, parseWithdrawalReceipt, withdrawalCall } = await import("@dusk-network/app-core/duskevm-withdrawals");
 
     assert.equal(typeof createWithdrawals, "function");
@@ -162,7 +188,7 @@ describe("the package", () => {
       assert.doesNotMatch(code, /\(\?<[=!]/, file);
       // Its imports are the networks' rules and the package's own modules,
       // and for DuskEVM's withdrawals viem, which no other entry point takes.
-      assert.ok(from.length > 0 || entry === "./amounts", file);
+      assert.ok(from.length > 0 || SELF_CONTAINED.includes(/** @type {string} */ (entry)), file);
       assert.equal([...code.matchAll(/^import\b/gm)].length, [...code.matchAll(/^import\b[^;]*?\bfrom\s+"[^"]+";/gm)].length, `${file}: every import is read`);
       for (const each of from) {
         assert.ok(
@@ -204,14 +230,24 @@ describe("the package", () => {
       "src/bridge-common.js",
       "src/bridge-explorer.d.ts",
       "src/bridge-explorer.js",
+      "src/bridge-ledger.js",
+      "src/bridge-status.js",
       "src/bridge.d.ts",
       "src/bridge.js",
       "src/duskevm-withdrawals.d.ts",
       "src/duskevm-withdrawals.js",
+      "src/export.d.ts",
+      "src/export.js",
       "src/history.d.ts",
       "src/history.js",
+      "src/payment-links.d.ts",
+      "src/payment-links.js",
       "src/shielded.d.ts",
       "src/shielded.js",
+      "src/sozu.d.ts",
+      "src/sozu.js",
+      "src/text.d.ts",
+      "src/text.js",
     ]);
   });
 });

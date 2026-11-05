@@ -539,10 +539,90 @@ const sendsDusk: PortalCall["deposit"] = 1n;
 void withdrawals.prepareProof("0x00", {});
 void sendsDusk;
 
-import { amountForField, amountLocale, decimalSeparator, formatDusk, formatDuskPlain, groupDigits, normalizeAmount, parseDusk, unclearAmount } from "@dusk-network/app-core/amounts";
+import { amountExample, amountForField, amountLocale, decimalSeparator, formatAmount, formatDusk, formatDuskPlain, groupDigits, normalizeAmount, parseDusk, readAmount, unclearAmount } from "@dusk-network/app-core/amounts";
 
 const shownAmount: { text: string; exact: string } = formatDusk(1n, { mode: "short", round: "up", locale: amountLocale("nl-NL") });
 const plainAmount: string = amountForField(formatDuskPlain(1n), decimalSeparator());
 const readLux: bigint | null = parseDusk(normalizeAmount(groupDigits(1n), ","));
 const eitherAmount: { grouped: string; decimal: string } | null = unclearAmount("1.001", ",");
 void [shownAmount, plainAmount, readLux, eitherAmount];
+
+const weiShown: { text: string; exact: string } = formatAmount(10n ** 18n, { decimals: 18, locale: "en", mode: "exact", round: "down" });
+const hint: string = amountExample("10.5", "fr-FR");
+const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 000,5", "fr-FR");
+const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
+void [weiShown, hint, readTyped, readFrench];
+
+// /text
+import { displayText, type TextFlag } from "@dusk-network/app-core/text";
+
+const safe: { text: string; neutralized: boolean; flags: TextFlag[] } = displayText("memo", { lineBreaks: true, maxChars: 10 });
+void safe;
+
+// /payment-links
+import { MAX_MEMO_BYTES, chainLabel, makePaymentLink, networkMismatch, parsePaymentLink, recipientKind, type MadePaymentLink, type PaymentLink, type PaymentRequest } from "@dusk-network/app-core/payment-links";
+
+const request: PaymentRequest = { amount: "0,15", label: "Estudio", language: "es-ES", memo: "Factura 33", network: networks.mainnet, to: "account", walletUrl: "https://wallet.example" };
+const madeLinks: MadePaymentLink = makePaymentLink(request);
+const madeProblem: string | undefined = madeLinks.problems.amount ?? madeLinks.problems.memo ?? madeLinks.problems.to;
+const madeLink: string | null = madeLinks.https;
+const readLink: PaymentLink | null = parsePaymentLink(madeLinks.dusk, { walletUrl: "https://wallet.example" });
+const linkForm: "dusk" | "https" | "raw" | undefined = readLink?.form;
+const linkLux: bigint | null | undefined = readLink?.lux;
+const memoLimit: 512 = MAX_MEMO_BYTES;
+const linkTexts: string[] = [chainLabel("dusk:1"), networkMismatch("dusk:1", 2), recipientKind("x")];
+void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
+// @ts-expect-error a request needs its recipient
+void makePaymentLink({ amount: "1" });
+
+// /sozu
+import { sozuFacts, sozuPosition, sozuRate, sozuRateLine, sozuYear, type SozuFact, type SozuPosition, type SozuStatusLike, type SozuYear } from "@dusk-network/app-core/sozu";
+import type { ActivityRow as ReadRow } from "@dusk-network/app-core/activity";
+
+declare const readRows: ReadRow[];
+declare const sozuStatus: import("@dusk-network/networks/sozu").SozuStatus;
+const sozuRead: Promise<Map<string, SozuFact>> = sozuFacts({ account: "a", archive, cache: new Map(), rows: readRows });
+const positionFromStatus: SozuPosition = sozuPosition({ complete: true, rows: readRows, status: sozuStatus });
+const earnedSoFar: bigint | null = positionFromStatus.earned;
+const extensionStatus: SozuStatusLike = { fees: { deposit: { denominator: "400", numerator: "1" }, reward: null }, pool: { tokenTotalSupply: "1", totalStakeLux: "1" }, position: { poolBalanceLux: "1", stDuskBalanceLux: "1" } };
+const year: SozuYear = sozuYear({ amount: 1n, nativeRate: 0.2, status: extensionStatus });
+const yearRate: number | null = sozuRate(0.2, sozuStatus);
+const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2, provisioners: [{ amount: 1, eligibility: 1 }], status: sozuStatus, tipHeight: 1 });
+void [sozuRead, earnedSoFar, year, yearRate, rateLine];
+
+// /export
+import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, type ExportOptions, type ExportPeriod, type ExportResult } from "@dusk-network/app-core/export";
+
+const quarter: ExportPeriod = quarterPeriod(2026, 4, { timeZone: "Europe/Madrid" });
+const dates: ExportPeriod = datesPeriod("2026-10-01", "2026-12-31");
+const exportFile: Promise<ExportResult> = accountingCsv({
+  bom: true,
+  contactName: () => "A contact",
+  currency: "EUR",
+  facts: new Map<string, SozuFact>(),
+  network: "testnet",
+  period: quarter,
+  price: async ({ at, coin }) => (coin === "DUSK" && at > 0 ? "0.12" : null),
+  profile: { account: "a", address: "b", name: "Estudio" },
+  profiles: [{ account: "c", name: "Personal" }],
+  rows: readRows,
+} satisfies ExportOptions);
+const exportText = exportFile.then(({ csv, fileName, left, unpriced }) => [csv, fileName, left.pending, left.notRead, left.outOfPeriod, unpriced]);
+void [dates, exportText, CSV_COLUMNS];
+
+// /bridge's ledger
+import { transferLedger, type LedgerInput, type LedgerLine, type TransferLedger } from "@dusk-network/app-core/bridge";
+
+const ledgerInput: LedgerInput = { arrival: null, bridgeFee: 1n, gasWei: "1", locale: "en", network: 1, networkFee: [1n, null, "2"], received: 1, route: "dusk-to-bsc", sent: 2n };
+const ledger: TransferLedger | null = transferLedger(ledgerInput);
+const ledgerLines: LedgerLine[] | undefined = ledger?.lines;
+const ledgerExact: string | undefined = ledger?.received?.exact;
+const ledgerFromRow: TransferLedger | null = transferLedger({ row: readRows[0] });
+void [ledgerLines, ledgerExact, ledgerFromRow];
+
+// /bridge's status
+import { STATUS_MAX_AGE_MS, bridgeStatus, type BridgeStatus } from "@dusk-network/app-core/bridge";
+
+const routeStatus: Promise<BridgeStatus> = bridgeStatus({ archive, cache: new Map(), fetch, maxAgeMs: STATUS_MAX_AGE_MS, network: 1, nodeUrl: "https://node", now: 1, route: "dusk-to-bsc", rpcUrl: "https://rpc", timeoutMs: 1 });
+const statusWords = routeStatus.then(({ canPay, gas, lastPayout, limit, paying, readAt, readSince, requests, running, waitingSince }) => [canPay, gas?.wei, lastPayout?.amount, limit, paying, readAt, readSince, requests, running, waitingSince]);
+void statusWords;

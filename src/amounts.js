@@ -1,25 +1,31 @@
 /* @ts-self-types="./amounts.d.ts" */
 /**
- * How the apps write and read amounts of DUSK, with Intl only: what's shown,
- * and what a field reads back, follow the browser's language together, so an
- * amount reads back as itself or is refused, never as another.
+ * How the apps write and read amounts, with Intl only: what's shown, and what
+ * a field reads back, follow the browser's language together, so an amount
+ * reads back as itself or is refused, never as another.
  *
  * @module
  */
 
 const LUX_DECIMALS = 9;
 const LUX_PER_DUSK = 10n ** BigInt(LUX_DECIMALS);
+const MAX_U64 = (1n << 64n) - 1n;
 
-/** Decimals a short amount shows, when it's 0.01 DUSK or more. */
+/** Decimals a short amount shows, when it's 0.01 or more. */
 const SHORT_DECIMALS = 4;
-
-/** 0.01 DUSK, in lux: under it, a short amount keeps 2 significant digits. */
-const SMALL = 10_000_000n;
 
 const MINUS = "−";
 
 /**
- * @typedef {{ decimal: string, digits: string[], whole: Intl.NumberFormat }} LocaleParts
+ * What separates a language's groups of digits, wherever one can't be taken
+ * for a decimal: its spaces, the no-break and narrow ones as well, and its
+ * apostrophes, straight or not.
+ */
+const SPACES = /[ \u00a0\u2009\u202f]/g;
+const APOSTROPHES = /['\u2019]/g;
+
+/**
+ * @typedef {{ decimal: string, digits: string[], groups: Intl.NumberFormat, whole: Intl.NumberFormat }} LocaleParts
  */
 
 /** @type {Map<string, LocaleParts>} */
@@ -47,6 +53,8 @@ function localeParts(locale) {
       plain.formatToParts(1.5).find((part) => part.type === "decimal")?.value ??
       ".",
     digits: [oneToZero[9], ...oneToZero.slice(0, 9)],
+    // Every group, as Polish and Spanish leave a thousand's out when they write one.
+    groups: new Intl.NumberFormat(locale, /** @type {Intl.NumberFormatOptions} */ ({ maximumFractionDigits: 0, useGrouping: /** @type {any} */ ("always") })),
     whole: new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }),
   };
 
@@ -69,11 +77,11 @@ function luxOf(value) {
     return BigInt(/** @type {number | string} */ (value));
   }
 
-  throw new TypeError("An amount is a whole number of lux");
+  throw new TypeError("An amount is a whole number of its smallest unit");
 }
 
 /**
- * Whole DUSK and the digits after the separator, in the locale's writing.
+ * The whole part and the digits after the separator, in the locale's writing.
  *
  * @param {boolean} negative
  * @param {bigint} whole
@@ -88,22 +96,24 @@ function written(negative, whole, fraction, locale) {
 }
 
 /**
- * `lux` (not negative) to `decimals` decimals, rounded as `round` says.
+ * `amount` (not negative), in units of `places` decimals, to `decimals`
+ * decimals, rounded as `round` says.
  *
- * @param {bigint} lux
- * @param {number} decimals 0 to 9
+ * @param {bigint} amount
+ * @param {number} places The decimals its units have
+ * @param {number} decimals 0 to `places`
  * @param {"down" | "up" | "nearest"} round
  * @returns {{ whole: bigint, fraction: string }}
  */
-function rounded(lux, decimals, round) {
-  const step = 10n ** BigInt(LUX_DECIMALS - decimals);
+function rounded(amount, places, decimals, round) {
+  const step = 10n ** BigInt(places - decimals);
   const units =
     round === "down"
-      ? lux / step
+      ? amount / step
       : round === "up"
-        ? (lux + step - 1n) / step
-        : (lux + step / 2n) / step;
-  const per = LUX_PER_DUSK / step;
+        ? (amount + step - 1n) / step
+        : (amount + step / 2n) / step;
+  const per = 10n ** BigInt(decimals);
 
   return {
     fraction:
@@ -115,33 +125,35 @@ function rounded(lux, decimals, round) {
 }
 
 /**
- * The decimals a short amount of `lux` (more than 0) shows: 4 from 0.01
- * DUSK, else as many as give 2 significant digits, up to all 9.
+ * The decimals a short amount (more than 0) of `places` decimals shows: 4
+ * from 0.01, else as many as give 2 significant digits, up to all of them.
  *
- * @param {bigint} lux
+ * @param {bigint} amount
+ * @param {number} places
  */
-function shortDecimals(lux) {
-  if (lux >= SMALL) {
-    return SHORT_DECIMALS;
+function shortDecimals(amount, places) {
+  if (places <= SHORT_DECIMALS || amount >= 10n ** BigInt(places - 2)) {
+    return Math.min(SHORT_DECIMALS, places);
   }
 
-  // A number of k digits in lux has its first significant digit at decimal
-  // 10 − k, so its second at 11 − k.
-  return Math.min(LUX_DECIMALS, 11 - lux.toString().length);
+  // A number of k digits has its first significant digit at decimal
+  // places + 1 − k, so its second at places + 2 − k.
+  return Math.min(places, places + 2 - amount.toString().length);
 }
 
 /**
- * `round` applies to the amount's size: down for balances and what can be
- * spent (never more than there is), up for fees (never less than is paid),
+ * An amount in units of `decimals` decimals, as `formatAmount` says. `round`
+ * applies to the amount's size: down for balances and what can be spent
+ * (never more than there is), up for fees' maxima (never less than is paid),
  * else to the nearest, half up.
  *
- * @param {bigint | number | string} lux
- * @param {{ mode?: "short" | "exact", round?: "down" | "up" | "nearest", locale?: string }} [options]
+ * @param {bigint | number | string} units
+ * @param {{ decimals?: number, mode?: "short" | "exact", round?: "down" | "up" | "nearest", locale?: string }} [options]
  * @returns {{ text: string, exact: string }}
  */
-export function formatDusk(
-  lux,
-  { mode = "short", round = "nearest", locale = amountLocale() } = {}
+export function formatAmount(
+  units,
+  { decimals = LUX_DECIMALS, mode = "short", round = "nearest", locale = amountLocale() } = {}
 ) {
   if (mode !== "short" && mode !== "exact") {
     throw new RangeError("The mode is short or exact");
@@ -151,17 +163,21 @@ export function formatDusk(
     throw new RangeError("Rounding is down, up or nearest");
   }
 
-  const value = luxOf(lux);
+  if (!Number.isSafeInteger(decimals) || decimals < 0) {
+    throw new RangeError("An amount's decimals are a whole number");
+  }
+
+  const value = luxOf(units);
   const negative = value < 0n;
   const size = negative ? -value : value;
-  const all = rounded(size, LUX_DECIMALS, "down");
+  const all = rounded(size, decimals, decimals, "down");
   const exact = written(negative && size > 0n, all.whole, all.fraction, locale);
 
   if (mode === "exact" || size === 0n) {
     return { exact, text: exact };
   }
 
-  const short = rounded(size, shortDecimals(size), round);
+  const short = rounded(size, decimals, shortDecimals(size, decimals), round);
 
   return {
     exact,
@@ -171,12 +187,19 @@ export function formatDusk(
 
 /**
  * @param {bigint | number | string} lux
+ * @param {{ mode?: "short" | "exact", round?: "down" | "up" | "nearest", locale?: string }} [options]
+ * @returns {{ text: string, exact: string }}
+ */
+export const formatDusk = (lux, options) => formatAmount(lux, { ...options, decimals: LUX_DECIMALS });
+
+/**
+ * @param {bigint | number | string} lux
  * @returns {string}
  */
 export function formatDuskPlain(lux) {
   const value = luxOf(lux);
   const size = value < 0n ? -value : value;
-  const { fraction, whole } = rounded(size, LUX_DECIMALS, "down");
+  const { fraction, whole } = rounded(size, LUX_DECIMALS, LUX_DECIMALS, "down");
 
   return `${value < 0n ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
 }
@@ -234,20 +257,69 @@ export const amountForField = (plain, decimal = decimalSeparator()) =>
   String(plain ?? "").replace(".", decimal);
 
 /**
- * An amount as typed, in the plain form `parseDusk` reads: a decimal comma
- * made a point, and digit grouping left out where it can't be decimals. "1,5"
- * is 1.5, "1.000,5" and "1,000.5" are 1000.5, and "1,000,000" is a million.
- * One separator before three digits is a decimal where the language writes
- * decimals with it. Otherwise it could mean either (`unclearAmount`), so it
- * isn't made plain and `parseDusk` refuses it, as it does what isn't an amount.
+ * A plain amount, such as "10.5", written with the language's separators, for
+ * an example in a hint: "10,5" in French, "1,234.5" in English, "1.234,5" in
+ * Dutch. It reads back as that amount where it's more than a lone separator
+ * could leave unclear, as anything with decimals is.
  *
- * @param {string} text
- * @param {string} [decimal] `decimalSeparator()`, unless given
+ * @param {string} [plain] Digits, and decimals after a point: "0.5", unless given
+ * @param {string} [language] The browser's, unless given
  * @returns {string}
  */
-export function normalizeAmount(text, decimal = decimalSeparator()) {
+export function amountExample(plain = "0.5", language) {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(String(plain));
+
+  if (!match) throw new TypeError("An example is digits, and decimals after a point");
+
+  const { decimal, digits, whole } = localeParts(amountLocale(language));
+  const fraction = Array.from(match[2] ?? "", (d) => digits[Number(d)]).join("");
+
+  return `${whole.format(BigInt(match[1]))}${fraction ? `${decimal}${fraction}` : ""}`;
+}
+
+/**
+ * A text's whole part with its groups as the language writes them, in the
+ * plain form, with its decimals: "1 000,5" in French, however the space was
+ * typed, "1\u2019000.5" in Swiss German, "12,34,567.89" in Hindi. Null for
+ * anything else: another group's size, or another language's separators.
+ *
+ * @param {string} value
+ * @param {string} decimal
+ * @param {string | undefined} language
+ * @returns {string | null}
+ */
+function languageGrouped(value, decimal, language) {
+  const [wholeText, fraction, ...rest] = value.split(decimal);
+  const digits = wholeText.replace(SPACES, "").replace(APOSTROPHES, "").replaceAll(",", "").replaceAll(".", "");
+
+  if (rest.length || digits === wholeText || !/^[1-9]\d*$/.test(digits) || !/^\d*$/.test(fraction ?? "")) return null;
+
+  /** @param {string} text */
+  const same = (text) => text.replace(SPACES, " ").replace(APOSTROPHES, "'");
+  const { groups } = localeParts(amountLocale(language));
+
+  return same(groups.format(BigInt(digits))) === same(wholeText) ? `${digits}${fraction === undefined ? "" : `.${fraction}`}` : null;
+}
+
+/**
+ * An amount as typed, in the plain form `parseDusk` reads: a decimal comma
+ * made a point, and digit grouping left out where it can't be decimals. "1,5"
+ * is 1.5, "1.000,5" and "1,000.5" are 1000.5, and "1,000,000" is a million;
+ * so are the language's own groups: "1 000" in French, "1'000" in Swiss
+ * German, "12,34,567" in Hindi. One separator before three digits is a
+ * decimal where the language writes decimals with it. Otherwise it could mean
+ * either (`unclearAmount`), so it isn't made plain and `parseDusk` refuses
+ * it, as it does what isn't an amount.
+ *
+ * @param {string} text
+ * @param {string} [decimal] The language's, unless given
+ * @param {string} [language] The browser's, unless given: whose groups are read
+ * @returns {string}
+ */
+export function normalizeAmount(text, decimal, language) {
+  const separator = decimal ?? decimalSeparator(language);
   const value = String(text ?? "").trim();
-  const commaDecimals = decimal === ",";
+  const commaDecimals = separator === ",";
 
   // Groups of three after a first group that doesn't start with a zero.
   if (/^[1-9]\d{0,2}(,\d{3})+\.\d*$/.test(value)) return value.replaceAll(",", "");
@@ -255,9 +327,9 @@ export function normalizeAmount(text, decimal = decimalSeparator()) {
   if (/^[1-9]\d{0,2}(,\d{3}){2,}$/.test(value)) return value.replaceAll(",", "");
   if (commaDecimals && /^[1-9]\d{0,2}(\.\d{3}){2,}$/.test(value)) return value.replaceAll(".", "");
 
-  if (unclearAmount(value, decimal)) return commaDecimals ? value.replace(".", ",") : value;
+  if (unclearAmount(value, separator)) return commaDecimals ? value.replace(".", ",") : value;
 
-  return /^\d*,\d*$/.test(value) ? value.replace(",", ".") : value;
+  return languageGrouped(value, separator, language) ?? (/^\d*,\d*$/.test(value) ? value.replace(",", ".") : value);
 }
 
 /**
@@ -293,4 +365,38 @@ export function parseDusk(plain) {
   if (fraction.length > LUX_DECIMALS) return null;
 
   return BigInt(whole || "0") * LUX_PER_DUSK + BigInt(fraction.padEnd(LUX_DECIMALS, "0"));
+}
+
+/**
+ * An amount of DUSK as a person typed it, in the language's reading: the lux
+ * it is, or what's wrong with it in plain words. Nothing typed is neither.
+ *
+ * @param {string} text
+ * @param {string} [language] The browser's, unless given
+ * @returns {{ lux: bigint | null, problem: string | null }}
+ */
+export function readAmount(text, language) {
+  const typed = String(text ?? "").trim();
+
+  if (!typed) return { lux: null, problem: null };
+
+  const decimal = decimalSeparator(language);
+  const either = unclearAmount(typed, decimal);
+
+  if (either) return { lux: null, problem: `Is that ${either.grouped} or ${either.decimal}? Write the one you mean.` };
+
+  const plain = normalizeAmount(typed, decimal, language);
+  const lux = parseDusk(plain);
+
+  if (lux === null) {
+    return {
+      lux: null,
+      problem: /^\d*\.\d+$/.test(plain) ? `DUSK has ${LUX_DECIMALS} decimals at most.` : `Enter an amount such as 10 or ${amountExample("10.5", language)}.`,
+    };
+  }
+
+  if (lux === 0n) return { lux: null, problem: "Enter an amount greater than 0." };
+  if (lux > MAX_U64) return { lux: null, problem: "That amount is too large." };
+
+  return { lux, problem: null };
 }

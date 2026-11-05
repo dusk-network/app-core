@@ -15,9 +15,12 @@ import { isAccount } from "@dusk-network/networks/account";
 import { BRIDGE_FUNCTIONS, decodeBridgeCall, duskEvmContracts, evmAddressOf, isBridgeContract } from "@dusk-network/networks/duskevm";
 import {
   CREDIT_WINDOW_MS,
+  ETH_BRIDGE_FINALIZED_TOPIC,
   EVM_ADDRESS,
   EVM_HASH,
+  RANGE_REFUSED,
   TIMEOUT_MS,
+  TRANSFER_TOPIC,
   WAIT_MS,
   WEI_PER_LUX,
   addressOf,
@@ -47,8 +50,10 @@ import {
 import { depositArrivalsFromExplorer } from "./bridge-explorer.js";
 import { DETAILS_BATCH, TRANSFER_CONTRACT, fetchTxDetails, historyRange } from "./history.js";
 
-export { CREDIT_WINDOW_MS, EXPLORER_PAGES, WAIT_MS } from "./bridge-common.js";
+export { CREDIT_WINDOW_MS, ETH_BRIDGE_FINALIZED_TOPIC, EXPLORER_PAGES, TRANSFER_TOPIC, WAIT_MS } from "./bridge-common.js";
 export { depositArrivalsFromExplorer } from "./bridge-explorer.js";
+export { transferLedger } from "./bridge-ledger.js";
+export { STATUS_MAX_AGE_MS, bridgeStatus } from "./bridge-status.js";
 
 /** @typedef {import("./bridge.js").Arrival} Arrival */
 /** @typedef {import("./bridge.js").BlockTimes} BlockTimes */
@@ -84,8 +89,6 @@ export const LOG_WINDOWS = 8;
 export const DEPOSIT_HORIZON_MS = 2 * 60 * 60_000;
 export const SERVICE_HORIZON_MS = 12 * 60 * 60_000;
 export const HISTORY_PAGES = 4;
-export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-export const ETH_BRIDGE_FINALIZED_TOPIC = "0x31b2166ff604fc5672ea5df08a78081d2bc6d746cadce880747f3643d819e83d";
 
 // About one Dusk block every 10 seconds: how far back a sender's history is read.
 const DUSK_BLOCK_MS = 10_000;
@@ -110,8 +113,6 @@ const RECHECK_MS = 60_000;
 // transfer waits for before it takes the credit where a later equal one,
 // still without its own, could have had it instead.
 const CONFIRM_PASSES = 8;
-// What an RPC says when it won't search that many blocks at once.
-const RANGE_REFUSED = /limit|range|too many|exceed/i;
 const WORDS = /^0x(?:[0-9a-fA-F]{64})+$/;
 
 // ---------------------------------------------------------------------------

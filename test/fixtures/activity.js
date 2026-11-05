@@ -26,19 +26,19 @@ export const EVM = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
 export const hash = (n) => n.toString(16).padStart(2, "0").repeat(32);
 
 /**
- * An account's recorded entry at a height, as `/history` reads it once its
- * details came, with `extra` kept beside it.
+ * An entry the archive listed for an account, as `/history` reads it once its
+ * details came: from its raw entry and its `tx(hash:)`, with `extra` kept
+ * beside it.
  *
  * @param {string} account
- * @param {number} height
+ * @param {any} raw
+ * @param {any} tx
  * @param {Record<string, unknown>} [extra]
  * @param {{ network?: any }} [options]
  * @returns {ReadEntry}
  */
-export function recorded(account, height, extra = {}, { network = 2 } = {}) {
-  const raw = [...fixture.accounts[account].sender, ...fixture.accounts[account].receiver].find((e) => e.block_height === height);
+export function entryFrom(account, raw, tx, extra = {}, { network = 2 } = {}) {
   const parsed = /** @type {import("../../src/history.js").HistoryEntry} */ (parseHistoryEntry(account, raw));
-  const tx = fixture.details[parsed.hash];
 
   return historyEntry(
     {
@@ -51,6 +51,7 @@ export function recorded(account, height, extra = {}, { network = 2 } = {}) {
       gasLimit: String(tx.tx.gasLimit),
       gasPrice: String(tx.tx.gasPrice),
       gasSpent: String(tx.gasSpent),
+      refund: parsed.refund,
       success: !tx.err,
       timestamp: tx.blockTimestamp * 1000,
       value: parsed.value.toString(),
@@ -58,6 +59,22 @@ export function recorded(account, height, extra = {}, { network = 2 } = {}) {
     },
     { network }
   );
+}
+
+/**
+ * An account's recorded entry at a height, as `/history` reads it once its
+ * details came, with `extra` kept beside it.
+ *
+ * @param {string} account
+ * @param {number} height
+ * @param {Record<string, unknown>} [extra]
+ * @param {{ network?: any }} [options]
+ * @returns {ReadEntry}
+ */
+export function recorded(account, height, extra = {}, options = {}) {
+  const raw = [...fixture.accounts[account].sender, ...fixture.accounts[account].receiver].find((e) => e.block_height === height);
+
+  return entryFrom(account, raw, fixture.details[raw.origin], extra, options);
 }
 
 /**

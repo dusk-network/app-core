@@ -2,6 +2,23 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.7.0]
+
+### Added
+
+- `/text`: `displayText`, text a person must trust with what hides in it made visible
+- `/payment-links`: `parsePaymentLink` and `makePaymentLink`, `dusk:` and https payment links, made only for what Send takes
+- `/export`: `accountingCsv`, an account's activity as Koinly's universal CSV, for a quarter or any dates
+- `/sozu`: `sozuPosition`, `sozuYear`, `sozuRateLine` and `sozuFacts`, a stake with Sozu in figures
+- `/bridge`: `transferLedger`, a transfer's exact amounts, the same in every app
+- `/bridge`: `bridgeStatus`, whether a route is paying out, its last payout and what it can pay
+- `/amounts`: `formatAmount`, an amount of any decimals by DUSK's rule
+- `/amounts`: `readAmount`, what was typed or what's wrong with it in plain words, and `amountExample`, a hint's example in the language's separators
+
+### Changed
+
+- `/amounts`: `normalizeAmount` reads a language's own digit groups: `1 000,5` in French, `1'000` in Swiss German, `12,34,567` in Hindi
+
 ## [0.6.0]
 
 ### Added

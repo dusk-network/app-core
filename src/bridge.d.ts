@@ -43,6 +43,8 @@
  * - An app that follows deposits on DuskEVM's explorer alone imports
  *   `depositArrivalsFromExplorer` from `/bridge-explorer`, without the RPC
  *   path and `/history`.
+ * - `transferLedger` says one transfer's amounts, the same in every app, and
+ *   `bridgeStatus` how a route is doing before someone sends.
  *
  * @example
  * ```js
@@ -61,7 +63,8 @@
  * @module
  */
 
-import type { Account, EvmAddress, Network, NetworkRef } from "@dusk-network/networks";
+import type { Account, EvmAddress, Network, NetworkRef, Route } from "@dusk-network/networks";
+import type { ActivityRow } from "./activity.js";
 import type { Archive, Direction, EntryKind } from "./history.js";
 
 export { depositArrivalsFromExplorer, type ExplorerDepositOptions } from "./bridge-explorer.js";
@@ -217,11 +220,15 @@ export type Arrival =
   | { state: "waiting"; scan?: Scan }
   | { state: "unknown"; reason: UnknownReason; error?: string; problem?: NoPayout; scan?: Scan };
 
-/** A `fetch`, as these reads use it: a GET of the explorer's JSON, or a POST of JSON-RPC, and the answer's status and text. */
+/**
+ * A `fetch`, as these reads use it: a GET of the explorer's JSON, a POST of
+ * JSON-RPC or to a node, and the answer's status and text; for a contract's
+ * reply, its bytes. Global `fetch` does.
+ */
 export type FetchLike = (
   input: string,
-  init: { method: "GET" | "POST"; headers: Record<string, string>; body?: string; signal: AbortSignal }
-) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+  init: { method: "GET" | "POST"; headers: Record<string, string>; body?: string | ArrayBuffer; signal: AbortSignal }
+) => Promise<{ ok: boolean; status: number; text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> }>;
 
 /** The app's cache of a chain's block times, in milliseconds, by number, as a `Map` is. */
 export type BlockTimes = {
@@ -520,3 +527,153 @@ export declare function migrationPayoutOf(entry: HistoryLike, network: BridgeNet
  * deposit's hash, the DuskEVM transaction that paid it and when.
  */
 export declare function arrivalsOf(arrivals: ReadonlyMap<string, Arrival>): Map<string, { hash: string; at: number | null }>;
+
+/**
+ * One amount of a transfer: `amount` in units of `decimals` decimals, of
+ * `coin`, as a row writes it (`text`: short, by `formatAmount`'s rule of
+ * `/amounts`) and as its detail writes it (`exact`).
+ */
+export type LedgerLine = {
+  key: "sent" | "bridgeFee" | "networkFee" | "received" | "gas";
+  amount: bigint;
+  decimals: number;
+  /** "DUSK", "BEP20 DUSK", "ERC20 DUSK", or the gas coin, "ETH" or "BNB". */
+  coin: string;
+  text: string;
+  exact: string;
+  /** Worked out from what was sent: what will arrive, not yet what did. */
+  expected: boolean;
+};
+
+/**
+ * One transfer in amounts, the same in every app: each is null where it isn't
+ * known, and a route without such a fee has none. `lines` are those known, in
+ * their order: sent, bridge fee, network fee, received, gas.
+ */
+export type TransferLedger = {
+  route: string | null;
+  kind: Route["kind"];
+  /** It failed on Dusk: nothing moved, and its fee stands alone. */
+  failed: boolean;
+  /** What arrived is known: `received` isn't worked out. */
+  arrived: boolean;
+  sent: LedgerLine | null;
+  /** The bridge's own fee, taken from what's sent. */
+  bridgeFee: LedgerLine | null;
+  /** What the transfer's transactions on Dusk paid, the proof's and the claim's together for a withdrawal. */
+  networkFee: LedgerLine | null;
+  received: LedgerLine | null;
+  /** What it paid in the other chain's coin, for its own gas. */
+  gas: LedgerLine | null;
+  lines: LedgerLine[];
+};
+
+/** What `transferLedger` takes: a row of `/activity`, what the app keeps of the transfer, or both. What's given goes before what the row says. */
+export type LedgerInput = {
+  /** The transfer's row of `/activity`: a transfer with a route's account, or a call of DuskEVM's bridge or Portal. */
+  row?: ActivityRow | null;
+  /** The route: as the network's file gives it (a row's `route`), or its ID with `network`. */
+  route?: Route | string | { id: string } | null;
+  network?: BridgeNetwork | null;
+  /** What was sent, in lux. */
+  sent?: bigint | number | string | null;
+  /** What the bridge took, in lux: the route's fee, unless given. */
+  bridgeFee?: bigint | number | string | null;
+  /** What it paid on Dusk, in lux: a withdrawal's proof and claim, as a list. */
+  networkFee?: bigint | number | string | null | ReadonlyArray<bigint | number | string | null | undefined>;
+  /** What arrived, in lux, where the app has it; else `arrival`, or worked out. */
+  received?: bigint | number | string | null;
+  /** What `/bridge` found of it on the other side. */
+  arrival?: Arrival | null;
+  /** The gas it paid on the other chain, in wei: `gasUsed` × `effectiveGasPrice` of its receipt. */
+  gasWei?: bigint | number | string | null;
+  /** It failed on Dusk: the row's status says, unless given. */
+  failed?: boolean;
+  /** Whose separators the amounts are written in; `amountLocale()`'s by default. */
+  locale?: string;
+};
+
+/**
+ * A transfer's ledger, for all three apps to show the same numbers: a row shows
+ * a line's `text`, its detail `exact`. Null for a row that's no bridge transfer.
+ */
+export declare function transferLedger(input?: LedgerInput): TransferLedger | null;
+
+/** How long `bridgeStatus` keeps what it read: 10 minutes, in milliseconds. */
+export declare const STATUS_MAX_AGE_MS: 600000;
+
+/**
+ * How a route is doing, as far as the chains say.
+ *
+ * What can't be known cheaply isn't here: how many transfers wait to be paid
+ * takes matching each transfer in to its payout, as `serviceArrivals` does for
+ * one person's; and a DuskEVM withdrawal's last claim, which no read finds
+ * without paging all the bridge's events.
+ */
+export type BridgeStatus = {
+  route: string;
+  /** The network's file offers the route. */
+  running: boolean;
+  /**
+   * "stopped": the route isn't running. "late": a transfer in went past twice
+   * the route's usual time (a day, where it has none) with no payout since.
+   * "yes": a payout came in the last week, or four times the usual time.
+   * "quiet": none did, and nothing says one is due. "on-claim": a DuskEVM
+   * withdrawal pays when its owner claims it, so no one is waited for.
+   * "unknown": the reads failed.
+   */
+  paying: "yes" | "quiet" | "late" | "stopped" | "on-claim" | "unknown";
+  /** The newest payout found: the transaction that paid it, its time in milliseconds, the lux it paid, its block. */
+  lastPayout: { hash: string; at: number | null; amount: bigint; block: number | null } | null;
+  /** With no payout found: how far back it was looked for, in milliseconds. A later read looks further, up to 30 days. */
+  readSince: number | null;
+  /** The newest transfer in with no payout since, on a route that's paid from a transfer in: its time. */
+  waitingSince: number | null;
+  /** What it can pay, in lux, where a balance says: the payout account's on Dusk, or the bridge's for a withdrawal. */
+  canPay: bigint | null;
+  /**
+   * What limits a payout: "balance", `canPay`; or "mints": what's paid is minted
+   * as it's paid, by DuskEVM for a deposit and by BSC's payout address, which
+   * holds none between payouts, so no balance says how much it can pay.
+   */
+  limit: "balance" | "mints";
+  /** What the address that pays holds of its chain's coin for gas, where it pays with its own. */
+  gas: { wei: bigint; coin: string } | null;
+  /** When it was read, in milliseconds. */
+  readAt: number;
+  /** The requests this call made: 0 when it's what was kept. */
+  requests: number;
+  /** Why a part couldn't be read; "" when all were. */
+  error: string;
+};
+
+/** What `bridgeStatus` takes. */
+export type BridgeStatusOptions = {
+  network: BridgeNetwork;
+  /** The route's ID, as "dusk-to-bsc". */
+  route: string;
+  /** Where the read is kept: a `Map` of text does, or the app's own store. Without one, each call reads. */
+  cache?: FactCache;
+  /** `STATUS_MAX_AGE_MS` by default. */
+  maxAgeMs?: number;
+  fetch?: FetchLike;
+  /** `/history`'s archive of Dusk: made from `nodeUrl` and `fetch` when not given. */
+  archive?: Archive;
+  /** The Dusk node; the network's by default. */
+  nodeUrl?: string;
+  /** The other chain's RPC; the route's by default. */
+  rpcUrl?: string;
+  now?: number;
+  timeoutMs?: number;
+};
+
+/**
+ * How a route is doing before someone sends. One read when the page opens: what
+ * it read is kept in `cache` for `maxAgeMs`, reads the same time make one, and a
+ * later read asks only for the blocks since. It's a few small requests: on Dusk
+ * the head and the account's newest, and on the other chain at most 8 log searches
+ * and the head. A part that can't be read leaves the rest, with `error`, and isn't
+ * kept. A route that isn't running asks nothing. Throws a TypeError for a route the
+ * network doesn't have.
+ */
+export declare function bridgeStatus(options: BridgeStatusOptions): Promise<BridgeStatus>;
