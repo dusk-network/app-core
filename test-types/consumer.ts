@@ -619,3 +619,10 @@ const ledgerLines: LedgerLine[] | undefined = ledger?.lines;
 const ledgerExact: string | undefined = ledger?.received?.exact;
 const ledgerFromRow: TransferLedger | null = transferLedger({ row: readRows[0] });
 void [ledgerLines, ledgerExact, ledgerFromRow];
+
+// /bridge's status
+import { STATUS_MAX_AGE_MS, bridgeStatus, type BridgeStatus } from "@dusk-network/app-core/bridge";
+
+const routeStatus: Promise<BridgeStatus> = bridgeStatus({ archive, cache: new Map(), fetch, maxAgeMs: STATUS_MAX_AGE_MS, network: 1, nodeUrl: "https://node", now: 1, route: "dusk-to-bsc", rpcUrl: "https://rpc", timeoutMs: 1 });
+const statusWords = routeStatus.then(({ canPay, gas, lastPayout, limit, paying, readAt, readSince, requests, running, waitingSince }) => [canPay, gas?.wei, lastPayout?.amount, limit, paying, readAt, readSince, requests, running, waitingSince]);
+void statusWords;

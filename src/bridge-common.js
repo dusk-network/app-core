@@ -43,6 +43,11 @@ export const CREDIT_WINDOW_MS = 120_000;
 export const WAIT_MS = 7 * 24 * 60 * 60_000;
 export const EXPLORER_PAGES = 5;
 
+export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+export const ETH_BRIDGE_FINALIZED_TOPIC = "0x31b2166ff604fc5672ea5df08a78081d2bc6d746cadce880747f3643d819e83d";
+// What an RPC says when it won't search that many blocks at once.
+export const RANGE_REFUSED = /limit|range|too many|exceed/i;
+
 export const WEI_PER_LUX = 1_000_000_000n;
 const MAX_U64 = (1n << 64n) - 1n;
 export const TIMEOUT_MS = 8_000;
@@ -269,11 +274,15 @@ export function reader(fetchFn, timeoutMs) {
   const counter = { requests: 0 };
 
   /**
+   * One request, within `timeoutMs` for its answer too, counted.
+   *
+   * @template T
    * @param {string} url
-   * @param {{ method: "GET" | "POST", headers: Record<string, string>, body?: string }} init
-   * @returns {Promise<{ ok: boolean, status: number, body: any, host: string }>}
+   * @param {{ method: "GET" | "POST", headers: Record<string, string>, body?: any }} init
+   * @param {(response: Awaited<ReturnType<FetchLike>>, host: string) => Promise<T>} read
+   * @returns {Promise<T>}
    */
-  async function exchange(url, init) {
+  async function asked(url, init, read) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const host = hostOf(url);
@@ -282,7 +291,24 @@ export function reader(fetchFn, timeoutMs) {
 
     try {
       const send = fetchFn ?? globalThis.fetch;
-      const response = await send(url, { ...init, signal: controller.signal });
+
+      return await read(await send(url, { ...init, signal: controller.signal }), host);
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(`${host} didn't answer within ${Math.round(timeoutMs / 100) / 10} s`);
+
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * @param {string} url
+   * @param {{ method: "GET" | "POST", headers: Record<string, string>, body?: string }} init
+   * @returns {Promise<{ ok: boolean, status: number, body: any, host: string }>}
+   */
+  const exchange = (url, init) =>
+    asked(url, init, async (response, host) => {
       const text = await response.text();
       /** @type {any} */
       let body;
@@ -294,14 +320,7 @@ export function reader(fetchFn, timeoutMs) {
       }
 
       return { body, host, ok: response.ok, status: response.status };
-    } catch (error) {
-      if (controller.signal.aborted) throw new Error(`${host} didn't answer within ${Math.round(timeoutMs / 100) / 10} s`);
-
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
+    });
 
   return {
     counter,
@@ -321,6 +340,33 @@ export function reader(fetchFn, timeoutMs) {
 
       return answer.body;
     },
+
+    /**
+     * A POST's answer as text, as it was written: amounts in it past 2^53 stay exact.
+     *
+     * @param {string} url
+     * @returns {Promise<string>}
+     */
+    postText: (url) =>
+      asked(url, { headers: {}, method: "POST" }, async (response, host) => {
+        if (!response.ok) throw new Error(`${host} answers with HTTP ${response.status}`);
+
+        return response.text();
+      }),
+
+    /**
+     * A POST of bytes, and its answer's bytes: a contract's reply.
+     *
+     * @param {string} url
+     * @param {ArrayBuffer} body
+     * @returns {Promise<Uint8Array>}
+     */
+    postBytes: (url, body) =>
+      asked(url, { body, headers: { "content-type": "application/octet-stream" }, method: "POST" }, async (response, host) => {
+        if (!response.ok) throw new Error(`${host} answers with HTTP ${response.status}`);
+
+        return new Uint8Array(await /** @type {any} */ (response).arrayBuffer());
+      }),
 
     /**
      * One JSON-RPC call; its error's message, with its code, when it refuses.
