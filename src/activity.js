@@ -732,8 +732,9 @@ function settleWithdrawals(rows, calls, claims, arrivals) {
  * @param {SentTransaction} sent
  */
 const addsToChainRow = (sent) =>
-  // The shielded history has neither a shielded send's recipient nor its memo.
-  Boolean(textOf(sent.toName) || (sent.privacy === "shielded" && (textOf(sent.memo) || textOf(sent.to))));
+  // The shielded history has neither a shielded send's recipient nor its memo, and
+  // the public one neither a token's amount nor its recipient.
+  Boolean(textOf(sent.toName) || (sent.privacy === "shielded" && (textOf(sent.memo) || textOf(sent.to))) || /** @type {any} */ (sent.asset)?.type === "DRC20");
 
 /**
  * The sends the chain's histories have the outcome of, as `activity.d.ts` says.

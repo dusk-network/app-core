@@ -466,6 +466,9 @@ describe("settleSends", () => {
     like(rowsOf({ pending: keep, shielded: entries })[0], { memo: "Invoice 42", source: "shielded", status: "executed" });
     // A public send's memo is the chain's too.
     assert.deepEqual(settleSends({ pending: [{ ...sent, memo: "Rent" }], public: [registered()] }).drop, [sent.hash]);
+    // Nor a token's amount or recipient, which only the wallet's record has.
+    const token = { ...sent, asset: { decimals: 9, op: "transfer", symbol: "TKN", to: A, type: "DRC20", valueUnits: "1" } };
+    assert.deepEqual(settleSends({ pending: [token], public: [registered()] }).keep, [{ ...token, settled: true }]);
   });
 
   it("keeps what the app says adds to the chain's row, and leaves alone a send the app's rule fails on", () => {

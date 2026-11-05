@@ -18,6 +18,11 @@
  *   way, once `facts` says its stDUSK (`sozuFacts` of `/sozu`), with its deposit
  *   fee and what a stDUSK was worth in its description. Until then, it's what
  *   moved under the staking tags.
+ * - A token's transfer is what it moved, with its amount, currency and recipient in
+ *   the same columns, from the wallet's record of it (`sent.asset` of `/activity`),
+ *   with no value in fiat. An allowance is its fee, saying what it allows and to
+ *   whom. What the wallet has no record of, such as a transfer sent from another
+ *   device, stays what the chain says: a call, and its fee.
  * - The value at the time of payment is the app's: `price` is asked what one
  *   DUSK was worth, and without one those columns stay empty, for the tool to
  *   work out.

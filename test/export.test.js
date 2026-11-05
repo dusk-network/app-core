@@ -411,6 +411,190 @@ describe("what's only a fee", () => {
   });
 });
 
+describe("a token", () => {
+  // Recorded: A called a contract at this height. Here, that call is a token's
+  // transfer, sent by the wallet: the chain's row says only that the contract
+  // was called, with nothing moved, and the wallet's own record says the rest.
+  const CALLED = 4658000;
+  const TOKEN = "ab".repeat(32);
+  /**
+   * The chain's row of a call and the wallet's record of it, as the wallet keeps a
+   * token's once it's settled: for what the chain's row lacks.
+   *
+   * @param {Record<string, unknown>} asset
+   * @param {Partial<ExportOptions>} [options]
+   * @param {string} [fnName]
+   */
+  const tokenFile = (asset, options, fnName = "transfer") => {
+    const entry = recorded(A, CALLED, { contractId: TOKEN, fnName });
+
+    return fileOf(A, {
+      pending: [{ amount: "0", asset, contractId: TOKEN, deposit: "0", fnName, hash: entry.hash, kind: "contract_call", privacy: "public", profileIndex: 0, settled: true, status: "executed", submittedAt: entry.timestamp }],
+      public: [entry],
+    }, options);
+  };
+  const SENT = { decimals: 9, driver: "drc20", name: "Token", op: "transfer", symbol: "TKN", to: C, type: "DRC20", valueUnits: "123456789100" };
+  const FEE = "0.001959593";
+
+  it("writes a transfer's amount, currency and recipient in the format's own columns, beside its fee", async () => {
+    const { records } = await tokenFile(SENT);
+
+    assert.equal(records.length, 1);
+    assert.equal(records[0]["Sent Amount"], "123.4567891");
+    assert.equal(records[0]["Sent Currency"], "TKN");
+    assert.equal(records[0]["Received Amount"], "");
+    assert.equal(records[0]["Fee Amount"], FEE);
+    assert.equal(records[0]["Fee Currency"], "DUSK");
+    assert.equal(records[0].Tag, "");
+    assert.equal(records[0].Counterparty, C);
+    assert.equal(records[0].Description, `Transfer of TKN, contract ${TOKEN}`);
+  });
+
+  it("writes one the wallet alone knows of yet, from its record", async () => {
+    const { records } = await fileOf(A, {
+      pending: [{ amount: "0", asset: SENT, contractId: TOKEN, deposit: "0", feePaid: "1000000", fnName: "transfer", hash: hash(0x7a), kind: "contract_call", privacy: "public", profileIndex: 0, status: "executed", submittedAt: 1_000, timestamp: 2_000 }],
+    });
+
+    assert.equal(records[0]["Sent Amount"], "123.4567891");
+    assert.equal(records[0]["Sent Currency"], "TKN");
+    assert.equal(records[0]["Fee Amount"], "0.001");
+    assert.equal(records[0].Counterparty, C);
+  });
+
+  it("is exact to the token's own decimals", async () => {
+    for (const [decimals, valueUnits, amount] of [[18, "1000000000000000001", "1.000000000000000001"], [0, "5", "5"], [2, "150", "1.5"], [6, "7", "0.000007"]]) {
+      const { records } = await tokenFile({ ...SENT, decimals, valueUnits });
+
+      assert.equal(records[0]["Sent Amount"], amount);
+    }
+  });
+
+  it("names the recipient as the person asked, and leaves out what isn't them", async () => {
+    const contactName = (/** @type {string} */ id) => (id === C ? "Carla" : id === TOKEN ? "the contract" : "");
+    const { records } = await tokenFile(SENT, { contactName });
+
+    assert.equal(records[0]["Counterparty Name"], "Carla");
+    assert.equal(records[0]["Internal Transfer"], "");
+  });
+
+  it("is a transfer between the person's own profiles, which isn't income", async () => {
+    const { records } = await tokenFile({ ...SENT, to: B });
+
+    assert.equal(records[0]["Sent Amount"], "123.4567891");
+    assert.equal(records[0].Counterparty, B);
+    assert.equal(records[0]["Counterparty Name"], SOFIA);
+    assert.equal(records[0]["Internal Transfer"], "yes");
+    assert.equal(records[0].Description, `Transfer of TKN to own profile ${SOFIA}, contract ${TOKEN}`);
+  });
+
+  it("is only a fee when it goes to the account itself", async () => {
+    const { records } = await tokenFile({ ...SENT, to: A });
+
+    assert.equal(records.length, 1);
+    assert.equal(records[0].Tag, "cost");
+    assert.equal(records[0]["Sent Currency"], "DUSK");
+    assert.equal(records[0]["Sent Amount"], FEE);
+    assert.equal(records[0].Description, "Transfer of TKN to the account itself");
+  });
+
+  it("is only a fee when it moved nothing", async () => {
+    const { records } = await tokenFile({ ...SENT, valueUnits: "0" });
+
+    assert.equal(records.length, 1);
+    assert.equal(records[0].Tag, "cost");
+    assert.equal(records[0]["Sent Currency"], "DUSK");
+    assert.equal(records[0].Description, `Transfer of no TKN, contract ${TOKEN}`);
+  });
+
+  it("moved nothing when it failed: its fee alone", async () => {
+    const entry = recorded(A, CALLED, { contractId: TOKEN, error: "Panic", fnName: "transfer", success: false });
+    const { records } = await fileOf(A, { pending: [{ asset: SENT, contractId: TOKEN, fnName: "transfer", hash: entry.hash, kind: "contract_call", profileIndex: 0, settled: true, status: "failed" }], public: [entry] });
+
+    assert.equal(records.length, 1);
+    assert.equal(records[0]["Sent Currency"], "DUSK");
+    assert.equal(records[0].Tag, "cost");
+    assert.match(records[0].Description, /^Failed: /);
+  });
+
+  it("makes an allowance a fee, saying what it allows and to whom, as nothing moved", async () => {
+    const approve = { decimals: 2, op: "approve", spender: C, symbol: "TKN", type: "DRC20", valueUnits: "150" };
+
+    for (const [asset, words] of /** @type {[Record<string, unknown>, string][]} */ ([
+      [approve, "Allowance of 1.5 TKN"],
+      [{ ...approve, isMax: true, valueUnits: "18446744073709551615" }, "Unlimited allowance of TKN"],
+      [{ ...approve, valueUnits: "0" }, "Allowance of TKN removed"],
+    ])) {
+      const { records } = await tokenFile(asset, {}, "approve");
+
+      assert.equal(records.length, 1);
+      assert.equal(records[0].Tag, "cost");
+      assert.equal(records[0]["Sent Currency"], "DUSK");
+      assert.equal(records[0]["Sent Amount"], FEE);
+      assert.equal(records[0].Counterparty, C);
+      assert.equal(records[0].Description, `${words}, contract ${TOKEN}`);
+    }
+  });
+
+  it("keeps DUSK a call paid beside it, on a line of its own", async () => {
+    const entry = recorded(A, CALLED, { contractId: TOKEN, fnName: "transfer", value: "2000000000" });
+    const { records } = await fileOf(A, { pending: [{ asset: SENT, contractId: TOKEN, deposit: "2000000000", fnName: "transfer", hash: entry.hash, kind: "contract_call", profileIndex: 0, settled: true, status: "executed" }], public: [entry] });
+
+    assert.deepEqual(records.map((record) => [record["Sent Amount"], record["Sent Currency"], record["Fee Amount"]]), [["123.4567891", "TKN", FEE], ["2", "DUSK", ""]]);
+  });
+
+  it("asks no price of DUSK for what isn't DUSK, leaves its value empty and counts it", async () => {
+    /** @type {unknown[]} */
+    const asked = [];
+    const { records, unpriced } = await tokenFile(SENT, {
+      price: (at) => {
+        asked.push(at);
+
+        return "0.5";
+      },
+    });
+
+    assert.deepEqual(asked, []);
+    assert.equal(records[0]["Net Worth Amount"], "");
+    assert.equal(records[0]["Net Worth Currency"], "");
+    assert.equal(unpriced, 1);
+  });
+
+  it("never reads a token's own words as a formula, or lets them hide anything", async () => {
+    const { records } = await tokenFile({ ...SENT, symbol: "=HYPERLINK(1)", to: "@evil\u202e" });
+
+    assert.equal(records[0]["Sent Currency"], "'=HYPERLINK(1)");
+    assert.match(records[0].Counterparty, /^'@evil\\u202e$/);
+    assert.ok(!records[0].Description.includes("\u202e"));
+  });
+
+  it("leaves a token's recipient empty when its record has none, never naming the contract called", async () => {
+    const { records } = await tokenFile({ ...SENT, to: undefined });
+
+    assert.equal(records[0]["Sent Currency"], "TKN");
+    assert.equal(records[0].Counterparty, "");
+    assert.ok(!JSON.stringify(records[0]).includes(`"Counterparty":"${TOKEN}"`));
+  });
+
+  it("keeps DUSK a call moved when its token moved nothing", async () => {
+    const entry = recorded(A, CALLED, { contractId: TOKEN, fnName: "approve", value: "2000000000" });
+    const asset = { ...SENT, op: "approve", spender: C, to: undefined };
+    const { records } = await fileOf(A, { pending: [{ asset, contractId: TOKEN, deposit: "2000000000", fnName: "approve", hash: entry.hash, kind: "contract_call", profileIndex: 0, settled: true, status: "executed" }], public: [entry] });
+
+    assert.ok(records.some((record) => record["Sent Currency"] === "DUSK" && record["Sent Amount"] === "2"), JSON.stringify(records));
+  });
+
+  it("invents no amount from a record it can't read: the fee, as what it was", async () => {
+    for (const asset of [{ ...SENT, decimals: undefined }, { ...SENT, decimals: 1_000_000 }, { ...SENT, valueUnits: "12x" }, { ...SENT, valueUnits: "-5" }, { kind: "sozu", action: "stake" }]) {
+      const { records } = await tokenFile(asset);
+
+      assert.equal(records.length, 1);
+      assert.equal(records[0]["Sent Currency"], "DUSK");
+      assert.equal(records[0]["Sent Amount"], FEE);
+      assert.equal(records[0].Description, "Call transfer, which may have moved a token: its amount isn't in this wallet's record");
+    }
+  });
+});
+
 describe("the bridge", () => {
   it("says a deposit's DuskEVM address, as what left the wallet", async () => {
     const tx = { blockTimestamp: 1793080300, err: null, gasSpent: 1985878, tx: { callData: { contractId: deposit.entry.events[0].data.receiver, fnName: "depositETHToWithValue" }, gasLimit: 5000000, gasPrice: 1 } };

@@ -25,6 +25,10 @@
  * account it is, who the other side is, and whether it's a transfer between
  * the person's own profiles) sits to the right of its twelve.
  *
+ * A token's transfer has its amount, currency and recipient in those same columns,
+ * from the wallet's own record of it (`sent.asset`): the chain's row says only that
+ * the contract was called.
+ *
  * Each file is one wallet's view, as the format wants: a transfer between two
  * profiles is a withdrawal in one's file and a deposit in the other's, with
  * the same time, amount and hash, which Koinly merges into a transfer. It has
@@ -67,6 +71,8 @@ export const CSV_COLUMNS = Object.freeze([
 const DUSK = "DUSK";
 const ST_DUSK = "stDUSK";
 const LUX_DECIMALS = 9;
+// The most a token's decimals can be, as a contract's `u8` has them.
+const MAX_TOKEN_DECIMALS = 255;
 const BOM = "\ufeff";
 
 // ---------------------------------------------------------------------------
@@ -163,7 +169,10 @@ export function datesPeriod(from, to, { timeZone } = {}) {
 /**
  * A line of the file, before its value in fiat.
  *
- * @typedef {{ sent?: bigint, sentCoin?: string, received?: bigint, receivedCoin?: string, fee?: bigint | null, tag?: string, words: string, valued: bigint | null }} Line
+ * `valued` is the DUSK it's worth, null for what isn't DUSK. `sentDecimals` is a
+ * token's own, and `counterparty` who it went to where that isn't the row's.
+ *
+ * @typedef {{ sent?: bigint, sentCoin?: string, sentDecimals?: number, received?: bigint, receivedCoin?: string, fee?: bigint | null, tag?: string, words: string, valued: bigint | null, counterparty?: string }} Line
  */
 
 /**
@@ -272,7 +281,82 @@ function callWords(row) {
 
   if (named) return `${named.name ? `${named.name}: ` : ""}${named.kind}`;
 
+  // A token's transfer this wallet has no record of: the chain's row doesn't say what it moved.
+  if (/^transfer(_from)?$/.test(row.fnName ?? "")) return `Call ${row.fnName}, which may have moved a token: its amount isn't in this wallet's record`;
+
   return row.fnName ? `Call ${row.fnName}` : "Contract call";
+}
+
+/**
+ * An amount with a point and no grouping, exact to its decimals.
+ *
+ * @param {bigint} units
+ * @param {number} decimals
+ */
+function plainUnits(units, decimals) {
+  const digits = units.toString().padStart(decimals + 1, "0");
+  const point = digits.length - decimals;
+  const fraction = digits.slice(point).replace(/0+$/, "");
+
+  return `${digits.slice(0, point)}${fraction ? `.${fraction}` : ""}`;
+}
+
+/**
+ * What the wallet's own record says a call to a token did. Null for a record
+ * that isn't one, or whose amount can't be read: no amount is made up.
+ *
+ * @param {ActivityRow} row
+ */
+function tokenOf(row) {
+  const asset = /** @type {any} */ (row.sent?.asset);
+  const op = String(asset?.op ?? "").toLowerCase();
+  const units = String(asset?.valueUnits ?? asset?.value ?? "");
+  const decimals = asset?.decimals;
+
+  if (row.kind !== "contract_call" || asset?.type !== "DRC20" || (op !== "transfer" && op !== "approve")) return null;
+  if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > MAX_TOKEN_DECIMALS || !/^\d+$/.test(units)) return null;
+
+  return {
+    decimals: /** @type {number} */ (decimals),
+    isMax: asset.isMax === true,
+    op,
+    party: String((op === "approve" ? asset.spender : asset.to) ?? "").trim() || undefined,
+    symbol: String(asset.symbol ?? "").trim() || row.contractId || "Token",
+    units: BigInt(units),
+  };
+}
+
+/**
+ * The lines of a call to a token: a transfer as what it moved, to whom, and an
+ * allowance or a transfer that moved nothing as its fee, saying what it was. What
+ * a token moved has no value in DUSK.
+ *
+ * @param {ActivityRow} row
+ * @param {NonNullable<ReturnType<typeof tokenOf>>} token
+ * @param {{ fee: bigint | null, own: ReadonlyMap<string, string>, self: ReadonlySet<string> }} context
+ * @returns {Line[]}
+ */
+function tokenLines(row, { decimals, isMax, op, party, symbol, units }, { fee, own, self }) {
+  const contract = row.contractId ? `, contract ${row.contractId}` : "";
+  // DUSK the call itself moved, as a deposit with a token's call, whatever the token did.
+  const native = row.value > 0n ? [{ ...moved(row), words: callWords(row) }] : [];
+  const onlyFee = (/** @type {string} */ words) => [...(fee ? [{ ...feeLine(fee, words), counterparty: party }] : []), ...native];
+
+  if (op === "approve") {
+    const allowed = isMax ? `Unlimited allowance of ${symbol}` : units === 0n ? `Allowance of ${symbol} removed` : `Allowance of ${plainUnits(units, decimals)} ${symbol}`;
+
+    return onlyFee(`${allowed}${contract}`);
+  }
+
+  if (party && self.has(party)) return onlyFee(`Transfer of ${symbol} to the account itself`);
+  if (units === 0n) return onlyFee(`Transfer of no ${symbol}${contract}`);
+
+  const other = party ? own.get(party) : undefined;
+
+  return [
+    { counterparty: party, fee, sent: units, sentCoin: symbol, sentDecimals: decimals, valued: null, words: `Transfer of ${symbol}${other ? ` to own profile ${other}` : ""}${contract}` },
+    ...native,
+  ];
 }
 
 /**
@@ -291,6 +375,10 @@ function linesOf(row, { address, facts, own, self }) {
   const other = row.counterparty && !self.has(row.counterparty) ? own.get(row.counterparty) : undefined;
 
   if (row.status === "failed") return onlyFee(`Failed: ${sozuWord(row) || (row.kind === "contract_call" ? callWords(row) : "transfer")}`);
+
+  const token = tokenOf(row);
+
+  if (token) return tokenLines(row, token, { fee, own, self });
   if (row.sozu) return sozuLines(row, facts?.get(row.hash), fee);
   if (row.kind === "stake") return skipped(row, "stake", "Native stake", fee);
   if (row.kind === "unstake") return skipped(row, "unstake", "Native unstake", fee);
@@ -350,8 +438,15 @@ function textField(value) {
  */
 const dateOf = (at) => new Date(at).toISOString().slice(0, 19).replace("T", " ");
 
-/** @param {bigint | null | undefined} lux */
-const amountOf = (lux) => (lux === undefined || lux === null ? "" : formatDuskPlain(lux));
+/**
+ * @param {bigint | null | undefined} units
+ * @param {number} [decimals] A token's own; DUSK's, unless given
+ */
+function amountOf(units, decimals) {
+  if (units === undefined || units === null) return "";
+
+  return decimals === undefined ? formatDuskPlain(units) : plainUnits(units, decimals);
+}
 
 /**
  * A price as digits: its text, a number's in full, or null for what isn't one.
@@ -459,19 +554,21 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
       continue;
     }
 
-    const internal = row.counterparty && !self.has(row.counterparty) ? own.get(row.counterparty) : undefined;
-    const name = internal ?? row.counterpartyName ?? row.toName ?? (row.counterparty ? contactName?.(row.counterparty) : "") ?? "";
-
     for (const line of linesOf(row, { address: Boolean(profile?.address), facts, own, self })) {
+      // A token's own line says who it went to, or that it isn't known: never the contract called.
+      const ownParty = "counterparty" in line;
+      const party = ownParty ? line.counterparty : row.counterparty;
+      const internal = party && !self.has(party) ? own.get(party) : undefined;
+      const name = internal ?? (ownParty ? null : row.counterpartyName) ?? (ownParty && !party ? null : row.toName) ?? (party ? contactName?.(party) : "") ?? "";
       const unit = price && line.valued !== null ? await priceAt(row.time) : null;
 
-      if (price && line.valued !== null && !unit) unpriced += 1;
+      if (price && !unit) unpriced += 1;
 
       lines.push(
         [
           field(dateOf(row.time)),
-          field(amountOf(line.sent)),
-          field(line.sent === undefined ? "" : line.sentCoin),
+          field(amountOf(line.sent, line.sentDecimals)),
+          line.sent === undefined ? "" : textField(line.sentCoin),
           field(amountOf(line.received)),
           field(line.received === undefined ? "" : line.receivedCoin),
           field(amountOf(line.fee)),
@@ -484,7 +581,7 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
           textField(profile?.name ?? ""),
           field(account),
           textField(name),
-          field(row.counterparty ?? ""),
+          textField(party ?? ""),
           field(internal ? "yes" : ""),
           textField(row.memo ?? ""),
         ].join(",")

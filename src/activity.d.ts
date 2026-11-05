@@ -58,6 +58,26 @@ export type SendStatus = "submitted" | "mempool" | "executed" | "failed" | "remo
  * as decimal strings or bigints. Every field but `hash` may be missing; the
  * wallet's own fields pass through on the row (`sent`).
  */
+/**
+ * A DRC20 token's call as the wallet sent it: `/export` writes a transfer's
+ * amount, symbol and recipient from it, and an allowance's words.
+ */
+export type SentToken = {
+  type: "DRC20";
+  op: "transfer" | "approve";
+  /** What a currency column names it by; its contract's ID without one. */
+  symbol?: string | null;
+  decimals: number;
+  /** Its amount, in the token's smallest units. */
+  valueUnits: string | bigint;
+  /** Who a transfer pays. */
+  to?: string | null;
+  /** Who an allowance is for. */
+  spender?: string | null;
+  /** An allowance without a limit. */
+  isMax?: boolean;
+};
+
 export type SentTransaction = {
   hash: string;
   /** What it does, one of `/history`'s kinds; any other is no kind. */
@@ -83,6 +103,8 @@ export type SentTransaction = {
   toName?: string | null;
   /** What a call to the bridge does, as the wallet sent it. */
   bridge?: BridgeFacts | null;
+  /** What a call to a token does, as the wallet sent it, which the chain's row doesn't say. */
+  asset?: SentToken | Record<string, unknown> | null;
   /** "submitted" when not given. */
   status?: SendStatus | string;
   error?: string | null;
@@ -336,8 +358,9 @@ export type SettleInput = {
   pending?: ReadonlyArray<SentTransaction> | null;
   /**
    * Whether a send adds to the chain's row what the chain doesn't say: by
-   * default, the name typed for its recipient, or a shielded send's
-   * recipient or memo, which the shielded history doesn't have. A failed
+   * default, the name typed for its recipient, a shielded send's recipient
+   * or memo, which the shielded history doesn't have, or a token's amount
+   * and recipient (`asset`), which the public one doesn't. A failed
    * send that tried to move an amount is kept too, whatever this says.
    */
   keeps?: (sent: SentTransaction) => boolean;
