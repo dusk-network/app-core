@@ -436,9 +436,10 @@ describe("a token", () => {
    * @param {Record<string, unknown>} asset
    * @param {Partial<ExportOptions>} [options]
    * @param {string} [fnName]
+   * @param {Record<string, unknown>} [row] What else the chain's row says
    */
-  const tokenFile = (asset, options, fnName = "transfer") => {
-    const entry = recorded(A, CALLED, { contractId: TOKEN, fnName });
+  const tokenFile = (asset, options, fnName = "transfer", row = {}) => {
+    const entry = recorded(A, CALLED, { contractId: TOKEN, fnName, ...row });
 
     return fileOf(A, {
       pending: [{ amount: "0", asset, contractId: TOKEN, deposit: "0", fnName, hash: entry.hash, kind: "contract_call", privacy: "public", profileIndex: 0, settled: true, status: "executed", submittedAt: entry.timestamp }],
@@ -580,7 +581,8 @@ describe("a token", () => {
   });
 
   it("leaves a token's recipient empty when its record has none, never naming the contract called", async () => {
-    const { records } = await tokenFile({ ...SENT, to: undefined });
+    // The chain's row has the contract called as its counterparty, as it has where the call paid it.
+    const { records } = await tokenFile({ ...SENT, to: undefined }, {}, "transfer", { counterparty: TOKEN });
 
     assert.equal(records[0]["Sent Currency"], "TKN");
     assert.equal(records[0].Counterparty, "");
