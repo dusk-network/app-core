@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.7.2]
+
+### Fixed
+
+- `/sozu`: `sozuFacts` reads the stDUSK an unstake burned where it reached a provisioner, to the lux where it took all, so `/export` writes it as the trade back
+
 ## [0.7.1]
 
 ### Fixed

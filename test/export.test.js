@@ -307,6 +307,18 @@ describe("staking", () => {
     assert.equal(unstake?.["Sent Currency"], "stDUSK");
     assert.equal(unstake?.["Received Amount"], "8664");
     assert.equal(unstake?.Description, "Unstaked from Sozu, 1 stDUSK = 1.513816582 DUSK");
+
+    // Two that reached a provisioner, the second of all the account had: what the vault says it burned.
+    const reached = rowsOf(sozu.third, sozu.unstakes);
+    const file = await accountingCsv({ facts: await sozuFacts({ account: sozu.third, archive: archiveOf(sozu.unstakes), rows: reached }), profile: { account: sozu.third, name: "Lena" }, rows: reached });
+
+    assert.deepEqual(
+      recordsOf(file.csv).map((record) => [record["Sent Amount"], record["Sent Currency"], record["Received Amount"], record["Received Currency"], record["Fee Amount"], record.Tag, record.Description]),
+      [
+        ["0.031827505", "stDUSK", "0.1", "DUSK", "0.002842118", "", "Unstaked from Sozu, 1 stDUSK = 3.141936468 DUSK"],
+        ["0.095163097", "stDUSK", "0.299017938", "DUSK", "0.002882483", "", "Unstaked from Sozu, 1 stDUSK = 3.142162747 DUSK"],
+      ]
+    );
   });
 
   it("says what moved where its stDUSK isn't known, under the staking tags, and invents none", async () => {
