@@ -1,6 +1,6 @@
 # @dusk-network/app-core
 
-Shared logic for the Dusk apps: amounts, public and shielded history, activity rows, bridge arrivals and DuskEVM withdrawals.
+Shared logic for the Dusk apps: amounts, text a person must trust, payment links, public and shielded history, activity rows, an accountant's export, Sozu positions, bridge arrivals and status, and DuskEVM withdrawals.
 
 It has no framework and runs in a browser extension's service worker. Each part is its own entry point, so an app loads only what it uses. Apps pass in their own fetch, batching and storage; the package never chooses storage keys.
 
@@ -27,15 +27,63 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 
 | Import | What it gives |
 |---|---|
-| `@dusk-network/app-core/amounts` | Amounts of DUSK as the apps write and read them, in the browser's language: `formatDusk`, `formatDuskPlain`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits` |
+| `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits` |
+| `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) |
+| `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
-| `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); and the arrivals as `/activity` takes them (`arrivalsOf`) |
+| `@dusk-network/app-core/export` | An account's activity as the file an accountant or a tax tool reads, for a quarter or any dates: Koinly's universal CSV (`accountingCsv`, `quarterPeriod`, `datesPeriod`) |
+| `@dusk-network/app-core/sozu` | A stake with Sozu: put in, taken out, worth now and earned (`sozuPosition`), what an amount earns in a year (`sozuYear`, `sozuRate`), what the rate is made of (`sozuRateLine`), and what each stake and unstake did (`sozuFacts`) |
+| `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); the arrivals as `/activity` takes them (`arrivalsOf`); a transfer's exact amounts (`transferLedger`); and how a route is doing (`bridgeStatus`) |
 | `@dusk-network/app-core/bridge-explorer` | Where a deposit to DuskEVM arrived, on DuskEVM's explorer alone (`depositArrivalsFromExplorer`): `/bridge`'s explorer path, for an app that reads nothing else, without the RPC path and `/history` |
 | `@dusk-network/app-core/duskevm-withdrawals` | A DuskEVM withdrawal's life, signing aside: its start on DuskEVM (`withdrawalCall`), finding an address's withdrawals (`syncWithdrawals`, `explorerWithdrawals`, `withdrawalsByNonce`), and on Dusk where each is, its proof and its claim, ready for the app's wallet to sign (`createWithdrawals`) |
 
 Every entry point has its `.d.ts`. The one runtime dependency is `@dusk-network/networks`. `/duskevm-withdrawals` also takes [viem](https://viem.sh) (`^2.55.2`), an optional peer: an app installs it to use that entry, and no other entry imports it.
+
+## Amounts
+
+```js
+import { amountExample, formatAmount, formatDusk, readAmount } from "@dusk-network/app-core/amounts";
+
+formatDusk(1_853_542n, { round: "nearest" }); // { text: "0.0019", exact: "0.001853542" }
+formatAmount(90_082_082_000_000_000n, { decimals: 18, round: "down" }); // { text: "0.09", exact: "0.090082082" }
+readAmount("1 000,5", "fr-FR"); // { lux: 1_000_500_000_000n, problem: null }
+readAmount("1.234", "es-ES"); // { lux: null, problem: "Is that 1234 or 1,234? Write the one you mean." }
+`Enter an amount such as 10 or ${amountExample("10.5", "fr-FR")}.`; // "…10 or 10,5."
+```
+
+- The one rule for an amount, of DUSK or an EVM token: a row and a balance line show `text`, its detail shows `exact`. `text` has at most 4 decimals, 2 significant digits under 0.01, and is never 0 for an amount that isn't. It rounds down for an amount or a balance, to the nearest for a fee paid, and up for the most a fee can be.
+- An amount reads back as itself or is refused, never as another. A language's own groups are read: `1 000` with any of its spaces in French, `1'000` in Swiss German, `12,34,567` in Hindi. A lone point or comma before three digits that could mean two things stays unclear (`unclearAmount`).
+
+## Text
+
+```js
+import { displayText } from "@dusk-network/app-core/text";
+
+displayText(memo); // { text: "pay \\u202e0001\\u202c DUSK", neutralized: true, flags: ["bidi_control"] }
+displayText(message, { lineBreaks: true, maxChars: 500 }); // for text written in lines, and cut
+```
+
+Text-direction controls, characters that render as nothing, controls and line breaks show as their codes, never left out, so what's shown is what the bytes say; half a character shows as the replacement mark. `neutralized` says whether anything was, for the app to say so, and `flags` what. It's for display: sign and send the original.
+
+## Payment links
+
+```js
+import { makePaymentLink, networkMismatch, parsePaymentLink } from "@dusk-network/app-core/payment-links";
+
+const made = makePaymentLink({ to: account, amount: typed, memo, network: chainId, language });
+// { ok: true, lux: 150000000n, problems: {}, dusk: "dusk:public-…@dusk:1?amount=0.15&memo=…",
+//   https: "https://apps.dusk.network/wallet/dashboard/send?to=…&amount=0.15&memo=…&network=mainnet" }
+// Or { ok: false, problems: { amount: "Is that 1234 or 1,234? Write the one you mean." }, dusk: "", https: null, lux: null }
+
+const link = parsePaymentLink(pastedOrScanned); // { form: "https", kind: "public", to, amountDusk: "0.15", lux, memo, label, chainId: "dusk:1", raw }
+networkMismatch(link.chainId, walletChain); // "This request is for Mainnet. You are on Testnet."
+```
+
+- `parsePaymentLink` reads a `dusk:` link, an https link to the web wallet's Send on a network there's a file for (or at `walletUrl`, the app's own address), or a recipient as it is. An https link anywhere else is no payment link: it reads as a recipient, which Send refuses. One that says a network other than its wallet's is null.
+- `makePaymentLink` checks what Send checks, and says what's wrong by the field: a recipient that is one, an amount above 0 with 9 decimals at most, and a memo of 512 bytes at most.
+- The https link ends with its network, so a mail or chat client that cuts a link's last punctuation cuts none of it.
 
 ## History
 
@@ -189,6 +237,50 @@ const { drop, keep } = settleSends({ public: entries, shielded, pending: sends }
 
 By default a send adds the name typed for its recipient, or a shielded send's recipient or memo, which the shielded history doesn't have; `keeps(send)` says what else does. A failed send that tried to move an amount is always kept: the chain's row says it moved nothing.
 
+## Export
+
+```js
+import { accountingCsv, datesPeriod, quarterPeriod } from "@dusk-network/app-core/export";
+
+const { csv, fileName, count, left, unpriced } = await accountingCsv({
+  rows, // `/activity`'s, all of them for the period
+  profile: { name, account, address },
+  profiles, // the person's others, the same way
+  period: quarterPeriod(2026, 4), // or datesPeriod("2026-10-01", "2026-10-31"), on the device's clock unless `timeZone` says
+  price: ({ at, coin }) => euros(coin, at), // optional: what one DUSK was worth, as text or a number, or null
+  currency: "EUR",
+  facts, // optional: `sozuFacts` of `/sozu`, what each stake and unstake did
+  contactName, // optional: the person's own names, only when they asked for them in the file
+  network, // the file's name says it, unless it's "mainnet"
+});
+// fileName: "dusk-estudio-sofia-2026-q4.csv"; left: { pending: 0, notRead: 1, outOfPeriod: 42 }
+```
+
+The file is [Koinly's universal CSV](https://support.koinly.io/en/articles/9489976-how-to-create-a-custom-csv-file-with-your-data), the template other tools' follow and explorers write: `Date`, `Sent Amount`, `Sent Currency`, `Received Amount`, `Received Currency`, `Fee Amount`, `Fee Currency`, `Net Worth Amount`, `Net Worth Currency`, `Tag`, `Description`, `TxHash`, then `Account Name`, `Account`, `Counterparty Name`, `Counterparty`, `Internal Transfer` and `Memo`, which Koinly ignores. Dates are UTC, amounts are exact, with a point and no grouping, and it has no BOM unless asked for (`bom`): Koinly has refused a file's headers over one.
+
+- A transfer between the person's own profiles has no tag, so it can't read as income: its description and `Internal Transfer` say what it is, and each profile's file has it with the same time, amount and hash, which is what Koinly merges.
+- Rewards claimed are tagged `reward`. A native stake and an unstake are tagged `stake` and `unstake`, which Koinly leaves out of its reports, and their fees are on lines of their own, as `cost`, which stay in; so are the fees of what moved nothing, or failed.
+- A stake with Sozu is a trade of DUSK for stDUSK, and an unstake the trade back, once `facts` says its stDUSK, with its deposit fee and what a stDUSK was worth in the description. Until then, it's what moved under the staking tags.
+- A memo with commas, quotes and line breaks comes through, with nothing in it that hides or reorders what it says, and is never read as a formula.
+- `rows` must be all of the period's: read the history down to it first. What was left out is counted: on its way, not looked up yet, or outside the period.
+
+## Sozu
+
+```js
+import { sozuFacts, sozuPosition, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
+
+const facts = await sozuFacts({ archive, account, rows, cache }); // optional: each one's own deposit fee and stDUSK
+sozuPosition({ rows, status, facts, complete });
+// { putIn: 1050000000000n, takenOut: 0n, worthNow: 1784753386279n, stDusk: 567580253155n, depositFees: 2625000000n, feesExact: true, earned: 737378386279n, waiting: 0 }
+sozuYear({ amount, nativeRate, status }); // { rate: 0.204, depositFee, worth, rewards, earned }: `earned` after Sozu's share and the deposit fee
+sozuRateLine({ provisioners, tipHeight, status });
+// "15.5 DUSK a block to stakers, 203.6M DUSK staked now: about 24% a year. Less Sozu's 15%: about 20%, and a little over as it restakes rewards every hour."
+```
+
+- `status` is what `readSozuStatus` of `@dusk-network/networks/sozu` gives, or the same figures as the extension's engine names them, and `rows` are `/activity`'s, all of them; `complete` is `read()`'s, without which `earned` is null. Earned is what's left of worth now and what was taken out, once what was put in, its deposit fees aside, is off: the five add up to the lux. Deposit fees are worked out at today's rate where `facts` doesn't have them (`feesExact`).
+- `sozuFacts` reads the pool's own event in each transaction, a request for each 25, without a data driver. With `cache`, a `Map` of text does, each is read once.
+- `sozuRate` is Sozu's rate as both wallets work it out: from native staking's as it's shown, to the percent. `sozuRateLine` takes the node's provisioners for what a block pays and what's staked, or `nativeRate` alone for the rate.
+
 ## Bridge
 
 ```js
@@ -220,6 +312,33 @@ An app that follows deposits on DuskEVM's explorer alone imports `depositArrival
 A result is facts: `arrived`, with the other side's transaction, its block's time, the lux it paid and its block; `waiting`; or `unknown`, with why: `unsure` (a credit could be another's), `late` (none came in its window), `beyond` (the explorer's pages don't reach it), `searching` (carry on from `scan`), `expired`, `no-route`, `no-payout` or `error`. The words are the app's.
 
 `activityRows` of `/activity` takes the deposits that arrived as its `arrivals`: `arrivalsOf` gives them by the deposit's hash, the DuskEVM transaction that paid it and when, and the deposit's row says where it arrived. Its `claims` are DuskEVM withdrawals', which this entry point doesn't read.
+
+### One transfer's ledger
+
+```js
+import { transferLedger } from "@dusk-network/app-core/bridge";
+
+const ledger = transferLedger({ row, arrival, locale }); // from a row of `/activity`
+// Or from what an app keeps of a transfer:
+transferLedger({ network, route: "dusk-to-bsc", sent: amountLux, networkFee: [feeLux, proveFeeLux, claimFeeLux], gasWei: feeWei, received, locale });
+// ledger.lines: [{ key: "sent", amount, decimals, coin: "DUSK", text: "0.19", exact: "0.190082082", expected: false }, { key: "bridgeFee", … }, { key: "networkFee", … }, { key: "received", … }, { key: "gas", … }]
+```
+
+Each app shows the same numbers: a row a line's `text`, its detail `exact`. A line is there only where it's known, and a route without such a fee has none. `received` is what arrived, or until then what will (`expected`), and `gas` what was paid in the other chain's coin. Of a transfer that failed, only its fee is left. What left an account holds a gas refund it paid another, which isn't the transfer's.
+
+### A route's status
+
+```js
+import { bridgeStatus } from "@dusk-network/app-core/bridge";
+
+const status = await bridgeStatus({ network: chainId, route: "dusk-to-bsc", cache, fetch });
+// { paying: "yes", lastPayout: { hash, at, amount, block }, readSince: null, waitingSince, canPay: null, limit: "mints", gas: { wei, coin: "BNB" }, running: true, readAt, requests: 10, error: "" }
+```
+
+- One read on opening the page: what it read stays in `cache` (a `Map` of text does) for 10 minutes (`maxAgeMs`), two at once make one, and the next asks only for the blocks since, or further back while no payout is known, up to 30 days. Without a cache, each call reads. A read is a few small requests: the node's head and an account's newest, and on the other chain its head and at most 8 log searches.
+- `paying`: "yes", a payout in the last week or four times the route's usual time; "late", a transfer in went past twice the usual time with no payout since, where that's known, as on a route out; "quiet", none, and nothing says one is due; "stopped", the route isn't running; "on-claim", a DuskEVM withdrawal, whose owner claims it; "unknown", the reads failed.
+- `canPay`: a migration's, its payout account's balance; a DuskEVM withdrawal's, the L1 bridge's. A route out to BSC has none (`limit: "mints"`): its payout address holds no DUSK between payouts, as it mints what it pays, so `gas` says what it has to pay with. A deposit to DuskEVM is minted there. A Transfer of nothing from the payout address, which anyone's transaction can write, is no payout.
+- How many transfers wait isn't said: that takes matching each transfer in to its payout, as `serviceArrivals` does for a person's own. Nor is a DuskEVM withdrawal's last claim, which no read finds without paging all the bridge's events.
 
 ## DuskEVM withdrawals
 
