@@ -4,6 +4,7 @@
   "license": "MPL-2.0",
   "exports": {
     "./amounts": "./src/amounts.js",
+    "./text": "./src/text.js",
     "./history": "./src/history.js",
     "./shielded": "./src/shielded.js",
     "./activity": "./src/activity.js",

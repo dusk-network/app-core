@@ -552,3 +552,9 @@ const hint: string = amountExample("10.5", "fr-FR");
 const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 000,5", "fr-FR");
 const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
 void [weiShown, hint, readTyped, readFrench];
+
+// /text
+import { displayText, type TextFlag } from "@dusk-network/app-core/text";
+
+const safe: { text: string; neutralized: boolean; flags: TextFlag[] } = displayText("memo", { lineBreaks: true, maxChars: 10 });
+void safe;

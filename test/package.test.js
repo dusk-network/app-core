@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./amounts", "./history", "./shielded", "./activity", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./text", "./history", "./shielded", "./activity", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
 const SHARED = ["./src/bridge-common.js"];
+/** The entry points that need nothing from anywhere. */
+const SELF_CONTAINED = ["./amounts", "./text"];
 /** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
 const VIEM_ENTRY = "./duskevm-withdrawals";
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -110,6 +112,10 @@ describe("the package", () => {
     assert.equal(typeof serviceArrivals, "function");
     assert.deepEqual(arrivalsOf(new Map()), new Map());
 
+    const { displayText } = await import("@dusk-network/app-core/text");
+
+    assert.deepEqual(displayText("plain"), { flags: [], neutralized: false, text: "plain" });
+
     const { WithdrawalError, createWithdrawals, explorerStage, parseWithdrawalReceipt, withdrawalCall } = await import("@dusk-network/app-core/duskevm-withdrawals");
 
     assert.equal(typeof createWithdrawals, "function");
@@ -162,7 +168,7 @@ describe("the package", () => {
       assert.doesNotMatch(code, /\(\?<[=!]/, file);
       // Its imports are the networks' rules and the package's own modules,
       // and for DuskEVM's withdrawals viem, which no other entry point takes.
-      assert.ok(from.length > 0 || entry === "./amounts", file);
+      assert.ok(from.length > 0 || SELF_CONTAINED.includes(/** @type {string} */ (entry)), file);
       assert.equal([...code.matchAll(/^import\b/gm)].length, [...code.matchAll(/^import\b[^;]*?\bfrom\s+"[^"]+";/gm)].length, `${file}: every import is read`);
       for (const each of from) {
         assert.ok(
@@ -212,6 +218,8 @@ describe("the package", () => {
       "src/history.js",
       "src/shielded.d.ts",
       "src/shielded.js",
+      "src/text.d.ts",
+      "src/text.js",
     ]);
   });
 });

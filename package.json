@@ -13,6 +13,10 @@
       "types": "./src/amounts.d.ts",
       "default": "./src/amounts.js"
     },
+    "./text": {
+      "types": "./src/text.d.ts",
+      "default": "./src/text.js"
+    },
     "./history": {
       "types": "./src/history.d.ts",
       "default": "./src/history.js"
