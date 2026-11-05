@@ -589,3 +589,23 @@ const year: SozuYear = sozuYear({ amount: 1n, nativeRate: 0.2, status: extension
 const yearRate: number | null = sozuRate(0.2, sozuStatus);
 const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2, provisioners: [{ amount: 1, eligibility: 1 }], status: sozuStatus, tipHeight: 1 });
 void [sozuRead, earnedSoFar, year, yearRate, rateLine];
+
+// /export
+import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, type ExportOptions, type ExportPeriod, type ExportResult } from "@dusk-network/app-core/export";
+
+const quarter: ExportPeriod = quarterPeriod(2026, 4, { timeZone: "Europe/Madrid" });
+const dates: ExportPeriod = datesPeriod("2026-10-01", "2026-12-31");
+const exportFile: Promise<ExportResult> = accountingCsv({
+  bom: true,
+  contactName: () => "A contact",
+  currency: "EUR",
+  facts: new Map<string, SozuFact>(),
+  network: "testnet",
+  period: quarter,
+  price: async ({ at, coin }) => (coin === "DUSK" && at > 0 ? "0.12" : null),
+  profile: { account: "a", address: "b", name: "Estudio" },
+  profiles: [{ account: "c", name: "Personal" }],
+  rows: readRows,
+} satisfies ExportOptions);
+const exportText = exportFile.then(({ csv, fileName, left, unpriced }) => [csv, fileName, left.pending, left.notRead, left.outOfPeriod, unpriced]);
+void [dates, exportText, CSV_COLUMNS];

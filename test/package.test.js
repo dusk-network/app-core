@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./amounts", "./text", "./payment-links", "./history", "./shielded", "./activity", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./text", "./payment-links", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
 const SHARED = ["./src/bridge-common.js"];
 /** The entry points that need nothing from anywhere. */
@@ -121,6 +121,11 @@ describe("the package", () => {
     assert.equal(parsePaymentLink(""), null);
     assert.equal(makePaymentLink({ to: "" }).ok, false);
 
+    const { accountingCsv, quarterPeriod } = await import("@dusk-network/app-core/export");
+
+    assert.equal(typeof accountingCsv, "function");
+    assert.equal(quarterPeriod(2026, 4, { timeZone: "UTC" }).label, "2026-q4");
+
     const { sozuPosition, sozuRateLine } = await import("@dusk-network/app-core/sozu");
 
     assert.equal(sozuPosition().putIn, 0n);
@@ -224,6 +229,8 @@ describe("the package", () => {
       "src/bridge.js",
       "src/duskevm-withdrawals.d.ts",
       "src/duskevm-withdrawals.js",
+      "src/export.d.ts",
+      "src/export.js",
       "src/history.d.ts",
       "src/history.js",
       "src/payment-links.d.ts",

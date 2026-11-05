@@ -1,0 +1,264 @@
+{
+ "note": "Recorded on 2026-11-05. `mainnet`: BSC's route: its account on Dusk as the archive lists what it sent and the newest of what it received, its balance as the node gives it (`accountStatus`, as text: past 2^53), and on BNB Smart Chain the DUSK token's Transfer logs from the payout address in the blocks asked, among them a payout and a Transfer of nothing someone else's transaction made, the payout address's DUSK (none: it mints what it pays, seen just before each payout) and its BNB. `paid`: the transfer in that payout paid, as its sender's history has it. `testnet`: DuskEVM's bridge paying a deposit, and what the L1 bridge holds (`contract_balance`'s reply, in hex).",
+ "mainnet": {
+  "account": "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x",
+  "finalized": 5682449,
+  "accountStatus": "{\"balance\":21603964301316070,\"next_nonce\":291,\"nonce\":290}",
+  "sent": [
+   {
+    "block_height": 5646540,
+    "events": [
+     {
+      "data": {
+       "gas_spent": "1860860",
+       "memo": "307839633266626266616434383734373338363232383465613530303836663239313830323233343739306166393162613235613965653236356464643535646139",
+       "receiver": "uQperHqZRJML89gw2ncwweKQJgxb9uSpTZk7mw9V1ft8rCe3NjCsooVsZMehkGwkcRFti634rTEyKgxNu1r6MwvfmfGEJ7yPykfbbHLyPQcw7xpLkquRxJYBLNpxQ5qHqgR",
+       "refund_info": null,
+       "sender": "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x",
+       "value": "963030960887"
+      },
+      "reverted": false,
+      "target": "0100000000000000000000000000000000000000000000000000000000000000",
+      "topic": "moonlight"
+     }
+    ],
+    "origin": "21c9c678a9ba6e8a3aac61cab8866281685256e98f8127ef44f4096f465d7f50"
+   },
+   {
+    "block_height": 5657897,
+    "events": [
+     {
+      "data": {
+       "gas_spent": "1857107",
+       "memo": "307865613365346561323230653632326137636462336339303066643931663964303362613332336337343261643032643532373465323765386635353166663533",
+       "receiver": "oXJkLkEcKgT6tCx2w5jAvF7QoHcQkCnD37x5QbP2QCtdtJ7j2c7abUqDoCyqqg6YpMQwyJ8Tb5SBPka7MYaodFDxoFT2tsRjWGEZWLskE34AdZ5GcnckTouzRNac7sFwU8i",
+       "refund_info": null,
+       "sender": "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x",
+       "value": "54325305359"
+      },
+      "reverted": false,
+      "target": "0100000000000000000000000000000000000000000000000000000000000000",
+      "topic": "moonlight"
+     }
+    ],
+    "origin": "9e5eccfc176f79ba7f5ffd58a11ffeb78d5cee45891be5867d88a67d679acd0c"
+   }
+  ],
+  "received": [
+   {
+    "block_height": 5660286,
+    "events": [
+     {
+      "data": {
+       "gas_spent": "1859341",
+       "memo": "307864373966653261616261306661366363383539363139353063313564353439313565363164366637",
+       "receiver": "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x",
+       "refund_info": null,
+       "sender": "21zd7AXUG3ZDCVewD47MrXiqnVt2DrQqZ1dW3DGqvLEHsafJaMtPg9SoQD9NUmAMgrih5kYsbweCfXA1THxU5kXWUfKnggQpWJHcwsLZVCm6ziJ1DbnXdAqEfE4kxonsH7AA",
+       "value": "2556000000000"
+      },
+      "reverted": false,
+      "target": "0100000000000000000000000000000000000000000000000000000000000000",
+      "topic": "moonlight"
+     }
+    ],
+    "origin": "81a52df74c647e4dd41ef7f46ce76a5449cdb400c3ef94522eadf2e504a2a65d"
+   },
+   {
+    "block_height": 5669072,
+    "events": [
+     {
+      "data": {
+       "gas_spent": "1858749",
+       "memo": "307865353030366362353336613932376431336132636163653865373636366431303833623332396530",
+       "receiver": "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x",
+       "refund_info": null,
+       "sender": "mNzBhZBk5ToPe248wvYS25xmWGtAaWTdQAvG12CUtbvJ3Qa4SYwknhJiQGLgPYWWjTMcoJDVXBK6cZBWUdGxosXis1rshTNNK5S3AmqorpzBQHZYhdFGfsrn1Fe6mNzFBQU",
+       "value": "20301000000000"
+      },
+      "reverted": false,
+      "target": "0100000000000000000000000000000000000000000000000000000000000000",
+      "topic": "moonlight"
+     }
+    ],
+    "origin": "91dd63464df98cde051d474bb98f095a277f39a392fa78b6989b692b3d96872a"
+   },
+   {
+    "block_height": 5681140,
+    "events": [
+     {
+      "data": {
+       "gas_spent": "1859165",
+       "memo": "307864643439633133663744384636336331416634463938316133304641343862354335644346314434",
+       "receiver": "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x",
+       "refund_info": null,
+       "sender": "yBMC4hV7K55erQqq3cBdsnZcmXXwU8gXDTgjFENfxnV4ojBekzdQUF4mGPnBy3oQvFmXR4VXpechk5YZWprNoFsmK6R1gggLeLjjYSPZJD6Fs9FJ41CVNH31q17StW1zw9u",
+       "value": "5094000000000"
+      },
+      "reverted": false,
+      "target": "0100000000000000000000000000000000000000000000000000000000000000",
+      "topic": "moonlight"
+     }
+    ],
+    "origin": "1b096af2688416aec7272a04a9fd18f51b96e1cb9e8ab842b6eafd3cda28011f"
+   }
+  ],
+  "details": {
+   "21c9c678a9ba6e8a3aac61cab8866281685256e98f8127ef44f4096f465d7f50": {
+    "blockHash": "5176049b838a899fb44c47748d6a1ef1ead0b93da23ab512eab596ceb72cd2d2",
+    "blockHeight": 5646540,
+    "blockTimestamp": 1793518537,
+    "err": null,
+    "gasSpent": 1860860,
+    "id": "21c9c678a9ba6e8a3aac61cab8866281685256e98f8127ef44f4096f465d7f50",
+    "tx": {
+     "callData": null,
+     "gasLimit": 500000000,
+     "gasPrice": 1,
+     "memo": "307839633266626266616434383734373338363232383465613530303836663239313830323233343739306166393162613235613965653236356464643535646139"
+    }
+   },
+   "9e5eccfc176f79ba7f5ffd58a11ffeb78d5cee45891be5867d88a67d679acd0c": {
+    "blockHash": "c70bea56fe3b61872353eaa8d52f74a8944587346184ccddc33ef57c547fc87e",
+    "blockHeight": 5657897,
+    "blockTimestamp": 1793632177,
+    "err": null,
+    "gasSpent": 1857107,
+    "id": "9e5eccfc176f79ba7f5ffd58a11ffeb78d5cee45891be5867d88a67d679acd0c",
+    "tx": {
+     "callData": null,
+     "gasLimit": 500000000,
+     "gasPrice": 1,
+     "memo": "307865613365346561323230653632326137636462336339303066643931663964303362613332336337343261643032643532373465323765386635353166663533"
+    }
+   },
+   "81a52df74c647e4dd41ef7f46ce76a5449cdb400c3ef94522eadf2e504a2a65d": {
+    "blockHash": "1ed6dd7fef32229dfe55c81b924d6ff1d9831b273013aeff284bfd0f3a0f8d42",
+    "blockHeight": 5660286,
+    "blockTimestamp": 1793656067,
+    "err": null,
+    "gasSpent": 1859341,
+    "id": "81a52df74c647e4dd41ef7f46ce76a5449cdb400c3ef94522eadf2e504a2a65d",
+    "tx": {
+     "callData": null,
+     "gasLimit": 100000000,
+     "gasPrice": 1,
+     "memo": "307864373966653261616261306661366363383539363139353063313564353439313565363164366637"
+    }
+   },
+   "91dd63464df98cde051d474bb98f095a277f39a392fa78b6989b692b3d96872a": {
+    "blockHash": "ebc7a37230680fadb347ece5411e6da26885e0585fd73c33fc9fe2aa14217d2b",
+    "blockHeight": 5669072,
+    "blockTimestamp": 1793743943,
+    "err": null,
+    "gasSpent": 1858749,
+    "id": "91dd63464df98cde051d474bb98f095a277f39a392fa78b6989b692b3d96872a",
+    "tx": {
+     "callData": null,
+     "gasLimit": 10000000,
+     "gasPrice": 1,
+     "memo": "307865353030366362353336613932376431336132636163653865373636366431303833623332396530"
+    }
+   },
+   "1b096af2688416aec7272a04a9fd18f51b96e1cb9e8ab842b6eafd3cda28011f": {
+    "blockHash": "1ed2b991e101d2f8a5b3bd4ca25d76fbd18120e112a0f7d93fb729cdeb5de07a",
+    "blockHeight": 5681140,
+    "blockTimestamp": 1793864630,
+    "err": null,
+    "gasSpent": 1859165,
+    "id": "1b096af2688416aec7272a04a9fd18f51b96e1cb9e8ab842b6eafd3cda28011f",
+    "tx": {
+     "callData": null,
+     "gasLimit": 2000000,
+     "gasPrice": 1,
+     "memo": "307864643439633133663744384636336331416634463938316133304641343862354335644346314434"
+    }
+   }
+  },
+  "sender": "mNzBhZBk5ToPe248wvYS25xmWGtAaWTdQAvG12CUtbvJ3Qa4SYwknhJiQGLgPYWWjTMcoJDVXBK6cZBWUdGxosXis1rshTNNK5S3AmqorpzBQHZYhdFGfsrn1Fe6mNzFBQU",
+  "paid": [
+   {
+    "block_height": 5669072,
+    "events": [
+     {
+      "data": {
+       "gas_spent": "1858749",
+       "memo": "307865353030366362353336613932376431336132636163653865373636366431303833623332396530",
+       "receiver": "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x",
+       "refund_info": null,
+       "sender": "mNzBhZBk5ToPe248wvYS25xmWGtAaWTdQAvG12CUtbvJ3Qa4SYwknhJiQGLgPYWWjTMcoJDVXBK6cZBWUdGxosXis1rshTNNK5S3AmqorpzBQHZYhdFGfsrn1Fe6mNzFBQU",
+       "value": "20301000000000"
+      },
+      "reverted": false,
+      "target": "0100000000000000000000000000000000000000000000000000000000000000",
+      "topic": "moonlight"
+     }
+    ],
+    "origin": "91dd63464df98cde051d474bb98f095a277f39a392fa78b6989b692b3d96872a"
+   }
+  ],
+  "bsc": {
+   "head": "131807974",
+   "headTime": 1793877730,
+   "logs": [
+    {
+     "address": "0xb2bd0749dbe21f623d9baba856d3b0f0e1bfec9c",
+     "topics": [
+      "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+      "0x000000000000000000000000e6d0c4d8ca2c12b357a5b5470c53e86123ab16da",
+      "0x000000000000000000000000e5006cb536a927d13a2cace8e7666d1083b329e0"
+     ],
+     "data": "0x00000000000000000000000000000000000000000000044c7717adfd8db00000",
+     "blockHash": "0x029db3735610725cd238cf3e1f5788b7d874f694570b1d050639dac89620a780",
+     "blockNumber": "0x7d7edd0",
+     "blockTimestamp": "0x6aeaea79",
+     "transactionHash": "0x23fa90c92167d8ad551b5bfa08233259bb2707728bb6ab40355bb759174914ac",
+     "transactionIndex": "0x20",
+     "logIndex": "0x6e",
+     "removed": false
+    },
+    {
+     "address": "0xb2bd0749dbe21f623d9baba856d3b0f0e1bfec9c",
+     "topics": [
+      "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+      "0x000000000000000000000000e6d0c4d8ca2c12b357a5b5470c53e86123ab16da",
+      "0x000000000000000000000000e500a0223ab071a3144cf503aa41410f33a629e0"
+     ],
+     "data": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "blockHash": "0xdd299d3fe54abddf3b2e58f298bf3cd3fafaff2c359b9a7e642f8eb1886d485b",
+     "blockNumber": "0x7d7f149",
+     "blockTimestamp": "0x6aeaec0a",
+     "transactionHash": "0x9427d9a552f5370d5096a257a55b08637a483bf9278f51b7f86ba7a20dc782fd",
+     "transactionIndex": "0x4a",
+     "logIndex": "0x409",
+     "removed": false
+    }
+   ],
+   "tokenBalance": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "gasWei": "0x10c54b2afb8f4c2"
+  }
+ },
+ "testnet": {
+  "head": "4350454",
+  "headTime": 1793877731,
+  "logs": [
+   {
+    "address": "0x4200000000000000000000000000000000000010",
+    "topics": [
+     "0x31b2166ff604fc5672ea5df08a78081d2bc6d746cadce880747f3643d819e83d",
+     "0x000000000000000000000000111d5854c7e53e40867dc92157059a0c4527b3f0",
+     "0x000000000000000000000000ce396bbff12483ff326833bda1e9be7ec4103c2a"
+    ],
+    "data": "0x00000000000000000000000000000000000000000000000029a2241af62c000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000",
+    "blockHash": "0xa48fffa6759e8254b45098bbc76bfde309d603a4d122601b4798417131bec1b1",
+    "blockNumber": "0x414d9c",
+    "blockTimestamp": "0x6aea3e2f",
+    "transactionHash": "0x326636fd42b782bd6c9cd03cc2a6b52d02a91b9fde795e49474ae624a8b8e14e",
+    "transactionIndex": "0x1",
+    "logIndex": "0x1",
+    "removed": false
+   }
+  ],
+  "bridgeBalance": "00009af7914e0100"
+ }
+}

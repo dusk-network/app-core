@@ -33,6 +33,10 @@
       "types": "./src/activity.d.ts",
       "default": "./src/activity.js"
     },
+    "./export": {
+      "types": "./src/export.d.ts",
+      "default": "./src/export.js"
+    },
     "./sozu": {
       "types": "./src/sozu.d.ts",
       "default": "./src/sozu.js"
