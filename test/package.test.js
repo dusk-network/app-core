@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./amounts", "./text", "./payment-links", "./history", "./shielded", "./activity", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./text", "./payment-links", "./history", "./shielded", "./activity", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
 const SHARED = ["./src/bridge-common.js"];
 /** The entry points that need nothing from anywhere. */
@@ -121,6 +121,11 @@ describe("the package", () => {
     assert.equal(parsePaymentLink(""), null);
     assert.equal(makePaymentLink({ to: "" }).ok, false);
 
+    const { sozuPosition, sozuRateLine } = await import("@dusk-network/app-core/sozu");
+
+    assert.equal(sozuPosition().putIn, 0n);
+    assert.equal(sozuRateLine({}), null);
+
     const { WithdrawalError, createWithdrawals, explorerStage, parseWithdrawalReceipt, withdrawalCall } = await import("@dusk-network/app-core/duskevm-withdrawals");
 
     assert.equal(typeof createWithdrawals, "function");
@@ -225,6 +230,8 @@ describe("the package", () => {
       "src/payment-links.js",
       "src/shielded.d.ts",
       "src/shielded.js",
+      "src/sozu.d.ts",
+      "src/sozu.js",
       "src/text.d.ts",
       "src/text.js",
     ]);

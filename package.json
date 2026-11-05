@@ -33,6 +33,10 @@
       "types": "./src/activity.d.ts",
       "default": "./src/activity.js"
     },
+    "./sozu": {
+      "types": "./src/sozu.d.ts",
+      "default": "./src/sozu.js"
+    },
     "./bridge": {
       "types": "./src/bridge.d.ts",
       "default": "./src/bridge.js"

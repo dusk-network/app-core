@@ -574,3 +574,18 @@ const linkTexts: string[] = [chainLabel("dusk:1"), networkMismatch("dusk:1", 2),
 void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
 // @ts-expect-error a request needs its recipient
 void makePaymentLink({ amount: "1" });
+
+// /sozu
+import { sozuFacts, sozuPosition, sozuRate, sozuRateLine, sozuYear, type SozuFact, type SozuPosition, type SozuStatusLike, type SozuYear } from "@dusk-network/app-core/sozu";
+import type { ActivityRow as ReadRow } from "@dusk-network/app-core/activity";
+
+declare const readRows: ReadRow[];
+declare const sozuStatus: import("@dusk-network/networks/sozu").SozuStatus;
+const sozuRead: Promise<Map<string, SozuFact>> = sozuFacts({ account: "a", archive, cache: new Map(), rows: readRows });
+const positionFromStatus: SozuPosition = sozuPosition({ complete: true, rows: readRows, status: sozuStatus });
+const earnedSoFar: bigint | null = positionFromStatus.earned;
+const extensionStatus: SozuStatusLike = { fees: { deposit: { denominator: "400", numerator: "1" }, reward: null }, pool: { tokenTotalSupply: "1", totalStakeLux: "1" }, position: { poolBalanceLux: "1", stDuskBalanceLux: "1" } };
+const year: SozuYear = sozuYear({ amount: 1n, nativeRate: 0.2, status: extensionStatus });
+const yearRate: number | null = sozuRate(0.2, sozuStatus);
+const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2, provisioners: [{ amount: 1, eligibility: 1 }], status: sozuStatus, tipHeight: 1 });
+void [sozuRead, earnedSoFar, year, yearRate, rateLine];
