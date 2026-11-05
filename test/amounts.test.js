@@ -302,7 +302,10 @@ describe("reading amounts", () => {
     assert.equal(amountExample("10.5", "en-US"), "10.5");
     assert.equal(amountExample("1234.5", "nl-NL"), "1.234,5");
     assert.equal(amountExample("1234.5", "en-US"), "1,234.5");
-    assert.equal(amountExample("1000", "de-CH"), "1\u2019000");
+    // Which apostrophe depends on the runtime's language data: both read back.
+    assert.match(amountExample("1000", "de-CH"), /^1['\u2019]000$/);
+    assert.equal(readAmount("1'000", "de-CH").lux, 1000n * DUSK);
+    assert.equal(readAmount("1\u2019000", "de-CH").lux, 1000n * DUSK);
     assert.throws(() => amountExample("abc"), TypeError);
 
     inLanguage("es-ES");
