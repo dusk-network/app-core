@@ -42,8 +42,14 @@ export type TextFlag = "bidi_control" | "invisible_format" | "line_separator" | 
  * shows, as it can hide anything an emoji can't. `maxChars` cuts it at that
  * many characters of the text given, never through one. Anything that isn't
  * text reads as its text.
+ *
+ * `isolate`, for a screen: each run of right-to-left letters, and each run of
+ * their digits, is set apart in an isolate (U+2068 to U+2069), so what's
+ * beside them reads in the order of the bytes, as "Pay א 10 א 1000" does
+ * rather than as "Pay א 1000 א 10". Within a run, a word reads as its script
+ * writes it. Not for a file: it adds those two characters around each run.
  */
 export declare function displayText(
   raw: unknown,
-  options?: { maxChars?: number; lineBreaks?: boolean }
+  options?: { maxChars?: number; lineBreaks?: boolean; isolate?: boolean }
 ): { text: string; neutralized: boolean; flags: TextFlag[] };

@@ -79,6 +79,37 @@ describe("text a person must trust", () => {
     assert.deepEqual(displayText("short", { maxChars: 5 }), { flags: [], neutralized: false, text: "short" });
   });
 
+  it("sets right-to-left words and Arabic digits apart where asked, so the rest reads in the order of its bytes", () => {
+    const [open, close] = ["⁨", "⁩"];
+    const apart = (/** @type {string} */ text) => `${open}${text}${close}`;
+    const ALEF = "א";
+
+    // Marek's: on a screen this reads "Pay א 1000 א 10 א DUSK".
+    assert.deepEqual(displayText(`Pay ${ALEF} 10 ${ALEF} 1000 ${ALEF} DUSK`, { isolate: true }), {
+      flags: [],
+      neutralized: false,
+      text: `Pay ${apart(ALEF)} 10 ${apart(ALEF)} 1000 ${apart(ALEF)} DUSK`,
+    });
+    // Arabic digits move what's between them as letters do: each number on its own.
+    assert.equal(displayText("Pay ١٠ב١٠٠٠ DUSK", { isolate: true }).text, `Pay ${apart("١٠")}${apart("ב")}${apart("١٠٠٠")} DUSK`);
+    // A word keeps its marks, and controls show as their codes as ever.
+    assert.equal(displayText("pay ‮0001‬ שָׁלוֹם א́", { isolate: true }).text, `pay \\u202e0001\\u202c ${apart("שָׁלוֹם")} ${apart("א́")}`);
+    // Cut first, by the characters given.
+    assert.deepEqual(displayText(`${ALEF}בג x`, { isolate: true, maxChars: 2 }), { flags: ["truncated"], neutralized: false, text: apart(`${ALEF}ב`) });
+
+    // Whatever mixes them, nothing outside a run set apart reads right to left, and no run holds digits and letters both.
+    const rightToLeft = /[֐-ࣿיִ-﷿ﹰ-ﻼ\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]/u;
+    for (const mixed of [`=HYPERLINK(1) pay ‮0001‬ ${ALEF} 10 ${ALEF} 1000`, "المبلغ ١٫٥ و 10", "Pay ߁ 10 ߂ 1000 DUSK", "שׁﭐ 9 \u{10800} 8 \u{1e900}"]) {
+      const { text } = displayText(mixed, { isolate: true });
+      const runs = [...text.matchAll(/⁨([^⁩]*)⁩/gu)].map(([, run]) => run);
+
+      assert.doesNotMatch(text.replace(/⁨[^⁩]*⁩/gu, ""), rightToLeft, mixed);
+      for (const run of runs) assert.ok(/^\p{Nd}+$/u.test(run) || !/\p{Nd}/u.test(run), `${mixed}: ${run}`);
+    }
+    // Asked for nothing, text that hides nothing stays as it was.
+    assert.equal(displayText(`Pay ${ALEF} 10`).text, `Pay ${ALEF} 10`);
+  });
+
   it("reads what isn't text as its text", () => {
     assert.deepEqual(displayText(null), { flags: [], neutralized: false, text: "" });
     assert.deepEqual(displayText(undefined), { flags: [], neutralized: false, text: "" });

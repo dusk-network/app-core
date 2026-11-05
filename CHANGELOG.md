@@ -4,6 +4,10 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 ## [0.7.2]
 
+### Added
+
+- `/text`: `displayText`'s `isolate`, right-to-left words and their digits set apart, so the rest of a text reads in the order of its bytes
+
 ### Fixed
 
 - `/sozu`: `sozuFacts` reads the stDUSK an unstake burned where it reached a provisioner, to the lux where it took all, so `/export` writes it as the trade back

@@ -8,6 +8,7 @@
  */
 
 /** @typedef {import("./text.js").TextFlag} TextFlag */
+/** @typedef {"" | "digits" | "letters"} Run What's set apart: a run of right-to-left letters, of their digits, or nothing */
 
 const BIDI_CONTROL = /\p{Bidi_Control}/u;
 const FORMAT_CONTROL = /\p{Cf}/u;
@@ -20,6 +21,13 @@ const LINE_SEPARATOR = /[\n\r\u2028\u2029]/u;
 const LINE_BREAK = /[\n\r]/u;
 const CONTROL = /\p{Cc}/u;
 const REPLACEMENT = "\ufffd";
+// What the scripts written right to left have, which turns what's beside it
+// around: the blocks Unicode keeps for them.
+const RIGHT_TO_LEFT = /^[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]$/u;
+const DIGIT = /^\p{Nd}$/u;
+const MARK = /^\p{M}$/u;
+const FIRST_STRONG_ISOLATE = "\u2068";
+const POP_DIRECTIONAL_ISOLATE = "\u2069";
 
 /** The flags that say the text shown isn't the text given, a cut aside. */
 const NEUTRALIZING = new Set(["bidi_control", "control_chars", "invalid_surrogate", "invisible_format", "line_separator"]);
@@ -32,11 +40,37 @@ const NEUTRALIZING = new Set(["bidi_control", "control_chars", "invalid_surrogat
 const visible = (char) => Array.from({ length: char.length }, (_, i) => `\\u${char.charCodeAt(i).toString(16).padStart(4, "0")}`).join("");
 
 /**
+ * What's shown, with each run of right-to-left letters, and each run of their
+ * digits, in an isolate of its own: a mark keeps to the run it follows.
+ *
+ * @param {string[]} shown Its characters, and the codes in place of hidden ones
+ */
+function isolated(shown) {
+  let text = "";
+  /** @type {Run} */
+  let open = "";
+
+  for (const piece of shown) {
+    /** @type {Run} */
+    const kind = MARK.test(piece) ? open : !RIGHT_TO_LEFT.test(piece) ? "" : DIGIT.test(piece) ? "digits" : "letters";
+
+    if (kind !== open) {
+      text += `${open ? POP_DIRECTIONAL_ISOLATE : ""}${kind ? FIRST_STRONG_ISOLATE : ""}`;
+      open = kind;
+    }
+
+    text += piece;
+  }
+
+  return open ? `${text}${POP_DIRECTIONAL_ISOLATE}` : text;
+}
+
+/**
  * @param {unknown} raw
- * @param {{ maxChars?: number, lineBreaks?: boolean }} [options]
+ * @param {{ maxChars?: number, lineBreaks?: boolean, isolate?: boolean }} [options]
  * @returns {{ text: string, neutralized: boolean, flags: TextFlag[] }}
  */
-export function displayText(raw, { lineBreaks = false, maxChars = Infinity } = {}) {
+export function displayText(raw, { isolate = false, lineBreaks = false, maxChars = Infinity } = {}) {
   const source = typeof raw === "string" ? raw : String(raw ?? "");
   /** @type {Set<TextFlag>} */
   const flags = new Set();
@@ -75,5 +109,7 @@ export function displayText(raw, { lineBreaks = false, maxChars = Infinity } = {
   if (source.normalize("NFC") !== source) flags.add("non_nfc");
   if (out.length > maxChars) flags.add("truncated");
 
-  return { flags: [...flags], neutralized, text: out.slice(0, maxChars).join("") };
+  const shown = out.slice(0, maxChars);
+
+  return { flags: [...flags], neutralized, text: isolate ? isolated(shown) : shown.join("") };
 }
