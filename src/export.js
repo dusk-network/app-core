@@ -338,7 +338,9 @@ function tokenOf(row) {
  */
 function tokenLines(row, { decimals, isMax, op, party, symbol, units }, { fee, own, self }) {
   const contract = row.contractId ? `, contract ${row.contractId}` : "";
-  const onlyFee = (/** @type {string} */ words) => (fee ? [{ ...feeLine(fee, words), counterparty: party }] : []);
+  // DUSK the call itself moved, as a deposit with a token's call, whatever the token did.
+  const native = row.value > 0n ? [{ ...moved(row), words: callWords(row) }] : [];
+  const onlyFee = (/** @type {string} */ words) => [...(fee ? [{ ...feeLine(fee, words), counterparty: party }] : []), ...native];
 
   if (op === "approve") {
     const allowed = isMax ? `Unlimited allowance of ${symbol}` : units === 0n ? `Allowance of ${symbol} removed` : `Allowance of ${plainUnits(units, decimals)} ${symbol}`;
@@ -353,7 +355,7 @@ function tokenLines(row, { decimals, isMax, op, party, symbol, units }, { fee, o
 
   return [
     { counterparty: party, fee, sent: units, sentCoin: symbol, sentDecimals: decimals, valued: null, words: `Transfer of ${symbol}${other ? ` to own profile ${other}` : ""}${contract}` },
-    ...(row.value > 0n ? [{ ...moved(row), words: callWords(row) }] : []),
+    ...native,
   ];
 }
 
@@ -553,9 +555,11 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
     }
 
     for (const line of linesOf(row, { address: Boolean(profile?.address), facts, own, self })) {
-      const party = line.counterparty ?? row.counterparty;
+      // A token's own line says who it went to, or that it isn't known: never the contract called.
+      const ownParty = "counterparty" in line;
+      const party = ownParty ? line.counterparty : row.counterparty;
       const internal = party && !self.has(party) ? own.get(party) : undefined;
-      const name = internal ?? (line.counterparty ? null : row.counterpartyName) ?? row.toName ?? (party ? contactName?.(party) : "") ?? "";
+      const name = internal ?? (ownParty ? null : row.counterpartyName) ?? (ownParty && !party ? null : row.toName) ?? (party ? contactName?.(party) : "") ?? "";
       const unit = price && line.valued !== null ? await priceAt(row.time) : null;
 
       if (price && !unit) unpriced += 1;

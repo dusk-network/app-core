@@ -567,6 +567,22 @@ describe("a token", () => {
     assert.ok(!records[0].Description.includes("\u202e"));
   });
 
+  it("leaves a token's recipient empty when its record has none, never naming the contract called", async () => {
+    const { records } = await tokenFile({ ...SENT, to: undefined });
+
+    assert.equal(records[0]["Sent Currency"], "TKN");
+    assert.equal(records[0].Counterparty, "");
+    assert.ok(!JSON.stringify(records[0]).includes(`"Counterparty":"${TOKEN}"`));
+  });
+
+  it("keeps DUSK a call moved when its token moved nothing", async () => {
+    const entry = recorded(A, CALLED, { contractId: TOKEN, fnName: "approve", value: "2000000000" });
+    const asset = { ...SENT, op: "approve", spender: C, to: undefined };
+    const { records } = await fileOf(A, { pending: [{ asset, contractId: TOKEN, deposit: "2000000000", fnName: "approve", hash: entry.hash, kind: "contract_call", profileIndex: 0, settled: true, status: "executed" }], public: [entry] });
+
+    assert.ok(records.some((record) => record["Sent Currency"] === "DUSK" && record["Sent Amount"] === "2"), JSON.stringify(records));
+  });
+
   it("invents no amount from a record it can't read: the fee, as what it was", async () => {
     for (const asset of [{ ...SENT, decimals: undefined }, { ...SENT, decimals: 1_000_000 }, { ...SENT, valueUnits: "12x" }, { ...SENT, valueUnits: "-5" }, { kind: "sozu", action: "stake" }]) {
       const { records } = await tokenFile(asset);
