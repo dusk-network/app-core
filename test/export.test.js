@@ -574,7 +574,7 @@ describe("a token", () => {
       assert.equal(records.length, 1);
       assert.equal(records[0]["Sent Currency"], "DUSK");
       assert.equal(records[0]["Sent Amount"], FEE);
-      assert.equal(records[0].Description, "Call transfer");
+      assert.equal(records[0].Description, "Call transfer, which may have moved a token: its amount isn't in this wallet's record");
     }
   });
 });

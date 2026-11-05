@@ -281,6 +281,9 @@ function callWords(row) {
 
   if (named) return `${named.name ? `${named.name}: ` : ""}${named.kind}`;
 
+  // A token's transfer this wallet has no record of: the chain's row doesn't say what it moved.
+  if (/^transfer(_from)?$/.test(row.fnName ?? "")) return `Call ${row.fnName}, which may have moved a token: its amount isn't in this wallet's record`;
+
   return row.fnName ? `Call ${row.fnName}` : "Contract call";
 }
 
