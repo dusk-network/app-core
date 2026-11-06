@@ -8,6 +8,7 @@
 
 import { routes } from "@dusk-network/networks";
 
+import { memoTextOf } from "./moved.js";
 import { EVM_HASH, RANGE_REFUSED, TIMEOUT_MS, TRANSFER_TOPIC, WEI_PER_LUX, addressOf, messageOf, networkOf, reader, urlOf } from "./bridge-common.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
@@ -81,7 +82,8 @@ export function migrationsOf(rows) {
   const found = [];
 
   for (const row of rows ?? []) {
-    const memo = String(row?.memo ?? "").trim().toLowerCase();
+    // The migration's hash, as text: a memo of bytes that aren't text names none.
+    const memo = (memoTextOf(row) ?? "").toLowerCase();
 
     if (row?.route?.kind === "migration" && row.direction === "in" && row.status !== "failed" && EVM_HASH.test(memo)) found.push({ hash: memo, payout: row.hash, route: row.route.id });
   }
@@ -112,14 +114,19 @@ function readKept(text) {
  * time: the latest before it, that isn't itself a migration's (the token
  * writes an `Approval` as a migration spends from one). Where another of the
  * owner's migrations came between, that one spent it first, and its fee is
- * that one's.
+ * that one's: a transfer to the contract between them spent from it only where
+ * the token wrote an `Approval` in its transaction too, as it does as the
+ * contract draws on one; the owner's own transfer to the contract writes none
+ * and draws on none. Where the token writes none as it's spent (`announces`,
+ * as the migration's own receipt says), a transfer between can't be told
+ * apart: "uncertain".
  *
  * @param {Reader} read
  * @param {string} rpcUrl
- * @param {{ token: string, contract: string, owner: string, hash: string, block: number, migrationLogs: any[] }} sought
+ * @param {{ token: string, contract: string, owner: string, hash: string, block: number, migrationLogs: any[], announces: boolean }} sought
  * @returns {Promise<{ state: MigrationEvm["approvalState"], hash?: string }>}
  */
-async function approvalSpent(read, rpcUrl, { block, contract, hash, migrationLogs, owner, token }) {
+async function approvalSpent(read, rpcUrl, { announces, block, contract, hash, migrationLogs, owner, token }) {
   const own = migrationLogs.filter((log) => String(log?.transactionHash ?? "").toLowerCase() === hash);
   const at = own.map(placeOf).reduce((first, place) => (before(place, first) ? place : first), [block, Number.MAX_SAFE_INTEGER]);
   /** @type {any[]} */
@@ -153,9 +160,13 @@ async function approvalSpent(read, rpcUrl, { block, contract, hash, migrationLog
 
     if (approval) {
       const since = placeOf(approval);
-      const spentFirst = logs.some((log) => log?.topics?.[0] === TRANSFER_TOPIC && String(log.transactionHash).toLowerCase() !== hash && before(since, placeOf(log)) && before(placeOf(log), at));
+      /** @param {any} log */
+      const txOf = (log) => String(log.transactionHash).toLowerCase();
+      const between = logs.filter((log) => log?.topics?.[0] === TRANSFER_TOPIC && txOf(log) !== hash && before(since, placeOf(log)) && before(placeOf(log), at));
+      const approving = new Set(logs.filter((log) => log?.topics?.[0] === APPROVAL_TOPIC).map(txOf));
+      const state = between.some((log) => approving.has(txOf(log))) ? "earlier" : between.length && !announces ? "uncertain" : "found";
 
-      return { hash: String(approval.transactionHash).toLowerCase(), state: spentFirst ? "earlier" : "found" };
+      return { hash: txOf(approval), state };
     }
 
     to = from - 1;
@@ -208,6 +219,8 @@ async function readMigration(read, { approval: given, hash, head, route, rpcUrl 
   const all = Array.isArray(receipt.logs) ? receipt.logs : [];
   const logs = all.filter((log) => addressOf(log?.address) === token && log?.topics?.[0] === TRANSFER_TOPIC && log.topics[1] === topicOf(owner) && log.topics[2] === topicOf(contract));
   const moved = logs.reduce((/** @type {bigint} */ sum, log) => sum + (bigOf(log.data) ?? 0n), 0n);
+  // The token says what a migration draws on an approval: an Approval in its receipt, of what's left.
+  const announces = all.some((log) => addressOf(log?.address) === token && log?.topics?.[0] === APPROVAL_TOPIC && log.topics[1] === topicOf(owner) && log.topics[2] === topicOf(contract));
   const at = await timeOf(read, rpcUrl, receipt);
   /** @type {MigrationEvm} */
   const fact = { ...base, at, block, from: owner, gasWei, lux: went ? moved / WEI_PER_LUX : null, state: went ? "mined" : "failed", totalWei: gasWei };
@@ -216,7 +229,7 @@ async function readMigration(read, { approval: given, hash, head, route, rpcUrl 
   if (!went || !owner) return { fact, final: at !== null && gasWei !== null && (await head()) - block >= FINAL_BLOCKS };
 
   /** @type {{ state: MigrationEvm["approvalState"], hash?: string }} */
-  let spent = await approvalSpent(read, rpcUrl, { block, contract, hash, migrationLogs: logs, owner, token });
+  let spent = await approvalSpent(read, rpcUrl, { announces, block, contract, hash, migrationLogs: logs, owner, token });
 
   // An approval the app names, where the logs can't say which this migration
   // spent: it's this one's only where the owner sent nothing between them, by
@@ -236,7 +249,7 @@ async function readMigration(read, { approval: given, hash, head, route, rpcUrl 
     if (approves && next && addressOf(kept.from) === owner && addressOf(approvalTx?.from) === owner && Number(bigOf(kept.blockNumber) ?? Infinity) <= block) spent = { hash: given, state: "found" };
   }
 
-  if (spent.hash && (spent.state === "found" || spent.state === "earlier")) {
+  if (spent.hash && (spent.state === "found" || spent.state === "earlier" || spent.state === "uncertain")) {
     const approvalReceipt = await read.rpc(rpcUrl, "eth_getTransactionReceipt", [spent.hash]);
     const approvalWei = paidOf(approvalReceipt);
 

@@ -635,12 +635,14 @@ export type MigrationEvm = {
   /**
    * "found": the approval it spent, its own; "earlier": the approval it spent,
    * which an earlier migration spent from first, and whose fee is that one's;
-   * "beyond": none in the blocks read back, over 75,000 at most (an hour on
-   * BSC at 5,000, up to about 15 hours); "unread": the RPC no longer gives
-   * logs that far back; "none": not looked for, as for a migration that failed,
-   * which spent none.
+   * "uncertain": the approval it spent, with a transfer to the contract
+   * between them that a token writing no `Approval` as it's spent doesn't say
+   * drew on it or not, so its fee isn't counted; "beyond": none in the blocks
+   * read back, over 75,000 at most (an hour on BSC at 5,000, up to about 15
+   * hours); "unread": the RPC no longer gives logs that far back; "none": not
+   * looked for, as for a migration that failed, which spent none.
    */
-  approvalState: "found" | "earlier" | "beyond" | "unread" | "none";
+  approvalState: "found" | "earlier" | "uncertain" | "beyond" | "unread" | "none";
   /** What the migration and its own approval paid in gas together, to the wei: the migration's alone while the approval's receipt can't be read. */
   totalWei: bigint | null;
   /** The chain's coin, "BNB" or "ETH". */

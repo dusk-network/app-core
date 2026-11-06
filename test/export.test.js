@@ -681,6 +681,10 @@ describe("the bridge", () => {
     assert.equal(payout.Account, receiver);
     // Without what it paid there, the payout alone, as before.
     assert.equal((await accountingCsv({ profile: { account: receiver, name: "Lena" }, rows })).count, 2);
+    // A payout's memo of bytes names no migration, though the app's facts have one by that hash.
+    const bytes = rows.map((row) => ({ ...row, entry: { ...row.entry, memoBinary: true } }));
+
+    assert.equal((await accountingCsv({ evm, profile: { account: receiver, name: "Lena" }, rows: bytes })).count, 2);
   });
 });
 

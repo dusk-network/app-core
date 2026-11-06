@@ -51,6 +51,16 @@ describe("what came in for each request", () => {
     assert.deepEqual(matchRequests([asked({ lux: null, memo: "" })], [payment({ memo: "" })]).get("a"), { state: "waiting" });
   });
 
+  it("takes a payment of nothing with a request's memo for none: not paid, paid twice or to check", () => {
+    // Codex's: anyone could mark a request paid for free with its memo.
+    const nothing = [payment({ value: 0n }), payment({ entry: { refund: 4_000n }, hash: "h2", value: 4_000n })];
+
+    for (const request of [asked({ lux: null }), asked()]) {
+      assert.deepEqual(matchRequests([request], nothing).get("a"), { state: "waiting" });
+    }
+    assert.equal(matchRequests([asked({ lux: null })], [payment({ hash: "h0", time: NOW + 1 }), ...nothing]).get("a")?.more, undefined);
+  });
+
   it("says waiting with nothing that matches: another amount and memo, what failed or waits, what went out, and what came before", () => {
     for (const row of [
       payment({ memo: "Other", value: 1n }),

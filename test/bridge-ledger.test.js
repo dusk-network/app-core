@@ -6,7 +6,7 @@ import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 
 import { activityRows } from "../src/activity.js";
 import { formatAmount } from "../src/amounts.js";
-import { migrationFacts, migrationsOf, serviceArrivals, transferLedger } from "../src/bridge.js";
+import { APPROVAL_TOPIC, migrationFacts, migrationsOf, serviceArrivals, transferLedger } from "../src/bridge.js";
 import { createArchive } from "../src/history.js";
 import { entryFrom, entryOf, hash } from "./fixtures/activity.js";
 import { fakeChain, hex, tokenTransfer, transferTx } from "./fixtures/bridge.js";
@@ -214,14 +214,24 @@ describe("a migration's side on its own chain", () => {
   /**
    * BSC's RPC as recorded, without what `drop` names.
    *
-   * @param {{ drop?: string[], logs?: boolean, maxRange?: bigint, receipts?: Record<string, any> }} [options]
+   * BSC's RPC as recorded, without what `drop` names, with `more` logs, and
+   * (`quiet`) as for a token that writes no Approval as it's spent.
+   *
+   * @param {{ drop?: string[], logs?: boolean, maxRange?: bigint, more?: any[], quiet?: boolean, receipts?: Record<string, any>, transactions?: Record<string, any> }} [options]
    */
-  const chainOf = ({ drop = [], logs = true, maxRange, receipts = {}, transactions = {} } = {}) =>
+  const chainOf = ({ drop = [], logs = true, maxRange, more = [], quiet = false, receipts = {}, transactions = {} } = {}) =>
     fakeChain({
       head: BigInt(bsc.head),
-      logs: logs ? bsc.logs.filter((/** @type {any} */ log) => !drop.includes(log.transactionHash)).map(asLog) : [],
+      logs: logs ? [...bsc.logs, ...more].filter((/** @type {any} */ log) => !drop.includes(log.transactionHash) && !(quiet && spentFrom(log))).map(asLog) : [],
       maxRange,
-      receipts: { ...Object.fromEntries(Object.entries(bsc.receipts).filter(([hash]) => !drop.includes(hash))), ...receipts },
+      receipts: {
+        ...Object.fromEntries(
+          Object.entries(bsc.receipts)
+            .filter(([hash]) => !drop.includes(hash))
+            .map(([hash, receipt]) => [hash, quiet ? { ...receipt, logs: receipt.logs.filter((/** @type {any} */ log) => !spentFrom(log)) } : receipt])
+        ),
+        ...receipts,
+      },
       timeAt: (n) => Number(BigInt(bsc.blocks[hex(n)]?.timestamp ?? "0x0")),
       transactions: { ...bsc.transactions, ...transactions },
     });
@@ -233,6 +243,11 @@ describe("a migration's side on its own chain", () => {
   /** When a recorded transaction's block was made, in milliseconds. @param {string} hash */
   const timeOf = (hash) => Number(BigInt(bsc.blocks[bsc.receipts[hash].blockNumber].timestamp)) * 1000;
   const route = "bsc-to-dusk";
+  /** The Approval of what's left the token writes as a migration spends from one. @param {any} log */
+  const spentFrom = (log) => log.topics[0] === APPROVAL_TOPIC && [firstMigration, secondMigration].includes(log.transactionHash);
+  // The owner's own transfer to the migration contract, in a block between the first approval and its migration: no spend of it.
+  const [firstSent] = bsc.logs.filter((/** @type {any} */ log) => log.transactionHash === firstMigration && log.topics[0] !== APPROVAL_TOPIC);
+  const sentDirect = { ...firstSent, blockNumber: hex(131_836_520), logIndex: "0x5", transactionHash: `0x${"d1".repeat(32)}` };
 
   it("reads what a migration sent and paid there, and the approval it spent, to the wei, as the chain says", async () => {
     const chain = chainOf();
@@ -268,6 +283,30 @@ describe("a migration's side on its own chain", () => {
 
     like(facts.get(secondMigration), { approvalState: "earlier", gasWei: 2_437_650_000_000n, totalWei: 2_437_650_000_000n });
     assert.equal(facts.get(secondMigration)?.approval?.hash, firstApproval);
+  });
+
+  it("counts an approval as its migration's though the owner sent the contract some of the token direct between them", async () => {
+    // Codex's: the same Transfer topics as a migration's, though it drew on no approval.
+    const facts = await migrationFacts({ fetch: chainOf({ more: [sentDirect] }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(facts.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+    assert.equal(facts.get(firstMigration)?.approval?.hash, firstApproval);
+
+    // A token that writes no Approval as it's spent can't say whether a transfer between drew on it: not counted.
+    const quiet = await migrationFacts({ fetch: chainOf({ more: [sentDirect], quiet: true }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(quiet.get(firstMigration), { approvalState: "uncertain", gasWei: 2_437_650_000_000n, totalWei: 2_437_650_000_000n });
+    assert.equal(quiet.get(firstMigration)?.approval?.hash, firstApproval);
+    // Nor whether another migration between did.
+    like((await migrationFacts({ fetch: chainOf({ drop: [secondApproval], quiet: true }).fetch, migrations: [{ hash: secondMigration, route }], network: 1 })).get(secondMigration), { approvalState: "uncertain", totalWei: 2_437_650_000_000n });
+    // With nothing between, it's its own all the same.
+    like((await migrationFacts({ fetch: chainOf({ quiet: true }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 })).get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+  });
+
+  it("takes a payout's memo of bytes for no migration's hash, though it reads as one", () => {
+    // Codex's: 32 bytes read as 0x and 64 hex digits.
+    assert.deepEqual(migrationsOf([{ ...payout, entry: { ...payout.entry, memoBinary: true } }]), []);
+    assert.deepEqual(migrationsOf([payout]), [{ hash: firstMigration, payout: payout.hash, route }]);
   });
 
   it("gives an approval two migrations spent to the first, also where the app names it for the second", async () => {

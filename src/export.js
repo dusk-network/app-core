@@ -38,6 +38,7 @@
  */
 
 import { formatDuskPlain } from "./amounts.js";
+import { memoTextOf } from "./moved.js";
 import { displayText } from "./text.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
@@ -590,8 +591,8 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
       continue;
     }
 
-    // A migration's side on its own chain, with the payout it was paid with.
-    const migration = row.route?.kind === "migration" && row.direction === "in" ? evm?.get(String(row.memo ?? "").trim().toLowerCase()) : undefined;
+    // A migration's side on its own chain, with the payout it was paid with: named by its memo, as text.
+    const migration = row.route?.kind === "migration" && row.direction === "in" ? evm?.get((memoTextOf(row) ?? "").toLowerCase()) : undefined;
 
     for (const line of [...evmLines(row, migration), ...linesOf(row, { address: Boolean(profile?.address), facts, own, self })]) {
       // A token's own line says who it went to, or that it isn't known: never the contract called.

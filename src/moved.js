@@ -1,10 +1,10 @@
 /**
- * What a row of `/activity` moved for its transfer, the one rule `/requests`
- * and `/bridge` read it by: its value, less the gas refund its transaction
- * paid to another account than its sender, which isn't the transfer's. Only
- * a value the chain gives holds such a refund: one from the wallet's record,
- * as a send's on chain before its details are read, holds none. Not an entry
- * point.
+ * What a row of `/activity` moved for its transfer, and its memo as text: the
+ * one rule `/requests`, `/bridge` and `/export` read them by. What it moved is
+ * its value, less the gas refund its transaction paid to another account than
+ * its sender, which isn't the transfer's. Only a value the chain gives holds
+ * such a refund: one from the wallet's record, as a send's on chain before its
+ * details are read, holds none. Not an entry point.
  *
  * @module
  */
@@ -23,4 +23,15 @@ export function movedBy(row) {
   const refund = typeof raw === "bigint" ? raw : /^\d+$/.test(String(raw ?? "")) ? BigInt(String(raw)) : 0n;
 
   return row.value > refund ? row.value - refund : 0n;
+}
+
+/**
+ * A row's memo as text, without the spaces around it: null for a memo of
+ * bytes, which `/history` gives as 0x hex, as no text is those bytes.
+ *
+ * @param {ActivityRow} row
+ * @returns {string | null}
+ */
+export function memoTextOf(row) {
+  return row?.entry?.memoBinary === true ? null : String(row?.memo ?? "").trim();
 }
