@@ -98,6 +98,8 @@ describe("text a person must trust", () => {
     assert.equal(displayText(`${ALEF} 10\r\n\n1000 DUSK\n0xAbC 1`, { isolate: true, lineBreaks: true }).text, `${ltr(`${apart(ALEF)} 10`)}\r\n\n1000 DUSK\n0xAbC 1`);
     // Digits of two blocks are set apart from each other: N'Ko's read right to left, Arabic-Indic's don't.
     assert.equal(displayText("Pay ١٠߀١٠٠٠ DUSK", { isolate: true }).text, ltr(`Pay ${apart("١٠")}${apart("߀")}${apart("١٠٠٠")} DUSK`));
+    // So are numerals that aren't digits, as Rumi's: one and ten stay where they were.
+    assert.equal(displayText("Pay \u{10e60}א\u{10e69} DUSK", { isolate: true }).text, ltr(`Pay ${apart("\u{10e60}")}${apart("א")}${apart("\u{10e69}")} DUSK`));
     // Arabic digits move what's between them as letters do: each number on its own.
     assert.equal(displayText("Pay ١٠ב١٠٠٠ DUSK", { isolate: true }).text, ltr(`Pay ${apart("١٠")}${apart("ב")}${apart("١٠٠٠")} DUSK`));
     // A word keeps its marks, and controls show as their codes as ever.
@@ -107,14 +109,14 @@ describe("text a person must trust", () => {
 
     // Whatever mixes them, nothing outside a run set apart reads right to left, and no run holds digits and letters both.
     const rightToLeft = /[֐-ࣿיִ-﷿ﹰ-ﻼ\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]/u;
-    for (const mixed of [`=HYPERLINK(1) pay ‮0001‬ ${ALEF} 10 ${ALEF} 1000`, "المبلغ ١٫٥ و 10", "Pay ߁ 10 ߂ 1000 DUSK", "١٠߀١٠٠٠ ۱۲߃", "שׁﭐ 9 \u{10800} 8 \u{1e900}"]) {
+    for (const mixed of [`=HYPERLINK(1) pay ‮0001‬ ${ALEF} 10 ${ALEF} 1000`, "المبلغ ١٫٥ و 10", "Pay ߁ 10 ߂ 1000 DUSK", "١٠߀١٠٠٠ ۱۲߃", "Pay \u{10e60}א\u{10e69} DUSK", "שׁﭐ 9 \u{10800} 8 \u{1e900}"]) {
       const { text } = displayText(mixed, { isolate: true });
       const runs = [...text.matchAll(/⁨([^⁩]*)⁩/gu)].map(([, run]) => run);
 
       assert.doesNotMatch(text.replace(/⁨[^⁩]*⁩/gu, ""), rightToLeft, mixed);
-      for (const run of runs) assert.ok(/^\p{Nd}+$/u.test(run) || !/\p{Nd}/u.test(run), `${mixed}: ${run}`);
-      // A run of digits holds one block's: one bidi class.
-      for (const run of runs.filter((run) => /^\p{Nd}+$/u.test(run))) {
+      for (const run of runs) assert.ok(/^\p{N}+$/u.test(run) || !/\p{N}/u.test(run), `${mixed}: ${run}`);
+      // A run of numerals holds one block's: one bidi class.
+      for (const run of runs.filter((run) => /^\p{N}+$/u.test(run))) {
         assert.equal(new Set([...run].map((digit) => Math.floor(/** @type {number} */ (digit.codePointAt(0)) / 16))).size, 1, `${mixed}: ${run}`);
       }
     }

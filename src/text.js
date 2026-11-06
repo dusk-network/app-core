@@ -26,29 +26,19 @@ const REPLACEMENT = "\ufffd";
 // which read right to left as well. U+FEFF is a format control, shown as its
 // code.
 const RIGHT_TO_LEFT = /^[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefe\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]$/u;
-const DIGIT = /^\p{Nd}$/u;
-// The zero of each block of digits the right-to-left blocks hold: Arabic-Indic,
-// Extended Arabic-Indic, N'Ko, Hanifi Rohingya, Garay and Adlam. Each block has
-// one bidi class, and they differ, N'Ko's and Adlam's reading right to left:
-// digits of two blocks together could turn their run around.
-const DIGIT_ZEROS = [0x660, 0x6f0, 0x7c0, 0x10d30, 0x10d40, 0x1e950];
+const NUMBER = /^\p{N}$/u;
 
 /**
- * The run a right-to-left digit belongs to: one of its own block's.
+ * The run a right-to-left numeral belongs to: one of its own sixteen code
+ * points. Numerals differ in how they read (Arabic-Indic digits and Rumi
+ * numerals don't turn around, N'Ko's and Adlam's read right to left), but a
+ * block of sixteen never holds two kinds: a run of one block can't turn a
+ * number around, and isn't one with the letters.
  *
- * @param {string} digit
+ * @param {string} numeral
  * @returns {Run}
  */
-const digitsOf = (digit) => {
-  const code = /** @type {number} */ (digit.codePointAt(0));
-  let block = 0;
-
-  for (const zero of DIGIT_ZEROS) {
-    if (zero <= code) block = zero;
-  }
-
-  return `digits ${block}`;
-};
+const numeralsOf = (numeral) => `digits ${Math.floor(/** @type {number} */ (numeral.codePointAt(0)) / 16)}`;
 const MARK = /^\p{M}$/u;
 const LEFT_TO_RIGHT_ISOLATE = "\u2066";
 const FIRST_STRONG_ISOLATE = "\u2068";
@@ -98,7 +88,7 @@ function isolated(shown) {
     }
 
     /** @type {Run} */
-    const kind = MARK.test(piece) ? open : !RIGHT_TO_LEFT.test(piece) ? "" : DIGIT.test(piece) ? digitsOf(piece) : "letters";
+    const kind = MARK.test(piece) ? open : !RIGHT_TO_LEFT.test(piece) ? "" : NUMBER.test(piece) ? numeralsOf(piece) : "letters";
 
     if (kind !== open) {
       line += `${open ? POP_DIRECTIONAL_ISOLATE : ""}${kind ? FIRST_STRONG_ISOLATE : ""}`;
