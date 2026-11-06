@@ -11,5 +11,5 @@
     "target": "es2022",
     "types": []
   },
-  "files": ["consumer.ts", "../src/amounts.js", "../src/text.js", "../src/payment-links.js", "../src/history.js", "../src/shielded.js", "../src/activity.js", "../src/export.js", "../src/sozu.js", "../src/bridge.js", "../src/bridge-explorer.js", "../src/bridge-common.js", "../src/bridge-ledger.js", "../src/bridge-status.js", "../src/duskevm-withdrawals.js"]
+  "files": ["consumer.ts", "../src/amounts.js", "../src/text.js", "../src/payment-links.js", "../src/requests.js", "../src/names.js", "../src/confusables.js", "../src/moved.js", "../src/history.js", "../src/shielded.js", "../src/activity.js", "../src/export.js", "../src/sozu.js", "../src/bridge.js", "../src/bridge-explorer.js", "../src/bridge-common.js", "../src/bridge-evm.js", "../src/bridge-ledger.js", "../src/bridge-status.js", "../src/duskevm-withdrawals.js"]
 }

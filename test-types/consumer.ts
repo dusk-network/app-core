@@ -555,6 +555,11 @@ const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 
 const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
 void [weiShown, hint, readTyped, readFrench];
 
+import { defaultCurrency } from "@dusk-network/app-core/amounts";
+
+const startsOn: "EUR" | "USD" = defaultCurrency("de-DE");
+void [startsOn, defaultCurrency()];
+
 // /text
 import { displayText, type TextFlag } from "@dusk-network/app-core/text";
 
@@ -577,6 +582,40 @@ void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
 // @ts-expect-error a request needs its recipient
 void makePaymentLink({ amount: "1" });
 
+import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
+
+const sendRead: LinkRead | null = readPaymentLink("dusk:public-x@dusk:1", { network: 2, walletUrl: "https://wallet.example" });
+const sendReason: "" | "unreadable" | "two-amounts" | "other-network" | undefined = sendRead?.reason;
+const sendFills: PaymentLink | null | undefined = sendRead?.link;
+const sendWords: string[] = [LINK_UNREADABLE, LINK_TWO_AMOUNTS, sendRead?.problem ?? "", sendRead?.network ?? "", sendRead?.chainId ?? ""];
+void [sendReason, sendFills, sendWords];
+
+// /names
+import { lookAlikes, looksAlike, nameClash, nameSkeleton, sameName } from "@dusk-network/app-core/names";
+
+const contactsHere = [{ address: "q", id: "c1", name: "Estudio Marta" }];
+const profilesHere = [{ account: "p", name: "Profile 2" }];
+const clash = nameClash("Profile 2", { contacts: contactsHere, except: "c1", profiles: profilesHere });
+const clashKind: "profile" | "contact" | undefined = clash?.kind;
+const clashAccount: string | undefined = clash?.kind === "profile" ? clash.entry.account : clash?.entry.address;
+const alikeHere: Set<{ address: string; id: string; name: string }> = lookAlikes(contactsHere);
+const nameChecks: [boolean, boolean, string] = [looksAlike("Bob", "Bօb"), sameName("a", "A"), nameSkeleton("rn")];
+void [clashKind, clashAccount, alikeHere, nameChecks];
+
+// /requests
+import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched } from "@dusk-network/app-core/requests";
+
+declare const readRowsForRequests: import("@dusk-network/app-core/activity").ActivityRow[];
+const keptRequests: KeptRequest[] = [{ at: 1, id: "a", lux: null, memo: "Factura 33", network: "testnet", to: "account" }];
+const requestMatches: Map<string, RequestMatch> = matchRequests(keptRequests, readRowsForRequests);
+const requestState: "check" | "paid" | "waiting" | undefined = requestMatches.get("a")?.state;
+const paidAgain: RequestMatched[] | undefined = requestMatches.get("a")?.more?.map((each) => each.matched);
+const repeat: import("@dusk-network/app-core/activity").ActivityRow | null = sentAlready(readRowsForRequests, { lux: 1n, memo: "", to: "account" });
+const requestWindows: [300000, 600000] = [CLOCK_SKEW_MS, AGAIN_MS];
+void [requestState, paidAgain, repeat, requestWindows];
+// @ts-expect-error a request's amount is lux as text, or null
+void matchRequests([{ at: 1, id: "a", lux: 1n, memo: "", to: "account" }], []);
+
 // /sozu
 import { sozuFacts, sozuPosition, sozuRate, sozuRateLine, sozuYear, type SozuFact, type SozuPosition, type SozuStatusLike, type SozuYear } from "@dusk-network/app-core/sozu";
 import type { ActivityRow as ReadRow } from "@dusk-network/app-core/activity";
@@ -591,6 +630,13 @@ const year: SozuYear = sozuYear({ amount: 1n, nativeRate: 0.2, status: extension
 const yearRate: number | null = sozuRate(0.2, sozuStatus);
 const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2, provisioners: [{ amount: 1, eligibility: 1 }], status: sozuStatus, tipHeight: 1 });
 void [sozuRead, earnedSoFar, year, yearRate, rateLine];
+
+import { GROWTH_MAX_AGE_MS, sozuGrowth, type SozuGrowth, type SozuPoint } from "@dusk-network/app-core/sozu";
+
+const growthRead: Promise<SozuGrowth | null> = sozuGrowth({ archive, cache: new Map(), days: 30, maxAgeMs: GROWTH_MAX_AGE_MS, now: 1, pool: "a", status: sozuStatus, tipHeight: 1n });
+const growthLine = growthRead.then((growth) => [sozuRateLine({ growth, locale: "en" }), sozuRate(0.2, extensionStatus, growth), sozuYear({ amount: 1n, growth, status: sozuStatus }).rewards]);
+const growthEnd = growthRead.then((growth): SozuPoint | undefined => growth?.to);
+void [growthLine, growthEnd];
 
 // /export
 import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, type ExportOptions, type ExportPeriod, type ExportResult } from "@dusk-network/app-core/export";
@@ -621,6 +667,19 @@ const ledgerLines: LedgerLine[] | undefined = ledger?.lines;
 const ledgerExact: string | undefined = ledger?.received?.exact;
 const ledgerFromRow: TransferLedger | null = transferLedger({ row: readRows[0] });
 void [ledgerLines, ledgerExact, ledgerFromRow];
+
+import { APPROVAL_TOPIC, migrationFacts, migrationsOf, type MigrationEvm } from "@dusk-network/app-core/bridge";
+
+const wayBack: Promise<Map<string, MigrationEvm>> = migrationFacts({ cache: new Map(), fetch, migrations: [...migrationsOf(readRows), { approval: "0x", hash: "0x", route: "bsc-to-dusk" }], network: 1, rpcUrl: "https://rpc", timeoutMs: 1 });
+const wayBackGas = wayBack.then((facts) => {
+  const fact = facts.get("0x");
+  const parts: ReadonlyArray<"approval" | "migration"> | undefined = transferLedger({ evm: fact, row: readRows[0] })?.gas?.parts;
+  const states: [MigrationEvm["state"] | undefined, MigrationEvm["approvalState"] | undefined, bigint | null | undefined] = [fact?.state, fact?.approvalState, fact?.totalWei];
+
+  return [parts, states, fact?.approval?.gasWei, APPROVAL_TOPIC];
+});
+const wayBackFile: Promise<ExportResult> = wayBack.then((evm) => accountingCsv({ evm, profile: { account: "a", name: "Lena" }, rows: readRows }));
+void [wayBackGas, wayBackFile];
 
 // /bridge's status
 import { STATUS_MAX_AGE_MS, bridgeStatus, type BridgeStatus } from "@dusk-network/app-core/bridge";

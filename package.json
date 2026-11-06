@@ -1,7 +1,7 @@
 {
   "name": "@dusk-network/app-core",
-  "version": "0.7.2",
-  "description": "Shared logic for the Dusk apps: amounts, text a person must trust, payment links, public and shielded history, activity rows, an accountant's export, Sozu positions, bridge arrivals and status, and DuskEVM withdrawals.",
+  "version": "0.8.0",
+  "description": "Shared logic for the Dusk apps: amounts, text a person must trust, payment links and requests, names that look alike, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, and DuskEVM withdrawals.",
   "license": "MPL-2.0",
   "type": "module",
   "repository": {
@@ -20,6 +20,14 @@
     "./payment-links": {
       "types": "./src/payment-links.d.ts",
       "default": "./src/payment-links.js"
+    },
+    "./requests": {
+      "types": "./src/requests.d.ts",
+      "default": "./src/requests.js"
+    },
+    "./names": {
+      "types": "./src/names.d.ts",
+      "default": "./src/names.js"
     },
     "./history": {
       "types": "./src/history.d.ts",
@@ -75,6 +83,7 @@
     "typecheck": "npx --yes --package=typescript@5.9.3 -- tsc -p test-types",
     "check:versions": "node scripts/check-versions.js",
     "check:jsr": "npx --yes jsr@0.14.3 publish --dry-run --allow-dirty",
+    "generate:confusables": "node scripts/generate-confusables.js",
     "fetch:drivers": "node scripts/fetch-drivers.js",
     "smoke:history": "node scripts/smoke-history.js",
     "smoke:bridge": "node scripts/smoke-bridge.js",

@@ -40,12 +40,83 @@ const NUMBER = /^\p{N}$/u;
  */
 const numeralsOf = (numeral) => `digits ${Math.floor(/** @type {number} */ (numeral.codePointAt(0)) / 16)}`;
 const MARK = /^\p{M}$/u;
+const DIGIT = /^\p{Nd}$/u;
+// The numerals of the right-to-left blocks that read left to right: the
+// Arabic-Indic digits and Persian's, Hanifi Rohingya's and Garay's digits, and
+// Rumi's numerals. Every other numeral there reads right to left, as N'Ko's
+// and Adlam's digits do (Unicode 18's bidi classes).
+const LEFT_TO_RIGHT_NUMERALS = /^[\u0660-\u0669\u06f0-\u06f9\u{10d30}-\u{10d49}\u{10e60}-\u{10e7e}]$/u;
+// What goes between a number's digits: a decimal point or comma, a group's
+// mark or its narrow space. A space ends a number.
+const NUMBER_SEPARATOR = /^[.,'\u2019\u066b\u066c\u00a0\u202f\u2009]$/u;
 const LEFT_TO_RIGHT_ISOLATE = "\u2066";
 const FIRST_STRONG_ISOLATE = "\u2068";
 const POP_DIRECTIONAL_ISOLATE = "\u2069";
 
 /** The flags that say the text shown isn't the text given, a cut aside. */
 const NEUTRALIZING = new Set(["bidi_control", "control_chars", "invalid_surrogate", "invisible_format", "line_separator"]);
+
+/** Each decimal digit's system, by the code point of its zero, as it's found. */
+const zeros = new Map();
+
+/**
+ * The system a decimal digit is of, as its zero's code point: a run of
+ * decimal digits is always whole sets of ten, each from its zero.
+ *
+ * @param {string} digit
+ */
+function zeroOf(digit) {
+  const code = /** @type {number} */ (digit.codePointAt(0));
+  let zero = zeros.get(code);
+
+  if (zero === undefined) {
+    let start = code;
+
+    while (start > 0 && DIGIT.test(String.fromCodePoint(start - 1))) start -= 1;
+
+    zero = start + Math.floor((code - start) / 10) * 10;
+    zeros.set(code, zero);
+  }
+
+  return zero;
+}
+
+/**
+ * What the numbers in a text show that their bytes don't say: one whose
+ * digits are of more than one system, as 1٠5 with an Arabic-Indic zero that
+ * looks like a point, and one in numerals that read right to left, as N'Ko's
+ * 0001 that shows as 1000. A number goes on past one separator between its
+ * numerals, and holds the selectors and marks on them; a numeral that's no
+ * decimal digit is a system of its own.
+ *
+ * @param {string} source
+ */
+function numberFlags(source) {
+  const found = { mixed: false, rightToLeft: false };
+  /** @type {Set<number | string> | null} */
+  let systems = null;
+  let separated = false;
+
+  for (const char of source) {
+    if (NUMBER.test(char)) {
+      systems ??= new Set();
+      systems.add(DIGIT.test(char) ? zeroOf(char) : "other");
+      found.mixed ||= systems.size > 1;
+      found.rightToLeft ||= RIGHT_TO_LEFT.test(char) && !LEFT_TO_RIGHT_NUMERALS.test(char);
+      separated = false;
+    } else if (systems && (EMOJI_SELECTOR.test(char) || MARK.test(char))) {
+      // An emoji's selector or a keycap's mark, kept as it is: part of the numeral it's on.
+      continue;
+    } else if (systems && !separated && NUMBER_SEPARATOR.test(char)) {
+      separated = true;
+    } else {
+      systems = null;
+      separated = false;
+    }
+  }
+
+  return found;
+}
 
 /**
  * A character as its code units, each as a backslash, u and four hex digits.
@@ -144,7 +215,10 @@ export function displayText(raw, { isolate = false, lineBreaks = false, maxChars
   }
 
   const neutralized = [...flags].some((flag) => NEUTRALIZING.has(flag));
+  const numbers = numberFlags(source);
 
+  if (numbers.mixed) flags.add("mixed_digits");
+  if (numbers.rightToLeft) flags.add("rtl_digits");
   if (source.normalize("NFC") !== source) flags.add("non_nfc");
   if (out.length > maxChars) flags.add("truncated");
 

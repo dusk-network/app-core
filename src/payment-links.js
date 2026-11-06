@@ -16,6 +16,7 @@ import { formatDuskPlain, parseDusk, readAmount } from "./amounts.js";
 /** @typedef {import("./payment-links.js").PaymentLink} PaymentLink */
 /** @typedef {import("./payment-links.js").PaymentRequest} PaymentRequest */
 /** @typedef {import("./payment-links.js").MadePaymentLink} MadePaymentLink */
+/** @typedef {import("./payment-links.js").LinkRead} LinkRead */
 /** @typedef {import("@dusk-network/networks").Network} Network */
 
 export const MAX_MEMO_BYTES = 512;
@@ -27,6 +28,13 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const ACCOUNT_BYTES = 96;
 const SHIELDED_BYTES = 64;
 const MAX_U64 = (1n << 64n) - 1n;
+
+/** What a link may say, each once: the recipient, what's asked, and the network. */
+const SAID_ONCE = Object.freeze(["to", "amount", "amountLux", "memo", "label", "network"]);
+
+/** Why a link fills in nothing, in the words both wallets use. */
+export const LINK_UNREADABLE = "That link can't be read. Ask for a new one.";
+export const LINK_TWO_AMOUNTS = "This link asks for two different amounts. Ask for a new one.";
 
 /** What the apps say of a recipient they won't send to, by the network file's reason. */
 const BLOCKED = Object.freeze({
@@ -121,11 +129,20 @@ function amountsOf(params) {
 }
 
 /**
+ * Whether a query says one of a link's fields more than once: the link could
+ * be read two ways.
+ *
+ * @param {URLSearchParams} params
+ */
+const saysTwice = (params) => SAID_ONCE.some((name) => params.getAll(name).length > 1);
+
+/**
  * A `dusk:` link: `dusk:public-<recipient>[@dusk:<chain>][?amount=…&memo=…]`,
- * or `shielded-`, with `//` after the scheme or not; null for any other.
+ * or `shielded-`, with `//` after the scheme or not, and its query; null for
+ * any other, and for one that says a field twice.
  *
  * @param {string} raw
- * @returns {PaymentLink | null}
+ * @returns {{ link: PaymentLink, params: URLSearchParams } | null}
  */
 function duskForm(raw) {
   const rest = raw.replace(/^dusk:/i, "").replace(/^\/+/, "");
@@ -140,7 +157,7 @@ function duskForm(raw) {
     head = head.slice(0, at).trim();
   }
 
-  if (chainId && !referenceOf(chainId)) return null;
+  if ((chainId && !referenceOf(chainId)) || saysTwice(params)) return null;
 
   const kind = /^public-/i.test(head) ? "public" : /^shielded-/i.test(head) ? "shielded" : null;
 
@@ -157,7 +174,7 @@ function duskForm(raw) {
 
   to = to.trim();
 
-  return to ? { ...amountsOf(params), chainId, form: "dusk", kind, label: textOf(params.get("label")), memo: textOf(params.get("memo")), raw, to } : null;
+  return to ? { link: { ...amountsOf(params), chainId, form: "dusk", kind, label: textOf(params.get("label")), memo: textOf(params.get("memo")), raw, to }, params } : null;
 }
 
 /**
@@ -168,12 +185,14 @@ function duskForm(raw) {
 const trimmed = (url) => url.replace(/\/+$/, "");
 
 /**
- * An https link to the web wallet's Send: `undefined` when it's no such link,
- * null where it says two networks or no recipient.
+ * An https link to the web wallet's Send, and its query: `undefined` when it's
+ * no such link; null where it says two networks or no recipient, a field more
+ * than once, or has a user part before its host, which makes it read as
+ * another address than the one it goes to.
  *
  * @param {string} raw
  * @param {string | undefined} walletUrl
- * @returns {PaymentLink | null | undefined}
+ * @returns {{ link: PaymentLink, params: URLSearchParams } | null | undefined}
  */
 function walletForm(raw, walletUrl) {
   /** @type {URL} */
@@ -195,19 +214,41 @@ function walletForm(raw, walletUrl) {
   const chainId = chainIdOf(said);
   const to = textOf(params.get("to"));
 
+  if (url.username || url.password || saysTwice(params)) return null;
   // A link that says one network, on another network's wallet.
   if (!to || (said && !chainId) || (ours && chainId && referenceOf(chainId) !== String(ours.chainId))) return null;
 
   return {
-    ...amountsOf(params),
-    chainId: chainId || (ours ? `dusk:${ours.chainId}` : ""),
-    form: "https",
-    kind: recipientKind(to),
-    label: textOf(params.get("label")),
-    memo: textOf(params.get("memo")),
-    raw,
-    to,
+    link: {
+      ...amountsOf(params),
+      chainId: chainId || (ours ? `dusk:${ours.chainId}` : ""),
+      form: "https",
+      kind: recipientKind(to),
+      label: textOf(params.get("label")),
+      memo: textOf(params.get("memo")),
+      raw,
+      to,
+    },
+    params,
   };
+}
+
+/**
+ * A link and its query, as given: null for nothing, and for what isn't one
+ * that can be read; a recipient as it is with no query.
+ *
+ * @param {string} raw
+ * @param {string | undefined} walletUrl
+ * @returns {{ link: PaymentLink, params: URLSearchParams | null } | null}
+ */
+function readLink(raw, walletUrl) {
+  if (!raw) return null;
+  if (/^dusk:/i.test(raw)) return duskForm(raw);
+
+  const https = walletForm(raw, walletUrl);
+
+  // Anything else may be a recipient, as a QR code holds just the address.
+  return https === undefined ? { link: { amountDusk: "", amountLux: "", chainId: "", form: "raw", kind: "unknown", label: "", lux: null, memo: "", raw, to: raw }, params: null } : https;
 }
 
 /**
@@ -216,15 +257,71 @@ function walletForm(raw, walletUrl) {
  * @returns {PaymentLink | null}
  */
 export function parsePaymentLink(input, { walletUrl } = {}) {
+  return readLink(textOf(input), walletUrl)?.link ?? null;
+}
+
+/**
+ * A link's query, as its form reads it: all after the `?` of a `dusk:` link,
+ * an https link's search.
+ *
+ * @param {string} raw
+ */
+function queryOf(raw) {
+  if (/^dusk:/i.test(raw)) {
+    const q = raw.indexOf("?");
+
+    return new URLSearchParams(q >= 0 ? raw.slice(q + 1) : "");
+  }
+
+  try {
+    return new URL(raw).searchParams;
+  } catch {
+    return new URLSearchParams();
+  }
+}
+
+/**
+ * Whether a link says amounts that differ: in DUSK and in lux, or one of them
+ * twice. The one in lux would be paid, unlike what's read.
+ *
+ * @param {URLSearchParams} params
+ */
+function amountsDiffer(params) {
+  const lux = [
+    ...params.getAll("amount").map((text) => parseDusk(textOf(text))),
+    ...params.getAll("amountLux").map((text) => (/^\d+$/.test(textOf(text)) ? BigInt(textOf(text)) : null)),
+  ];
+
+  return new Set(lux.map(String)).size > 1;
+}
+
+/**
+ * A link read, with the name of the network it's for.
+ *
+ * @param {Omit<LinkRead, "network">} read
+ * @returns {LinkRead}
+ */
+const said = (read) => ({ ...read, network: chainLabel(read.chainId) });
+
+/**
+ * @param {unknown} input
+ * @param {{ network?: unknown, walletUrl?: string }} [options]
+ * @returns {LinkRead | null}
+ */
+export function readPaymentLink(input, { network, walletUrl } = {}) {
   const raw = textOf(input);
+  const read = readLink(raw, walletUrl);
 
-  if (!raw) return null;
-  if (/^dusk:/i.test(raw)) return duskForm(raw);
+  if (!raw || read?.link.form === "raw") return null;
 
-  const https = walletForm(raw, walletUrl);
+  const chainId = read?.link.chainId ?? "";
 
-  // Anything else may be a recipient, as a QR code holds just the address.
-  return https === undefined ? { amountDusk: "", amountLux: "", chainId: "", form: "raw", kind: "unknown", label: "", lux: null, memo: "", raw, to: raw } : https;
+  if (amountsDiffer(queryOf(raw))) return said({ chainId, link: null, problem: LINK_TWO_AMOUNTS, reason: "two-amounts" });
+  if (!read) return said({ chainId, link: null, problem: LINK_UNREADABLE, reason: "unreadable" });
+
+  const otherNetwork = networkMismatch(chainId, network);
+
+  return said(otherNetwork ? { chainId, link: null, problem: otherNetwork, reason: "other-network" } : { chainId, link: read.link, problem: "", reason: "" });
 }
 
 /**

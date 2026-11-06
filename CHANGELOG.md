@@ -2,6 +2,23 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.8.0]
+
+### Added
+
+- `/amounts`: `defaultCurrency`, euros where the browser's region pays in them, US dollars elsewhere
+- `/bridge`: `migrationFacts` and `migrationsOf`, a migration's gas on its own chain with the approval it spent, which `transferLedger` takes (`evm`)
+- `/export`: a migration's gas and its approval's, on lines of their own (`evm`)
+- `/names`: `looksAlike`, `sameName`, `nameSkeleton`, `nameClash` and `lookAlikes`, by Unicode's confusables
+- `/payment-links`: `readPaymentLink`, a link as Send reads it on the wallet's network, and the network it's for
+- `/requests`: `matchRequests` and `sentAlready`; a request of no amount paid with its memo is paid
+- `/sozu`: `sozuGrowth`, how stDUSK grew over the last 30 days, which `sozuRate`, `sozuYear` and `sozuRateLine` take
+- `/text`: `displayText` flags digits that read right to left (`rtl_digits`) or mix systems (`mixed_digits`)
+
+### Changed
+
+- `/payment-links`: `parsePaymentLink` refuses a link that says a field twice or has a user part before its host
+
 ## [0.7.2]
 
 ### Added

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -8,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { networks } from "@dusk-network/networks";
 
 import { versionProblem } from "../scripts/check-versions.js";
+import { SOURCE, confusablesModule, parseConfusables } from "../scripts/generate-confusables.js";
 import { DRIVERS_URL, DriverMismatchError, fetchDrivers } from "../scripts/fetch-drivers.js";
 import { countingFetch, readWhole } from "../scripts/measure-reads.js";
 import { releaseNotes } from "../scripts/release-notes.js";
@@ -121,5 +123,74 @@ describe("the data drivers the withdrawal tests run", () => {
         DriverMismatchError
       );
     });
+  });
+});
+
+describe("the script that makes /names' table of look-alikes", () => {
+  const sample = [
+    "# confusables.txt",
+    "# Date: 2026-08-06, 01:05:35 GMT",
+    "# © 2026 Unicode®, Inc.",
+    "",
+    "05AD ;\t0596 ;\tMA\t# ( ֭ → ֖ ) HEBREW ACCENT DEHI → HEBREW ACCENT TIPEHA\t# ",
+    "0430 ;\t0061 ;\tMA\t# ( а → a ) CYRILLIC SMALL LETTER A → LATIN SMALL LETTER A\t# ",
+    "006D ;\t0072 006E ;\tMA\t# ( m → rn ) LATIN SMALL LETTER M → LATIN SMALL LETTER R, LATIN SMALL LETTER N\t# ",
+    "",
+  ].join("\n");
+
+  it("reads each line of Unicode's file, in order of its source", () => {
+    assert.deepEqual(parseConfusables(sample), [
+      [0x6d, [0x72, 0x6e]],
+      [0x430, [0x61]],
+      [0x5ad, [0x596]],
+    ]);
+    assert.throws(() => parseConfusables("0430 ;\t0061 ;\tXX\t# not one"), /Not a confusables line/);
+  });
+
+  it("writes a module of the table with Unicode's notice, which reads back as the file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "confusables-"));
+
+    try {
+      const file = join(dir, "confusables.js");
+
+      writeFileSync(file, confusablesModule(sample));
+
+      const text = readFileSync(file, "utf8");
+      const made = await import(pathToFileURL(file).href);
+
+      assert.match(text, /© 2026 Unicode®, Inc\./);
+      assert.match(text, /https:\/\/www\.unicode\.org\/license\.txt/);
+      assert.equal(made.CONFUSABLES_VERSION, SOURCE.version);
+      assert.equal(made.CONFUSABLES, "6d 72 6e;430 61;5ad 596");
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("writes nothing from a file that isn't the pinned version's", () => {
+    const dir = mkdtempSync(join(tmpdir(), "confusables-"));
+    const before = readFileSync(new URL("../src/confusables.js", import.meta.url), "utf8");
+
+    try {
+      const file = join(dir, "confusables.txt");
+
+      writeFileSync(file, sample);
+
+      const run = spawnSync(process.execPath, [new URL("../scripts/generate-confusables.js", import.meta.url).pathname, file], { encoding: "utf8" });
+
+      assert.equal(run.status, 1);
+      assert.match(run.stderr, /SHA-256 differs/);
+      assert.equal(readFileSync(new URL("../src/confusables.js", import.meta.url), "utf8"), before);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("made the package's table from the pinned version", () => {
+    const text = readFileSync(new URL("../src/confusables.js", import.meta.url), "utf8");
+
+    assert.match(SOURCE.url, /^https:\/\/www\.unicode\.org\/Public\/\d+\.\d+\.\d+\/security\/confusables\.txt$/);
+    assert.ok(SOURCE.url.includes(`/${SOURCE.version}/`));
+    assert.ok(text.includes(SOURCE.url) && text.includes(SOURCE.sha256), "its header names the file and its hash");
   });
 });

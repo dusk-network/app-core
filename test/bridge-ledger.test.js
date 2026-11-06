@@ -6,10 +6,10 @@ import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 
 import { activityRows } from "../src/activity.js";
 import { formatAmount } from "../src/amounts.js";
-import { serviceArrivals, transferLedger } from "../src/bridge.js";
+import { APPROVAL_TOPIC, migrationFacts, migrationsOf, serviceArrivals, transferLedger } from "../src/bridge.js";
 import { createArchive } from "../src/history.js";
 import { entryFrom, entryOf, hash } from "./fixtures/activity.js";
-import { fakeChain, tokenTransfer, transferTx } from "./fixtures/bridge.js";
+import { fakeChain, hex, tokenTransfer, transferTx } from "./fixtures/bridge.js";
 import { fakeArchive, like, readFixture } from "./fixtures/helpers.js";
 
 const { mainnet } = readFixture("bridge-status.json");
@@ -99,6 +99,14 @@ describe("a transfer's ledger", () => {
     const refunded = { ...row, entry: { ...row.entry, refund: 500n }, value: row.value + 500n };
 
     assert.equal(/** @type {any} */ (transferLedger({ row: /** @type {any} */ (refunded) })).sent.amount, row.value);
+  });
+
+  it("takes no refund out of what the wallet's record says it sent, which holds none", () => {
+    // On chain before its details are read: the row's value is the record's.
+    const row = serviceRow();
+    const recorded = { ...row, entry: { ...row.entry, refund: 500n, success: undefined }, sent: { amount: String(row.value), hash: row.hash }, value: row.value };
+
+    assert.equal(/** @type {any} */ (transferLedger({ row: /** @type {any} */ (recorded) })).sent.amount, row.value);
   });
 
   it("says nothing arrives of one the fee takes whole, and of one the bridge won't pay", () => {
@@ -194,5 +202,236 @@ describe("a transfer's ledger", () => {
 
     assert.equal(transferLedger({ row }), null);
     assert.equal(transferLedger(), null);
+  });
+});
+
+describe("a migration's side on its own chain", () => {
+  // Recorded on BNB Smart Chain: an account's two migrations, each after its own approval, and their payouts on Dusk.
+  const bsc = readFixture("bridge-migration-bsc.json");
+  const [firstApproval, firstMigration, secondApproval, secondMigration] = Object.keys(bsc.receipts);
+  /** @param {any} log */
+  const asLog = (log) => ({ address: log.address, block: BigInt(log.blockNumber), data: log.data, hash: log.transactionHash, index: Number(BigInt(log.logIndex)), topics: log.topics });
+  /**
+   * BSC's RPC as recorded, without what `drop` names.
+   *
+   * BSC's RPC as recorded, without what `drop` names, with `more` logs, and
+   * (`quiet`) as for a token that writes no Approval as it's spent.
+   *
+   * @param {{ drop?: string[], logs?: boolean, maxRange?: bigint, more?: any[], quiet?: boolean, receipts?: Record<string, any>, transactions?: Record<string, any> }} [options]
+   */
+  const chainOf = ({ drop = [], logs = true, maxRange, more = [], quiet = false, receipts = {}, transactions = {} } = {}) =>
+    fakeChain({
+      head: BigInt(bsc.head),
+      logs: logs ? [...bsc.logs, ...more].filter((/** @type {any} */ log) => !drop.includes(log.transactionHash) && !(quiet && spentFrom(log))).map(asLog) : [],
+      maxRange,
+      receipts: {
+        ...Object.fromEntries(
+          Object.entries(bsc.receipts)
+            .filter(([hash]) => !drop.includes(hash))
+            .map(([hash, receipt]) => [hash, quiet ? { ...receipt, logs: receipt.logs.filter((/** @type {any} */ log) => !spentFrom(log)) } : receipt])
+        ),
+        ...receipts,
+      },
+      timeAt: (n) => Number(BigInt(bsc.blocks[hex(n)]?.timestamp ?? "0x0")),
+      transactions: { ...bsc.transactions, ...transactions },
+    });
+  const [payout] = activityRows({
+    account: bsc.payouts.entries[0].events[0].data.receiver,
+    network: 1,
+    public: bsc.payouts.entries.map((/** @type {any} */ raw) => entryFrom(raw.events[0].data.receiver, raw, bsc.payouts.details[raw.origin], {}, { network: 1 })),
+  }).filter((row) => row.memo === firstMigration);
+  /** When a recorded transaction's block was made, in milliseconds. @param {string} hash */
+  const timeOf = (hash) => Number(BigInt(bsc.blocks[bsc.receipts[hash].blockNumber].timestamp)) * 1000;
+  const route = "bsc-to-dusk";
+  /** The Approval of what's left the token writes as a migration spends from one. @param {any} log */
+  const spentFrom = (log) => log.topics[0] === APPROVAL_TOPIC && [firstMigration, secondMigration].includes(log.transactionHash);
+  // The owner's own transfer to the migration contract, in a block between the first approval and its migration: no spend of it.
+  const [firstSent] = bsc.logs.filter((/** @type {any} */ log) => log.transactionHash === firstMigration && log.topics[0] !== APPROVAL_TOPIC);
+  const sentDirect = { ...firstSent, blockNumber: hex(131_836_520), logIndex: "0x5", transactionHash: `0x${"d1".repeat(32)}` };
+
+  it("reads what a migration sent and paid there, and the approval it spent, to the wei, as the chain says", async () => {
+    const chain = chainOf();
+    const facts = await migrationFacts({ fetch: chain.fetch, migrations: [{ hash: firstMigration, route: "bsc-to-dusk" }], network: 1 });
+
+    assert.deepEqual(facts.get(firstMigration), {
+      approval: { at: timeOf(firstApproval), block: 131_836_513, gasWei: 2_310_900_000_000n, hash: firstApproval },
+      approvalState: "found",
+      at: timeOf(firstMigration),
+      block: 131_836_535,
+      coin: "BNB",
+      from: bsc.owner,
+      gasWei: 2_437_650_000_000n,
+      hash: firstMigration,
+      lux: 1_041_531_062_630n,
+      route: "bsc-to-dusk",
+      state: "mined",
+      totalWei: 4_748_550_000_000n,
+    });
+  });
+
+  it("finds the approval whatever app signed it, and that a later migration's is its own, not an earlier one's", async () => {
+    const facts = await migrationFacts({ fetch: chainOf().fetch, migrations: migrationsOf([payout]).concat([{ hash: secondMigration, payout: "", route: "bsc-to-dusk" }]), network: 1 });
+
+    like(facts.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+    like(facts.get(secondMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+    assert.equal(facts.get(secondMigration)?.approval?.hash, secondApproval);
+  });
+
+  it("gives an approval two migrations spent to the first, whose fee it is", async () => {
+    // As if one approval had been for both.
+    const facts = await migrationFacts({ fetch: chainOf({ drop: [secondApproval] }).fetch, migrations: [{ hash: secondMigration, route: "bsc-to-dusk" }], network: 1 });
+
+    like(facts.get(secondMigration), { approvalState: "earlier", gasWei: 2_437_650_000_000n, totalWei: 2_437_650_000_000n });
+    assert.equal(facts.get(secondMigration)?.approval?.hash, firstApproval);
+  });
+
+  it("counts an approval as its migration's though the owner sent the contract some of the token direct between them", async () => {
+    // Codex's: the same Transfer topics as a migration's, though it drew on no approval.
+    const facts = await migrationFacts({ fetch: chainOf({ more: [sentDirect] }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(facts.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+    assert.equal(facts.get(firstMigration)?.approval?.hash, firstApproval);
+
+    // A token that writes no Approval as it's spent can't say whether a transfer between drew on it: not counted.
+    const quiet = await migrationFacts({ fetch: chainOf({ more: [sentDirect], quiet: true }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(quiet.get(firstMigration), { approvalState: "uncertain", gasWei: 2_437_650_000_000n, totalWei: 2_437_650_000_000n });
+    assert.equal(quiet.get(firstMigration)?.approval?.hash, firstApproval);
+    // Nor whether another migration between did.
+    like((await migrationFacts({ fetch: chainOf({ drop: [secondApproval], quiet: true }).fetch, migrations: [{ hash: secondMigration, route }], network: 1 })).get(secondMigration), { approvalState: "uncertain", totalWei: 2_437_650_000_000n });
+    // With nothing between, it's its own all the same.
+    like((await migrationFacts({ fetch: chainOf({ quiet: true }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 })).get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+  });
+
+  it("takes a payout's memo of bytes for no migration's hash, though it reads as one", () => {
+    // Codex's: 32 bytes read as 0x and 64 hex digits.
+    assert.deepEqual(migrationsOf([{ ...payout, entry: { ...payout.entry, memoBinary: true } }]), []);
+    assert.deepEqual(migrationsOf([payout]), [{ hash: firstMigration, payout: payout.hash, route }]);
+  });
+
+  it("gives an approval two migrations spent to the first, also where the app names it for the second", async () => {
+    const facts = await migrationFacts({ fetch: chainOf({ drop: [secondApproval] }).fetch, migrations: [{ approval: firstApproval, hash: secondMigration, route }], network: 1 });
+
+    like(facts.get(secondMigration), { approvalState: "earlier", totalWei: 2_437_650_000_000n });
+  });
+
+  it("counts an approval the app names where the logs can't be read only when the owner sent it right before the migration", async () => {
+    // The first approval is the owner's transaction right before the first migration: it can only be that one's.
+    const own = await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ approval: firstApproval, hash: firstMigration, route }], network: 1 });
+
+    like(own.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+
+    // Named for the second migration, with another approval between them: not counted, as it can't be told.
+    const other = await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ approval: firstApproval, hash: secondMigration, route }], network: 1 });
+
+    like(other.get(secondMigration), { approvalState: "unread", totalWei: 2_437_650_000_000n });
+  });
+
+  it("says so where the RPC no longer gives the logs, or the approval is further back than it reads", async () => {
+    const unread = await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(unread.get(firstMigration), { approval: null, approvalState: "unread", totalWei: 2_437_650_000_000n });
+
+    const beyond = await migrationFacts({ fetch: chainOf({ drop: [firstApproval] }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(beyond.get(firstMigration), { approval: null, approvalState: "beyond", totalWei: 2_437_650_000_000n });
+  });
+
+  it("reads narrower windows where the RPC refuses wide ones, and the logs also for an approval the app names", async () => {
+    const narrow = chainOf({ maxRange: 2_000n });
+
+    like((await migrationFacts({ fetch: narrow.fetch, migrations: [{ hash: firstMigration, route }], network: 1 })).get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+    // Asked 5,000 blocks first, then narrower until the RPC answers.
+    const widths = narrow.ranges().map(([from, to]) => to - from + 1n);
+
+    assert.equal(widths[0], 5_000n);
+    assert.ok(/** @type {bigint} */ (widths.at(-1)) <= 2_000n);
+
+    const given = chainOf();
+
+    like((await migrationFacts({ fetch: given.fetch, migrations: [{ approval: firstApproval, hash: firstMigration, route }], network: 1 })).get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+    // Read as without it, for an earlier migration that spent from it first.
+    assert.ok(given.methods().includes("eth_getLogs"));
+  });
+
+  it("counts no approval for a migration that failed, and says what isn't one or isn't there yet", async () => {
+    const failedHash = `0x${"f".repeat(64)}`;
+    const failed = { ...bsc.receipts[firstMigration], logs: [], status: "0x0", transactionHash: failedHash };
+    const facts = await migrationFacts({ fetch: chainOf({ receipts: { [failedHash]: failed } }).fetch, migrations: [{ hash: failedHash, route }, { hash: firstApproval, route }, { hash: `0x${"a".repeat(64)}`, route }], network: 1 });
+
+    // Its block's time, read from the block: it has no logs to say it.
+    like(facts.get(failedHash), { approval: null, approvalState: "none", at: timeOf(firstMigration), lux: null, state: "failed", totalWei: 2_437_650_000_000n });
+    like(facts.get(firstApproval), { state: "not-migration", totalWei: null });
+    like(facts.get(`0x${"a".repeat(64)}`), { state: "pending", totalWei: null });
+  });
+
+  it("keeps nothing for good while the approval's receipt can't be read, and reads it again", async () => {
+    const cache = new Map();
+    // The RPC lists the approval, but has no receipt of it for a moment.
+    const brief = chainOf({ receipts: { [firstApproval]: null } });
+    const first = await migrationFacts({ cache, fetch: brief.fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(first.get(firstMigration), { approvalState: "found", totalWei: 2_437_650_000_000n });
+    assert.equal(cache.size, 0);
+
+    const later = await migrationFacts({ cache, fetch: chainOf().fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(later.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+  });
+
+  it("counts no approval the app names, where the logs can't be read, but the one sent right before", async () => {
+    // Codex's: approve X, migrate X, approve X, migrate X. The first approval named for the second
+    // migration allowed what it sent too, but the owner sent another approval between them.
+    const sameAmount = { ...bsc.receipts[secondMigration], logs: bsc.receipts[secondMigration].logs.map((/** @type {any} */ log) => ({ ...log, data: bsc.receipts[firstMigration].logs[0].data })) };
+    const unread = chainOf({ logs: false, receipts: { [secondMigration]: sameAmount } });
+
+    like((await migrationFacts({ fetch: unread.fetch, migrations: [{ approval: firstApproval, hash: secondMigration, route }], network: 1 })).get(secondMigration), { approvalState: "unread", totalWei: 2_437_650_000_000n });
+    // The one sent right before it, by the owner's next nonce, is its own.
+    like((await migrationFacts({ fetch: unread.fetch, migrations: [{ approval: secondApproval, hash: secondMigration, route }], network: 1 })).get(secondMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+  });
+
+  it("keeps nothing for good without the migration's own time and gas", async () => {
+    // Logs without their block's time, and the block not given for a moment.
+    const stampless = Object.fromEntries(Object.entries(bsc.receipts).map(([hash, receipt]) => [hash, { ...(/** @type {any} */ (receipt)), logs: (/** @type {any} */ (receipt)).logs.map(({ blockTimestamp, ...log }) => log) }]));
+    const failedHash = `0x${"f".repeat(64)}`;
+    const failed = { ...bsc.receipts[firstMigration], logs: [], status: "0x0", transactionHash: failedHash };
+    const chain = chainOf({ receipts: { ...stampless, [failedHash]: failed } });
+    /** @param {string} input @param {any} init */
+    const noBlocks = async (input, init) => (JSON.parse(init.body).method === "eth_getBlockByNumber" ? new Response(JSON.stringify({ id: 1, jsonrpc: "2.0", result: null })) : chain.fetch(input, init));
+    const cache = new Map();
+    const facts = await migrationFacts({ cache, fetch: noBlocks, migrations: [{ hash: firstMigration, route }, { hash: failedHash, route }], network: 1 });
+
+    like(facts.get(firstMigration), { approvalState: "found", at: null });
+    like(facts.get(failedHash), { at: null, state: "failed" });
+    assert.equal(cache.size, 0);
+  });
+
+  it("keeps what's final in a cache, and reads it once", async () => {
+    const cache = new Map();
+    const chain = chainOf();
+    const first = await migrationFacts({ cache, fetch: chain.fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+    const calls = chain.calls.length;
+
+    assert.ok(calls > 0);
+    assert.deepEqual(await migrationFacts({ cache, fetch: chain.fetch, migrations: [{ hash: firstMigration, route }], network: 1 }), first);
+    assert.equal(chain.calls.length, calls);
+  });
+
+  it("has the way back's gas in the ledger, the approval with it, in every app the same", async () => {
+    const facts = await migrationFacts({ fetch: chainOf().fetch, migrations: migrationsOf([payout]), network: 1 });
+    const ledger = /** @type {any} */ (transferLedger({ evm: facts.get(firstMigration), locale: "en-GB", row: payout }));
+
+    assert.deepEqual(shown(ledger), [
+      ["sent", "1,041.531", "1,041.53106263", "BEP20 DUSK", false],
+      ["received", "1,041.531", "1,041.53106263", "DUSK", false],
+      ["gas", "0.0000047", "0.00000474855", "BNB", false],
+    ]);
+    assert.deepEqual(ledger.gas.parts, ["approval", "migration"]);
+    // Kept by an app, as the standalone keeps a transfer: the same numbers.
+    assert.deepEqual(shown(transferLedger({ evm: facts.get(firstMigration), locale: "en-GB", network: 1, received: 1_041_531_062_630n, route: "bsc-to-dusk" })), shown(ledger));
+    // Without its approval, the migration's alone, and it says so.
+    const unread = (await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 })).get(firstMigration);
+
+    assert.deepEqual(/** @type {any} */ (transferLedger({ evm: unread, row: payout })).gas.parts, ["migration"]);
   });
 });

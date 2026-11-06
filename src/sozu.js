@@ -20,6 +20,8 @@ import { amountLocale } from "./amounts.js";
 /** @typedef {import("./sozu.js").SozuPosition} SozuPosition */
 /** @typedef {import("./sozu.js").SozuStatusLike} SozuStatusLike */
 /** @typedef {import("./sozu.js").SozuYear} SozuYear */
+/** @typedef {import("./sozu.js").SozuGrowth} SozuGrowth */
+/** @typedef {import("./sozu.js").SozuPoint} SozuPoint */
 /** @typedef {{ numerator: bigint, denominator: bigint }} Rate */
 
 const LUX_PER_DUSK = 1_000_000_000n;
@@ -43,6 +45,27 @@ const PROVISIONER_BYTES = 193;
 const TRANSFER_BYTES = 400;
 /** The zero address the token burns to: a contract's tag and 32 bytes of zero. */
 const ZERO_ADDRESS = "00".repeat(33);
+
+/** How long `sozuGrowth` keeps what it read: an hour, as Sozu restakes every hour. */
+export const GROWTH_MAX_AGE_MS = 60 * 60_000;
+/** The period `sozuGrowth` measures, unless asked another, in days. */
+const GROWTH_DAYS = 30;
+/** Blocks a day, at one block every 10 seconds. */
+const BLOCKS_PER_DAY = 8_640;
+/** The most blocks the archive lists a contract's transactions of in one field. */
+const TXS_BLOCKS = 200;
+/** Windows read at each end: 600 blocks, where Sozu restakes every 360. */
+const TXS_WINDOWS = 3;
+const DAY_MS = 86_400_000;
+const YEAR_MS = 365.25 * DAY_MS;
+/** How far the latest restake's stDUSK may be from the pool's rate now, as a share: further, and it isn't the pool's. */
+const RATE_TOLERANCE = 0.005;
+/** A reward event's stake and stDUSK: the last u64s but one, from the end of its data. */
+const REWARD_STAKE_FROM_END = 24;
+/** Digits a growth's ratio is worked out to. */
+const GROWTH_SCALE = 1_000_000_000_000n;
+/** @type {WeakMap<object, Map<string, Promise<SozuGrowth | null>>>} */
+const growthsUnderWay = new WeakMap();
 
 /**
  * Lux from a bigint, a whole number or its text: null for anything else.
@@ -278,6 +301,180 @@ export async function sozuFacts({ account, archive, cache, rows }) {
 }
 
 /**
+ * A restake of the pool's, from a transaction the archive lists calling it:
+ * a `recycle` that went through. Null for any other.
+ *
+ * @param {any} listed
+ * @param {string} pool
+ * @returns {{ id: string, height: number, at: number } | null}
+ */
+function restakeOf(listed, pool) {
+  /** @type {any} */
+  let tx = null;
+
+  try {
+    tx = JSON.parse(String(listed?.tx?.json ?? "null"));
+  } catch {
+    tx = null;
+  }
+
+  const height = Number(listed?.blockHeight);
+  const at = Number(listed?.blockTimestamp) * 1000;
+  const id = String(listed?.id ?? "").toLowerCase();
+
+  if (listed?.err || tx?.call?.fn_name !== "recycle" || String(tx?.call?.contract ?? "").toLowerCase() !== pool || !CONTRACT_ID.test(id)) return null;
+
+  return Number.isSafeInteger(height) && Number.isFinite(at) && at > 0 ? { at, height, id } : null;
+}
+
+/**
+ * What one stDUSK was worth once a restake went through: the pool's stake
+ * and its stDUSK, as its reward event says them in that block's events.
+ *
+ * @param {unknown} list The block's events, as the archive gives them
+ * @param {{ id: string, height: number, at: number }} restake
+ * @param {string} pool
+ * @returns {SozuPoint | null}
+ */
+function pointOf(list, restake, pool) {
+  const event = (Array.isArray(list) ? list : []).find(
+    (each) => each && each.reverted !== true && each.topic === "reward" && String(each.origin ?? "").toLowerCase() === restake.id && String(each.source ?? each.target ?? "").toLowerCase() === pool
+  );
+  const hex = hexOf(event?.data);
+  const end = hex.length / 2;
+
+  if (end < REWARD_STAKE_FROM_END) return null;
+
+  const stake = u64At(hex, end - REWARD_STAKE_FROM_END);
+  const supply = u64At(hex, end - REWARD_STAKE_FROM_END + 8);
+
+  return stake > 0n && supply > 0n ? { at: restake.at, height: restake.height, stake, supply } : null;
+}
+
+/**
+ * How much more a's stDUSK is worth than b's, as a share: null where either
+ * has nothing to divide by.
+ *
+ * @param {{ stake: bigint, supply: bigint }} a
+ * @param {{ stake: bigint, supply: bigint }} b
+ */
+const grownBy = (a, b) => (a.supply > 0n && b.stake > 0n ? Number((a.stake * b.supply * GROWTH_SCALE) / (a.supply * b.stake) - GROWTH_SCALE) / Number(GROWTH_SCALE) : null);
+
+/** @param {SozuGrowth} growth */
+const growthKept = (growth) =>
+  JSON.stringify(growth, (_, value) => (typeof value === "bigint" ? `${value}` : value));
+
+/**
+ * @param {string | null | undefined} text
+ * @returns {{ readAt: number, growth: SozuGrowth } | null}
+ */
+function growthRead(text) {
+  try {
+    const { growth, readAt } = JSON.parse(String(text));
+    /** @param {any} point */
+    const point = (point) => ({ at: Number(point.at), height: Number(point.height), stake: BigInt(point.stake), supply: BigInt(point.supply) });
+
+    return { growth: { days: Number(growth.days), from: point(growth.from), rate: Number(growth.rate), to: point(growth.to) }, readAt: Number(readAt) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {{ archive: Pick<Archive, "query">, pool?: string | null, status?: SozuStatusLike | null, days?: number, tipHeight?: number | bigint | null, cache?: FactCache, maxAgeMs?: number, now?: number }} options
+ * @returns {Promise<SozuGrowth | null>}
+ */
+export async function sozuGrowth({ archive, cache, days = GROWTH_DAYS, maxAgeMs = GROWTH_MAX_AGE_MS, now = Date.now(), pool, status, tipHeight }) {
+  const id = String(pool ?? /** @type {any} */ (status)?.contracts?.pool ?? "").toLowerCase();
+
+  if (!CONTRACT_ID.test(id)) return null;
+  if (!Number.isSafeInteger(days) || days < 1) throw new RangeError("A period is a whole number of days");
+
+  const key = `sozu-growth:${id}:${days}`;
+  const figures = readStatus(status).pool;
+  // The growth as this caller has it: none where its status's rate now isn't
+  // the latest restake's, as then what was read isn't the pool's figures.
+  /** @param {SozuGrowth | null} growth */
+  const ofCaller = (growth) => {
+    const apart = growth && figures ? grownBy(growth.to, figures) : 0;
+
+    return growth && apart !== null && Math.abs(apart) <= RATE_TOLERANCE ? growth : null;
+  };
+  const kept = growthRead(cache?.get(key));
+
+  if (kept && now - kept.readAt >= 0 && now - kept.readAt < maxAgeMs) return ofCaller(kept.growth);
+
+  const under = cache ? growthsUnderWay.get(cache)?.get(key) : undefined;
+
+  if (under) return ofCaller(await under);
+
+  const answer = readGrowth(archive, id, days, tipHeight);
+  const reads = cache ? (growthsUnderWay.get(cache) ?? new Map()) : null;
+
+  if (cache && reads) {
+    growthsUnderWay.set(cache, reads);
+    reads.set(key, answer);
+  }
+
+  try {
+    const growth = await answer;
+
+    // Kept where this caller's status agrees with it, or it has none to say.
+    if (growth && ofCaller(growth)) cache?.set(key, JSON.stringify({ growth: JSON.parse(growthKept(growth)), readAt: now }));
+
+    return ofCaller(growth);
+  } finally {
+    reads?.delete(key);
+  }
+}
+
+/**
+ * How the pool's stDUSK grew over `days`, as the chain says: null where it
+ * can't be read. Nothing here knows what any caller's status says.
+ *
+ * @param {Pick<Archive, "query">} archive
+ * @param {string} id The pool's contract ID
+ * @param {number} days
+ * @param {number | bigint | null | undefined} tipHeight
+ * @returns {Promise<SozuGrowth | null>}
+ */
+async function readGrowth(archive, id, days, tipHeight) {
+  try {
+    const tip = tipHeight === undefined || tipHeight === null ? Number((await archive.query("query { tip: block(height: -1) { header { height } } }"))?.tip?.header?.height) : Number(tipHeight);
+    const then = tip - days * BLOCKS_PER_DAY;
+
+    if (!Number.isSafeInteger(tip) || then < TXS_BLOCKS * TXS_WINDOWS) return null;
+
+    // The latest restake, and the one nearest the period's start.
+    const latest = Array.from({ length: TXS_WINDOWS }, (_, i) => [`n${i}`, tip - TXS_BLOCKS * (i + 1) + 1, tip - TXS_BLOCKS * i]);
+    const first = Array.from({ length: TXS_WINDOWS }, (_, i) => [`t${i}`, then - (TXS_BLOCKS * TXS_WINDOWS) / 2 + TXS_BLOCKS * i, then - (TXS_BLOCKS * TXS_WINDOWS) / 2 + TXS_BLOCKS * (i + 1) - 1]);
+    const listed = await archive.query(
+      `query { ${[...latest, ...first].map(([alias, from, to]) => `${alias}: blockTxs(range: [${from}, ${to}], contract: ${JSON.stringify(id)}) { id blockHeight blockTimestamp err tx { json } }`).join(" ")} }`
+    );
+    /** @param {(string | number)[][]} windows */
+    const restakesIn = (windows) => windows.flatMap(([alias]) => (Array.isArray(listed?.[alias]) ? listed[alias] : [])).map((each) => restakeOf(each, id)).filter((each) => each !== null);
+    const end = restakesIn(latest).sort((a, b) => b.height - a.height)[0];
+    const start = restakesIn(first).sort((a, b) => Math.abs(a.height - then) - Math.abs(b.height - then))[0];
+
+    if (!end || !start || start.height >= end.height) return null;
+
+    const blocks = await archive.query(`query { a: contractEvents(height: ${start.height}) { json } b: contractEvents(height: ${end.height}) { json } }`);
+    const from = pointOf(blocks?.a?.json, start, id);
+    const to = pointOf(blocks?.b?.json, end, id);
+    const span = from && to ? to.at - from.at : 0;
+
+    if (!from || !to || span <= 0) return null;
+
+    const grown = grownBy(to, from);
+
+    return grown === null ? null : { days: Math.round(span / DAY_MS), from, rate: (grown * YEAR_MS) / span, to };
+  } catch {
+    // What can't be read says nothing: the rate as it's worked out stands.
+    return null;
+  }
+}
+
+/**
  * @param {{ rows?: Iterable<ActivityRow> | null, status?: SozuStatusLike | null, facts?: ReadonlyMap<string, SozuFact> | null, complete?: boolean }} [input]
  * @returns {SozuPosition}
  */
@@ -337,18 +534,19 @@ const rateAfterFee = (nativeRate, rewardFee) =>
 /**
  * @param {number | null | undefined} nativeRate
  * @param {SozuStatusLike | null | undefined} status
+ * @param {SozuGrowth | null} [growth]
  * @returns {number | null}
  */
-export const sozuRate = (nativeRate, status) => rateAfterFee(nativeRate, status?.fees?.reward);
+export const sozuRate = (nativeRate, status, growth) => growth?.rate ?? rateAfterFee(nativeRate, status?.fees?.reward);
 
 /**
- * @param {{ amount: bigint | number | string, nativeRate?: number | null, status?: SozuStatusLike | null }} input
+ * @param {{ amount: bigint | number | string, nativeRate?: number | null, status?: SozuStatusLike | null, growth?: SozuGrowth | null }} input
  * @returns {SozuYear}
  */
-export function sozuYear({ amount, nativeRate, status }) {
+export function sozuYear({ amount, growth, nativeRate, status }) {
   const lux = luxOf(amount) ?? 0n;
   const { depositFee: fee } = readStatus(status);
-  const rate = sozuRate(nativeRate, status);
+  const rate = sozuRate(nativeRate, status, growth);
   const depositFee = fee ? sozuFee(lux, fee) : null;
   const worth = depositFee === null ? null : lux > depositFee ? lux - depositFee : 0n;
   const rewards = rate === null || worth === null ? null : (worth * BigInt(Math.round(rate * RATE_SCALE))) / BigInt(RATE_SCALE);
@@ -379,10 +577,31 @@ function working(provisioners, tipHeight, native) {
 }
 
 /**
- * @param {{ nativeRate?: number | null, status?: SozuStatusLike | null, provisioners?: ReadonlyArray<{ amount?: unknown, eligibility?: unknown }> | null, tipHeight?: number | bigint | null, locale?: string }} input
+ * What one stDUSK was worth, in DUSK, to four decimals; more where the two
+ * ends would read the same.
+ *
+ * @param {{ stake: bigint, supply: bigint }} point
+ * @param {number} decimals
+ */
+const valueOf = ({ stake, supply }, decimals) => {
+  const scale = 10n ** BigInt(decimals);
+
+  return Number((stake * scale + supply / 2n) / supply) / Number(scale);
+};
+
+/**
+ * @param {{ nativeRate?: number | null, status?: SozuStatusLike | null, provisioners?: ReadonlyArray<{ amount?: unknown, eligibility?: unknown }> | null, tipHeight?: number | bigint | null, locale?: string, growth?: SozuGrowth | null }} input
  * @returns {string | null}
  */
-export function sozuRateLine({ locale = amountLocale(), nativeRate, provisioners, status, tipHeight }) {
+export function sozuRateLine({ growth, locale = amountLocale(), nativeRate, provisioners, status, tipHeight }) {
+  if (growth) {
+    const decimals = valueOf(growth.from, 4) === valueOf(growth.to, 4) ? 6 : 4;
+    const value = new Intl.NumberFormat(locale, { maximumFractionDigits: decimals, minimumFractionDigits: decimals });
+    const period = growth.days === 1 ? "the last day" : `the last ${new Intl.NumberFormat(locale).format(growth.days)} days`;
+
+    return `stDUSK went from ${value.format(valueOf(growth.from, decimals))} to ${value.format(valueOf(growth.to, decimals))} DUSK over ${period}, after Sozu's share.`;
+  }
+
   const read = provisioners && tipHeight !== null && tipHeight !== undefined;
   const native = nativeRate ?? (read ? nativeRateEstimate({ provisioners: /** @type {any} */ (provisioners), tipHeight }) : null);
 

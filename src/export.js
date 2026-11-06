@@ -38,6 +38,7 @@
  */
 
 import { formatDuskPlain } from "./amounts.js";
+import { memoTextOf } from "./moved.js";
 import { displayText } from "./text.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
@@ -45,6 +46,7 @@ import { displayText } from "./text.js";
 /** @typedef {import("./export.js").ExportPeriod} ExportPeriod */
 /** @typedef {import("./export.js").ExportResult} ExportResult */
 /** @typedef {import("./sozu.js").SozuFact} SozuFact */
+/** @typedef {import("./bridge.js").MigrationEvm} MigrationEvm */
 
 /** The format's twelve, then what it ignores. */
 export const CSV_COLUMNS = Object.freeze([
@@ -170,9 +172,10 @@ export function datesPeriod(from, to, { timeZone } = {}) {
  * A line of the file, before its value in fiat.
  *
  * `valued` is the DUSK it's worth, null for what isn't DUSK. `sentDecimals` is a
- * token's own, and `counterparty` who it went to where that isn't the row's.
+ * token's own, and `counterparty` who it went to where that isn't the row's. A
+ * line of another chain's has its own time, hash, account and memo.
  *
- * @typedef {{ sent?: bigint, sentCoin?: string, sentDecimals?: number, received?: bigint, receivedCoin?: string, fee?: bigint | null, tag?: string, words: string, valued: bigint | null, counterparty?: string }} Line
+ * @typedef {{ sent?: bigint, sentCoin?: string, sentDecimals?: number, received?: bigint, receivedCoin?: string, fee?: bigint | null, tag?: string, words: string, valued: bigint | null, counterparty?: string, partyName?: string, at?: number, hash?: string, account?: string, accountName?: string, memo?: string }} Line
  */
 
 /**
@@ -269,6 +272,40 @@ function bridgeLines(row, bridge, fee) {
   const words = bridge.step === "proof" ? "Proof of a DuskEVM withdrawal" : bridge.step === "claim" ? "Claim of a DuskEVM withdrawal" : "Call of DuskEVM's bridge";
 
   return fee ? [feeLine(fee, words)] : [];
+}
+
+/**
+ * The lines of a migration's side on its own chain, for the payout on Dusk it
+ * was paid with: the gas its own approval and it paid there, in that chain's
+ * coin, each at its own time and hash, of the address that sent it, as costs.
+ * What it moved is the payout's line.
+ *
+ * @param {ActivityRow} row
+ * @param {MigrationEvm | undefined} fact
+ * @returns {Line[]}
+ */
+function evmLines(row, fact) {
+  const route = /** @type {any} */ (row.route);
+
+  if (fact?.state !== "mined" || !fact.from || fact.at === null || route?.kind !== "migration") return [];
+
+  const chain = route.chain?.name ?? route.id;
+  const decimals = route.chain?.currency?.decimals ?? 18;
+  const base = { account: fact.from, accountName: chain, counterparty: String(route.contract ?? "").toLowerCase() || undefined, memo: "", partyName: "", sentCoin: fact.coin, sentDecimals: decimals, tag: "cost", valued: null };
+  /** @type {Line[]} */
+  const lines = [];
+
+  if (fact.approvalState === "found" && fact.approval?.gasWei && fact.approval.at !== null) {
+    lines.push({ ...base, at: fact.approval.at, hash: fact.approval.hash, sent: fact.approval.gasWei, words: `Network fee on ${chain}: approval for a migration to Dusk` });
+  }
+
+  if (fact.gasWei) {
+    const moved = fact.lux === null ? "" : ` of ${formatDuskPlain(fact.lux)} ${route.chain?.tokenLabel ?? DUSK}`;
+
+    lines.push({ ...base, at: fact.at, hash: fact.hash, sent: fact.gasWei, words: `Network fee on ${chain}: migration${moved} to Dusk` });
+  }
+
+  return lines;
 }
 
 /**
@@ -502,7 +539,7 @@ function slugOf(name) {
  * @param {ExportOptions} options
  * @returns {Promise<ExportResult>}
  */
-export async function accountingCsv({ bom = false, contactName, currency = "EUR", facts, network, period, price, profile, profiles = [], rows }) {
+export async function accountingCsv({ bom = false, contactName, currency = "EUR", evm, facts, network, period, price, profile, profiles = [], rows }) {
   const account = String(profile?.account ?? "");
   /** @type {ReadonlySet<string>} */
   const self = new Set([profile?.account, profile?.address].flatMap((id) => (typeof id === "string" && id !== "" ? [id] : [])));
@@ -531,8 +568,8 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
     return known;
   };
   const chronological = [...(rows ?? [])].sort((a, b) => (a.time ?? 0) - (b.time ?? 0) || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
-  /** @type {string[]} */
-  const lines = [CSV_COLUMNS.map(field).join(",")];
+  /** @type {{ at: number, text: string }[]} */
+  const written = [];
   let count = 0;
 
   for (const row of chronological) {
@@ -554,19 +591,25 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
       continue;
     }
 
-    for (const line of linesOf(row, { address: Boolean(profile?.address), facts, own, self })) {
+    // A migration's side on its own chain, with the payout it was paid with: named by its memo, as text.
+    const migration = row.route?.kind === "migration" && row.direction === "in" ? evm?.get((memoTextOf(row) ?? "").toLowerCase()) : undefined;
+
+    for (const line of [...evmLines(row, migration), ...linesOf(row, { address: Boolean(profile?.address), facts, own, self })]) {
       // A token's own line says who it went to, or that it isn't known: never the contract called.
       const ownParty = "counterparty" in line;
       const party = ownParty ? line.counterparty : row.counterparty;
       const internal = party && !self.has(party) ? own.get(party) : undefined;
-      const name = internal ?? (ownParty ? null : row.counterpartyName) ?? (ownParty && !party ? null : row.toName) ?? (party ? contactName?.(party) : "") ?? "";
-      const unit = price && line.valued !== null ? await priceAt(row.time) : null;
+      const name = line.partyName ?? internal ?? (ownParty ? null : row.counterpartyName) ?? (ownParty && !party ? null : row.toName) ?? (party ? contactName?.(party) : "") ?? "";
+      const at = line.at ?? row.time;
+      const memo = line.memo ?? row.memo ?? "";
+      const unit = price && line.valued !== null ? await priceAt(at) : null;
 
       if (price && !unit) unpriced += 1;
 
-      lines.push(
-        [
-          field(dateOf(row.time)),
+      written.push({
+        at,
+        text: [
+          field(dateOf(at)),
           field(amountOf(line.sent, line.sentDecimals)),
           line.sent === undefined ? "" : textField(line.sentCoin),
           field(amountOf(line.received)),
@@ -576,16 +619,16 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
           field(unit && line.valued !== null ? worthOf(line.valued, unit) : ""),
           field(unit ? currency : ""),
           field(line.tag ?? ""),
-          textField([line.words, row.memo].filter(Boolean).join(" · ")),
-          field(row.hash),
-          textField(profile?.name ?? ""),
-          field(account),
+          textField([line.words, memo].filter(Boolean).join(" · ")),
+          field(line.hash ?? row.hash),
+          textField(line.accountName ?? profile?.name ?? ""),
+          field(line.account ?? account),
           textField(name),
           textField(party ?? ""),
           field(internal ? "yes" : ""),
-          textField(row.memo ?? ""),
-        ].join(",")
-      );
+          textField(memo),
+        ].join(","),
+      });
       count += 1;
     }
   }
@@ -595,7 +638,8 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
 
   return {
     count,
-    csv: `${bom ? BOM : ""}${lines.join("\r\n")}\r\n`,
+    // Oldest first, as a migration's lines on its own chain come before its payout.
+    csv: `${bom ? BOM : ""}${[CSV_COLUMNS.map(field).join(","), ...written.sort((a, b) => a.at - b.at).map((line) => line.text)].join("\r\n")}\r\n`,
     fileName: `dusk-${slug}${on}-${period?.label ?? "all"}.csv`,
     left,
     unpriced,

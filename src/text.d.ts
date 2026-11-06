@@ -29,12 +29,24 @@
  * - "invalid_surrogate": half a character, shown as the replacement mark;
  * - "non_nfc": combining marks that look like one precomposed character. The
  *   text isn't changed: it's for the app to say;
+ * - "mixed_digits": a number whose digits are of more than one system, as
+ *   "1٠5", whose Arabic-Indic zero looks like a point. A number goes on past
+ *   one decimal or group mark between its digits, not past a space, and holds
+ *   an emoji's selector or a keycap's mark on its digits; a
+ *   numeral that's no decimal digit, as ½, is a system of its own. The text
+ *   isn't changed: it's for the app to say;
+ * - "rtl_digits": numerals that read right to left, as N'Ko's and Adlam's
+ *   digits: N'Ko's 0001 shows as 1000 to someone who reads left to right.
+ *   Arabic-Indic and Persian digits read left to right and aren't flagged.
+ *   The text isn't changed: it's for the app to say;
  * - "truncated": it was cut at `maxChars`.
  */
-export type TextFlag = "bidi_control" | "invisible_format" | "line_separator" | "control_chars" | "invalid_surrogate" | "non_nfc" | "truncated";
+export type TextFlag = "bidi_control" | "invisible_format" | "line_separator" | "control_chars" | "invalid_surrogate" | "non_nfc" | "mixed_digits" | "rtl_digits" | "truncated";
 
 /**
- * The text as it's safe to show, and whether anything in it was neutralised.
+ * The text as it's safe to show, and whether anything in it was neutralised:
+ * `neutralized` says the text shown isn't the text given, and is false for
+ * what's only flagged ("non_nfc", "mixed_digits", "rtl_digits", "truncated").
  * Each hidden character shows as its code (a backslash, u and four hex
  * digits), and half a character as the replacement mark. Line breaks show as
  * codes too, unless `lineBreaks` keeps them for text that's written in lines,

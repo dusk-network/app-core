@@ -126,6 +126,29 @@ describe("text a person must trust", () => {
     assert.equal(displayText(`Pay ${ALEF} 10`).text, `Pay ${ALEF} 10`);
   });
 
+  it("flags a number whose digits read right to left, or mix digit systems, and changes nothing", () => {
+    // Marek's: N'Ko's 0001 shows as "߁000", and an Arabic-Indic zero makes 105 look like 1·5.
+    assert.deepEqual(displayText("Pay ߀߀߀߁ DUSK"), { flags: ["rtl_digits"], neutralized: false, text: "Pay ߀߀߀߁ DUSK" });
+    assert.deepEqual(displayText("Pay ١٠ DUSK, or 1٠5 DUSK"), { flags: ["mixed_digits"], neutralized: false, text: "Pay ١٠ DUSK, or 1٠5 DUSK" });
+    assert.deepEqual(displayText("Invoice ߀߀߀߁ paid 1٠5").flags, ["mixed_digits", "rtl_digits"]);
+    // Adlam's digits read right to left too, and a single one turns what's beside it around.
+    assert.deepEqual(displayText("Pay \u{1e951}\u{1e950} DUSK").flags, ["rtl_digits"]);
+    assert.deepEqual(displayText("Pay ߁ 10 ߂ 1000 DUSK").flags, ["rtl_digits"]);
+    // An emoji's selector or a keycap's mark is part of the number it's on: it shows as the digits do.
+    for (const mixed of ["1\ufe0f\u0660\ufe0f5", "1\ufe0f\u20e3\u0660\ufe0f\u20e35\ufe0f\u20e3", "1\ufe0e\u0660"]) assert.deepEqual(displayText(mixed).flags, ["mixed_digits"], mixed);
+    // A number goes on past a decimal or group mark, not past a space.
+    for (const mixed of ["1.٠5", "1,٠٠٠", "1'٠00", "١٢٣۴", "𝟏𝟙", "1½", "١0"]) assert.deepEqual(displayText(mixed).flags, ["mixed_digits"], mixed);
+    // With what else it flags, as it's shown.
+    assert.deepEqual(displayText("pay \u202e1٠5\u202c", { isolate: true }), { flags: ["bidi_control", "mixed_digits"], neutralized: true, text: `⁦pay \\u202e1⁨٠⁩5\\u202c⁩` });
+  });
+
+  it("leaves numbers of one system alone, in any script, and numbers of two kept apart", () => {
+    // Arabic-Indic and Persian digits read left to right; a math font's digits are one system across its code points.
+    for (const one of ["Factura 33", "1 000,50 €", "١٠٠٠", "۱۲۳۴", "１０００", "𝟏𝟐𝟑", "𝟗𝟖", "१,२३४.५", "10 or ١٠", "Pay 10, ١٠", "3.5 DUSK", "Ⅻ", "\u{10e60}\u{10e69}"]) {
+      assert.deepEqual(displayText(one).flags, [], one);
+    }
+  });
+
   it("reads what isn't text as its text", () => {
     assert.deepEqual(displayText(null), { flags: [], neutralized: false, text: "" });
     assert.deepEqual(displayText(undefined), { flags: [], neutralized: false, text: "" });

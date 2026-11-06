@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { activityRows } from "../src/activity.js";
+import { migrationFacts, migrationsOf } from "../src/bridge.js";
 import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod } from "../src/export.js";
 import { sozuFacts } from "../src/sozu.js";
 import { A, B, C, POOL, entryFrom, entryOf, hash, recorded } from "./fixtures/activity.js";
+import { fakeChain, hex } from "./fixtures/bridge.js";
 import { readFixture } from "./fixtures/helpers.js";
 
 /** @typedef {import("../src/export.js").ExportOptions} ExportOptions */
@@ -645,6 +647,44 @@ describe("the bridge", () => {
     assert.equal(record["Received Amount"], "54.325305359");
     assert.equal(record["Fee Amount"], "");
     assert.match(record.Description, /^From BNB Smart Chain · 0xea3e4e/);
+  });
+
+  it("writes what a migration paid on its own chain, its approval and itself, each at its own time and hash, with its payout", async () => {
+    // Recorded on BNB Smart Chain and Dusk: a migration after its own approval, and its payout.
+    const bsc = readFixture("bridge-migration-bsc.json");
+    const [approval, migration] = Object.keys(bsc.receipts);
+    const receiver = bsc.payouts.entries[0].events[0].data.receiver;
+    const rows = activityRows({ account: receiver, network: 1, public: bsc.payouts.entries.map((/** @type {any} */ raw) => entryFrom(receiver, raw, bsc.payouts.details[raw.origin], {}, { network: 1 })) });
+    const chain = fakeChain({
+      head: BigInt(bsc.head),
+      logs: bsc.logs.map((/** @type {any} */ log) => ({ address: log.address, block: BigInt(log.blockNumber), data: log.data, hash: log.transactionHash, index: Number(BigInt(log.logIndex)), topics: log.topics })),
+      receipts: bsc.receipts,
+      timeAt: (n) => Number(BigInt(bsc.blocks[hex(n)]?.timestamp ?? "0x0")),
+    });
+    const evm = await migrationFacts({ fetch: chain.fetch, migrations: migrationsOf(rows), network: 1 });
+    const { count, csv } = await accountingCsv({ evm, profile: { account: receiver, name: "Lena" }, rows });
+    const [first, second, payout] = recordsOf(csv).filter((record) => [approval, migration].includes(record.TxHash) || record.Memo === migration);
+    /** @param {string} hash */
+    const dateOf = (hash) => new Date(Number(BigInt(bsc.blocks[bsc.receipts[hash].blockNumber].timestamp)) * 1000).toISOString().slice(0, 19).replace("T", " ");
+
+    // Two migrations and their approvals, and the two payouts.
+    assert.equal(count, 6);
+    assert.deepEqual(
+      [first, second].map((record) => [record.Date, record["Sent Amount"], record["Sent Currency"], record.Tag, record.Description, record.TxHash, record["Account Name"], record.Account, record.Counterparty, record.Memo]),
+      [
+        [dateOf(approval), "0.0000023109", "BNB", "cost", "Network fee on BNB Smart Chain: approval for a migration to Dusk", approval, "BNB Smart Chain", bsc.owner, bsc.migration, ""],
+        [dateOf(migration), "0.00000243765", "BNB", "cost", "Network fee on BNB Smart Chain: migration of 1041.53106263 BEP20 DUSK to Dusk", migration, "BNB Smart Chain", bsc.owner, bsc.migration, ""],
+      ]
+    );
+    assert.equal(payout["Received Amount"], "1041.53106263");
+    assert.equal(payout["Account Name"], "Lena");
+    assert.equal(payout.Account, receiver);
+    // Without what it paid there, the payout alone, as before.
+    assert.equal((await accountingCsv({ profile: { account: receiver, name: "Lena" }, rows })).count, 2);
+    // A payout's memo of bytes names no migration, though the app's facts have one by that hash.
+    const bytes = rows.map((row) => ({ ...row, entry: { ...row.entry, memoBinary: true } }));
+
+    assert.equal((await accountingCsv({ evm, profile: { account: receiver, name: "Lena" }, rows: bytes })).count, 2);
   });
 });
 

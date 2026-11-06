@@ -1,6 +1,6 @@
 # @dusk-network/app-core
 
-Shared logic for the Dusk apps: amounts, text a person must trust, payment links, public and shielded history, activity rows, an accountant's export, Sozu positions, bridge arrivals and status, and DuskEVM withdrawals.
+Shared logic for the Dusk apps: amounts, text a person must trust, payment links and requests, names that look alike, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, and DuskEVM withdrawals.
 
 It has no framework and runs in a browser extension's service worker. Each part is its own entry point, so an app loads only what it uses. Apps pass in their own fetch, batching and storage; the package never chooses storage keys.
 
@@ -27,15 +27,17 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 
 | Import | What it gives |
 |---|---|
-| `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits` |
+| `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits`; and the currency a wallet starts on, by the browser's region (`defaultCurrency`) |
 | `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) |
-| `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
+| `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), as Send reads them on the wallet's network (`readPaymentLink`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
+| `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; the name a contact's takes (`nameClash`); and which in a list to show with their address (`lookAlikes`) |
+| `@dusk-network/app-core/requests` | Payment requests: what came in for each request a wallet made (`matchRequests`), and the payment a send would make again (`sentAlready`) |
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
 | `@dusk-network/app-core/export` | An account's activity as the file an accountant or a tax tool reads, for a quarter or any dates: Koinly's universal CSV (`accountingCsv`, `quarterPeriod`, `datesPeriod`) |
-| `@dusk-network/app-core/sozu` | A stake with Sozu: put in, taken out, worth now and earned (`sozuPosition`), what an amount earns in a year (`sozuYear`, `sozuRate`), what the rate is made of (`sozuRateLine`), and what each stake and unstake did (`sozuFacts`) |
-| `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); the arrivals as `/activity` takes them (`arrivalsOf`); a transfer's exact amounts (`transferLedger`); and how a route is doing (`bridgeStatus`) |
+| `@dusk-network/app-core/sozu` | A stake with Sozu: put in, taken out, worth now and earned (`sozuPosition`), what an amount earns in a year (`sozuYear`, `sozuRate`), how stDUSK grew, from the chain (`sozuGrowth`), what the rate is made of (`sozuRateLine`), and what each stake and unstake did (`sozuFacts`) |
+| `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); the arrivals as `/activity` takes them (`arrivalsOf`); a migration's side on its own chain, its gas and the approval it spent (`migrationFacts`, `migrationsOf`); a transfer's exact amounts (`transferLedger`); and how a route is doing (`bridgeStatus`) |
 | `@dusk-network/app-core/bridge-explorer` | Where a deposit to DuskEVM arrived, on DuskEVM's explorer alone (`depositArrivalsFromExplorer`): `/bridge`'s explorer path, for an app that reads nothing else, without the RPC path and `/history` |
 | `@dusk-network/app-core/duskevm-withdrawals` | A DuskEVM withdrawal's life, signing aside: its start on DuskEVM (`withdrawalCall`), finding an address's withdrawals (`syncWithdrawals`, `explorerWithdrawals`, `withdrawalsByNonce`), and on Dusk where each is, its proof and its claim, ready for the app's wallet to sign (`createWithdrawals`) |
 
@@ -54,6 +56,7 @@ readAmount("1.234", "es-ES"); // { lux: null, problem: "Is that 1234 or 1,234? W
 ```
 
 - The one rule for an amount, of DUSK or an EVM token: a row and a balance line show `text`, its detail shows `exact`. `text` has at most 4 decimals, 2 significant digits under 0.01, and is never 0 for an amount that isn't. It rounds down for an amount or a balance, to the nearest for a fee paid, and up for the most a fee can be.
+- `defaultCurrency` is the fiat currency a wallet starts on: "EUR" where the browser's region pays in euros (the euro area, Bulgaria in it since 2026; Andorra, Monaco, San Marino, the Vatican, Montenegro, Kosovo; France's overseas regions and the collectivities that use it; Åland, the Canary Islands, Ceuta and Melilla), "USD" anywhere else. A language without a region takes the one it's most spoken in: "de" and "fr" are EUR, "en" and "pt" (Brazil) USD.
 - An amount reads back as itself or is refused, never as another. A language's own groups are read: `1 000` with any of its spaces in French, `1'000` in Swiss German, `12,34,567` in Hindi. A lone point or comma before three digits that could mean two things stays unclear (`unclearAmount`).
 
 ## Text
@@ -66,7 +69,7 @@ displayText(message, { lineBreaks: true, maxChars: 500 }); // for text written i
 displayText(memo, { isolate: true }); // for a screen: right-to-left words set apart, the rest in the order of the bytes
 ```
 
-Text-direction controls, characters that render as nothing, controls and line breaks show as their codes, never left out, so what's shown is what the bytes say; half a character shows as the replacement mark. `neutralized` says whether anything was, for the app to say so, and `flags` what. On a screen, right-to-left letters turn the numbers and words beside them around: `isolate` sets each run of them, and of their digits, apart, so "Pay א 10 א 1000" doesn't read as "Pay א 1000 א 10". It's for display: sign and send the original.
+Text-direction controls, characters that render as nothing, controls and line breaks show as their codes, never left out, so what's shown is what the bytes say; half a character shows as the replacement mark. `neutralized` says whether anything was, for the app to say so, and `flags` what. Some things are only flagged, the text as it was: a number whose digits read right to left (`rtl_digits`), as N'Ko's 0001 that shows as 1000, or mix digit systems (`mixed_digits`), as 1٠5 with an Arabic-Indic zero that looks like a point. On a screen, right-to-left letters turn the numbers and words beside them around: `isolate` sets each run of them, and of their digits, apart, so "Pay א 10 א 1000" doesn't read as "Pay א 1000 א 10". It's for display: sign and send the original.
 
 ## Payment links
 
@@ -80,11 +83,47 @@ const made = makePaymentLink({ to: account, amount: typed, memo, network: chainI
 
 const link = parsePaymentLink(pastedOrScanned); // { form: "https", kind: "public", to, amountDusk: "0.15", lux, memo, label, chainId: "dusk:1", raw }
 networkMismatch(link.chainId, walletChain); // "This request is for Mainnet. You are on Testnet."
+
+// In Send, pasted, scanned or opened alike: what it fills in, or why it fills in nothing.
+readPaymentLink(pastedOrScanned, { network: walletChain });
+// { link: null, problem: "This request is for Mainnet. You are on Testnet.", reason: "other-network", chainId: "dusk:1", network: "Mainnet" }
 ```
 
-- `parsePaymentLink` reads a `dusk:` link, an https link to the web wallet's Send on a network there's a file for (or at `walletUrl`, the app's own address), or a recipient as it is. An https link anywhere else is no payment link: it reads as a recipient, which Send refuses. One that says a network other than its wallet's is null.
+- `parsePaymentLink` reads a `dusk:` link, an https link to the web wallet's Send on a network there's a file for (or at `walletUrl`, the app's own address), or a recipient as it is. An https link anywhere else is no payment link: it reads as a recipient, which Send refuses. One that says a network other than its wallet's is null, and so is one that says a field twice or has a user part before its host (`https://apps.testnet.dusk.network@apps.dusk.network/…` goes to the host after the `@`).
+- `readPaymentLink` is Send's reading, the same pasted, scanned or opened, for a wallet to say what's wrong at once and never fill a link in as a recipient: `link` to fill in, or `problem` in the wallets' words, by `reason`: "two-amounts" (amounts that differ, in DUSK and in lux or one of them twice), "unreadable", or "other-network"; and either way the network it's for, `chainId` and its name `network`. What isn't a link is null, for Send to read as a recipient.
 - `makePaymentLink` checks what Send checks, and says what's wrong by the field: a recipient that is one, an amount above 0 with 9 decimals at most, and a memo of 512 bytes at most.
 - The https link ends with its network, so a mail or chat client that cuts a link's last punctuation cuts none of it.
+
+## Names
+
+```js
+import { lookAlikes, looksAlike, nameClash } from "@dusk-network/app-core/names";
+
+looksAlike("Bob", "Bօb"); // true: an Armenian օ
+nameClash("Profile 2", { profiles, contacts, except: editedId });
+// { kind: "profile", same: true, entry: profiles[1] }: a contact named like a profile, to refuse
+nameClash("Estudio Mаrta", { profiles, contacts }); // { kind: "contact", same: false, entry }: another's, in other letters
+lookAlikes([...profiles, ...contacts]); // the entries to show with their address
+```
+
+- Names look alike when they read as the same name, whatever their case, accents, spaces and punctuation (`sameName`), or have the same skeleton by Unicode's confusables (UTS #39), as written or in lower case: Cyrillic, Greek, Armenian and Cherokee letters that look like Latin ones, a capital I that looks like a small l, rn that looks like m. The table is Unicode's, version 18.0.0, kept in the package as data: `npm run generate:confusables` makes `src/confusables.js` again from the pinned file, once its hash is checked.
+- `nameClash` says whose name a new or changed contact's takes: one of the person's profiles first, as a contact named like a profile would read as that profile on Review; then another contact's. `same` says it reads as that name, rather than looking like it.
+- `lookAlikes` gives the entries whose name looks like another's of another address, for a list or a picker to show each with its address.
+- For what a person reads only: a payment goes to an address, and a name never stands for one.
+
+## Requests
+
+```js
+import { matchRequests, sentAlready } from "@dusk-network/app-core/requests";
+
+const matches = matchRequests(kept, rows); // the wallet's requests, as it keeps them, and `/activity`'s rows
+// matches.get(id): { state: "paid", matched: "amount-memo", hash, at, lux, memo, more: [{ hash, at, lux, matched, memo }] }
+sentAlready(rows, { to, lux, memo }); // before a send: the row of the payment it would make again, or null
+```
+
+- A request is kept as `{ id, to, lux, memo, network, at, paid? }`: `lux` as text, null for any amount, and `paid` the payment that paid it, for it to stay paid once that payment is too far back to read.
+- "paid" takes the amount and the memo asked, both, in one payment, or the memo of a request of no amount; anything less is "check", with what `matched`, never paid. "waiting" is none yet. Only a payment that went through (`executed`) counts, by what its transfer paid, without a gas refund its transaction paid with it. A payment answers one request, to the address it asked on, from 5 minutes before it was asked: the oldest it pays in full, before any it matches less. `more` holds what else came in for it, oldest first: one with all of it again (`matched` "amount-memo") paid it twice.
+- `sentAlready` is a payment out to the same recipient, of the same amount and memo, that didn't fail and wasn't dropped, on its way too: in the last 10 minutes, or at any time with a memo. Its amount is what its transfer paid, without a gas refund to another account.
 
 ## History
 
@@ -264,6 +303,7 @@ The file is [Koinly's universal CSV](https://support.koinly.io/en/articles/94899
 - A stake with Sozu is a trade of DUSK for stDUSK, and an unstake the trade back, once `facts` says its stDUSK, with its deposit fee and what a stDUSK was worth in the description. Until then, it's what moved under the staking tags.
 - A token's transfer is what it moved, with its amount, currency and recipient in the same columns, from the wallet's record of it (`sent.asset`, which `settleSends` keeps), with no value in fiat. An allowance is its fee, saying what it allows and to whom. What the wallet has no record of stays what the chain says: a call, and its fee.
 - A memo with commas, quotes and line breaks comes through, with nothing in it that hides or reorders what it says, and is never read as a formula.
+- A migration's side on its own chain, given as `evm` (`migrationFacts` of `/bridge`), has lines of its own before its payout's: what its approval and it paid in gas there, in that chain's coin, as costs, each at its own time, with its own hash and its EVM address as the account. They're in the file of the payout's period.
 - `rows` must be all of the period's: read the history down to it first. What was left out is counted: on its way, not looked up yet, or outside the period.
 
 ## Sozu
@@ -277,11 +317,16 @@ sozuPosition({ rows, status, facts, complete });
 sozuYear({ amount, nativeRate, status }); // { rate: 0.204, depositFee, worth, rewards, earned }: `earned` after Sozu's share and the deposit fee
 sozuRateLine({ provisioners, tipHeight, status });
 // "15.5 DUSK a block to stakers, 203.6M DUSK staked now: about 24% a year. Less Sozu's 15%: about 20%, and a little over as it restakes rewards every hour."
+
+const growth = await sozuGrowth({ archive, pool: status.contracts.pool, status, cache }); // what stDUSK did, from the chain
+sozuRate(nativeRate, status, growth); // 0.204: the rate, once it's read
+sozuRateLine({ growth }); // "stDUSK went from 1.2740 to 1.2953 DUSK over the last 30 days, after Sozu's share."
 ```
 
 - `status` is what `readSozuStatus` of `@dusk-network/networks/sozu` gives, or the same figures as the extension's engine names them, and `rows` are `/activity`'s, all of them; `complete` is `read()`'s, without which `earned` is null. Earned is what's left of worth now and what was taken out, once what was put in, its deposit fees aside, is off: the five add up to the lux. Deposit fees are worked out at today's rate where `facts` doesn't have them (`feesExact`).
 - `sozuFacts` reads the pool's own event in each transaction, and the stDUSK an unstake burned from the token's transfer in it, a request for each 25, without a data driver. With `cache`, a `Map` of text does, each is read once.
 - `sozuRate` is Sozu's rate as both wallets work it out: from native staking's as it's shown, to the percent. `sozuRateLine` takes the node's provisioners for what a block pays and what's staked, or `nativeRate` alone for the rate.
+- `sozuGrowth` reads how stDUSK grew over the last 30 days (`days`), from the chain: the pool's hourly restake near the tip and near the period's start, among the transactions calling it, and what one stDUSK was worth after each, as the pool's reward event says. That growth is what a holder earned, Sozu's share off. Given it, `sozuRate`, `sozuYear` and `sozuRateLine` go by it, so the rate shown, what an amount earns and the line agree. Two or three requests, about 120 kB on mainnet, kept in `cache` for an hour; null where it can't be read, or where the latest restake isn't the pool's rate `status` read: then the rate is worked out as before.
 
 ## Bridge
 
@@ -326,7 +371,18 @@ transferLedger({ network, route: "dusk-to-bsc", sent: amountLux, networkFee: [fe
 // ledger.lines: [{ key: "sent", amount, decimals, coin: "DUSK", text: "0.19", exact: "0.190082082", expected: false }, { key: "bridgeFee", … }, { key: "networkFee", … }, { key: "received", … }, { key: "gas", … }]
 ```
 
-Each app shows the same numbers: a row a line's `text`, its detail `exact`. A line is there only where it's known, and a route without such a fee has none. `received` is what arrived, or until then what will (`expected`), and `gas` what was paid in the other chain's coin. Of a transfer that failed, only its fee is left. What left an account holds a gas refund it paid another, which isn't the transfer's.
+Each app shows the same numbers: a row a line's `text`, its detail `exact`. A line is there only where it's known, and a route without such a fee has none. `received` is what arrived, or until then what will (`expected`), and `gas` what was paid in the other chain's coin. Of a transfer that failed, only its fee is left. What left an account holds a gas refund it paid another, which isn't the transfer's; a value from the wallet's own record holds none, as `/requests` reads it too.
+
+```js
+import { migrationFacts, migrationsOf, transferLedger } from "@dusk-network/app-core/bridge";
+
+const evm = await migrationFacts({ network: chainId, migrations: migrationsOf(rows), fetch, cache }); // or [{ hash, route, approval }] the app keeps
+transferLedger({ row, evm: evm.get(row.memo) }).gas; // { key: "gas", coin: "BNB", exact: "0.00000474855", parts: ["approval", "migration"], … }
+```
+
+- A migration's gas is what it paid on its own chain and what the approval it spent paid, to the wei, whichever app signed either and whenever: the approval is the owner's latest of the route's contract on its token before the migration, found among their logs read back from the migration's block, 5,000 blocks first and twice as many each window after, 75,000 at most. The token writes an approval of what's left as a migration spends one: that's no approval. Where an earlier migration spent from the same approval, its fee is that one's (`approvalState: "earlier"`): a transfer to the contract between them spent from it where the token wrote an approval in it too, and the owner's own transfer to the contract didn't; where the token writes none as it's spent, that can't be told, and the approval's fee isn't counted (`"uncertain"`). An RPC that no longer gives logs that far back says nothing, and that's said too (`"unread"`): the migration's gas alone, its `parts` saying so. With the approval's hash (`approval`), the logs are read all the same, for an earlier migration that spent it first; where they can't say, it counts only when the owner sent it right before the migration, by their nonce. A migration that failed spent no approval.
+- `migrationsOf` gives the migrations `/activity`'s rows were paid for: a migration's payout on Dusk has its hash as the memo.
+- A transfer to BNB Smart Chain brings no gas money on mainnet: its payout address only mints and pays out the token. The 0.01 ETH testnet's test chain sends a recipient that holds little comes from a wallet of the test chain's own, and isn't the transfer's.
 
 ### A route's status
 
@@ -389,4 +445,4 @@ const claimCall = await withdrawals.claimCall(txHash, { submitter: account }); /
 
 ## License
 
-MPL-2.0
+MPL-2.0. `src/confusables.js` is Unicode's data, © Unicode, Inc., under the [Unicode License v3](https://www.unicode.org/license.txt).

@@ -5,7 +5,7 @@ import { nativeRateEstimate, sozuRateEstimate } from "@dusk-network/networks/rat
 import { sozuFee, sozuStake } from "@dusk-network/networks/sozu";
 
 import { activityRows } from "../src/activity.js";
-import { sozuFacts, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
+import { GROWTH_MAX_AGE_MS, sozuFacts, sozuGrowth, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
 import { DUSK, POOL, entryFrom, entryOf, hash } from "./fixtures/activity.js";
 import { readFixture } from "./fixtures/helpers.js";
 
@@ -319,5 +319,150 @@ describe("what Sozu pays", () => {
     const line = /** @type {string} */ (sozuRateLine({ locale: "de-DE", provisioners, status: { fees: FEES }, tipHeight }));
 
     assert.match(line, /^15,5 DUSK a block to stakers, 203,6\sMio\. DUSK staked now/);
+  });
+});
+
+describe("how Sozu's stDUSK grew", () => {
+  // What the archives answered on 2026-11-06: the tip, the pool's transactions
+  // and the events of the blocks with a restake read.
+  const { networks: chains } = readFixture("sozu-growth.json");
+  const HOUR = 3_600_000;
+
+  /**
+   * An archive that answers the tip, a contract's transactions in a range of
+   * blocks and a block's events, from a network's recording; `queries` keeps
+   * each query.
+   *
+   * @param {any} chain
+   */
+  const archiveOf = (chain) => {
+    /** @type {string[]} */
+    const queries = [];
+
+    return {
+      queries,
+      query: async (/** @type {string} */ query) => {
+        queries.push(query);
+
+        /** @type {Record<string, any>} */
+        const data = {};
+
+        if (query.includes("tip: block(height: -1) { header { height } }")) data.tip = { header: { height: chain.tip } };
+        for (const [, alias, from, to, contract] of query.matchAll(/(\w+): blockTxs\(range: \[(\d+), (\d+)\], contract: "([0-9a-f]+)"\)/g)) {
+          assert.ok(Number(to) - Number(from) < 200, "the archive lists 200 blocks at most");
+          data[alias] = contract === chain.pool ? chain.txs.filter((/** @type {any} */ tx) => tx.blockHeight >= Number(from) && tx.blockHeight <= Number(to)) : [];
+        }
+        for (const [, alias, height] of query.matchAll(/(\w+): contractEvents\(height: (\d+)\)/g)) data[alias] = { json: chain.events[height] ?? [] };
+
+        return data;
+      },
+    };
+  };
+  it("measures it from the pool's own restakes, 30 days apart, as Lena did", async () => {
+    // Mainnet: 1.2740 DUSK a stDUSK on 7 October, 1.2953 on 6 November.
+    const growth = /** @type {any} */ (await sozuGrowth({ archive: archiveOf(chains.mainnet), pool: chains.mainnet.pool }));
+
+    assert.equal(growth.days, 30);
+    assert.deepEqual(growth.from, { at: Date.UTC(2026, 9, 7, 11, 5, 17), height: 5_431_889, stake: 42_109_694_827_953_470n, supply: 33_053_801_993_391_055n });
+    assert.equal(growth.to.height, 5_690_984);
+    assert.equal(Math.round(growth.rate * 1000) / 1000, 0.204);
+    assert.equal(sozuRateLine({ growth, locale: "en-GB" }), "stDUSK went from 1.2740 to 1.2953 DUSK over the last 30 days, after Sozu's share.");
+    assert.equal(sozuRateLine({ growth, locale: "de-DE", nativeRate: NATIVE, provisioners, tipHeight }), "stDUSK went from 1,2740 to 1,2953 DUSK over the last 30 days, after Sozu's share.");
+  });
+
+  it("is the rate shown and what an amount earns, so the line and the figure agree", async () => {
+    // Testnet's grew faster than the network's estimate says now.
+    const growth = /** @type {any} */ (await sozuGrowth({ archive: archiveOf(chains.testnet), pool: chains.testnet.pool }));
+    const percent = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0, style: "percent" });
+
+    assert.equal(sozuRateLine({ growth, locale: "en-GB" }), "stDUSK went from 2.8973 to 3.1513 DUSK over the last 30 days, after Sozu's share.");
+    assert.equal(percent.format(/** @type {number} */ (sozuRate(NATIVE, STATUS, growth))), "107%");
+    assert.notEqual(sozuRate(NATIVE, STATUS, growth), sozuRate(NATIVE, STATUS));
+
+    const year = sozuYear({ amount: 100n * DUSK, growth, nativeRate: NATIVE, status: STATUS });
+
+    assert.equal(year.rate, growth.rate);
+    assert.equal(year.rewards, (/** @type {bigint} */ (year.worth) * BigInt(Math.round(growth.rate * 1e9))) / 1_000_000_000n);
+  });
+
+  it("takes three requests, keeps what it read for an hour, and makes one of two reads at once", async () => {
+    const archive = archiveOf(chains.mainnet);
+    const cache = new Map();
+    const now = Date.UTC(2026, 10, 6, 12);
+    const [first, second] = await Promise.all([0, 1].map(() => sozuGrowth({ archive, cache, now, pool: chains.mainnet.pool })));
+
+    assert.equal(archive.queries.length, 3);
+    assert.deepEqual(first, second);
+    assert.deepEqual(await sozuGrowth({ archive, cache, now: now + HOUR - 1, pool: chains.mainnet.pool }), first);
+    assert.equal(archive.queries.length, 3);
+
+    await sozuGrowth({ archive, cache, now: now + GROWTH_MAX_AGE_MS, pool: chains.mainnet.pool });
+    assert.equal(archive.queries.length, 6);
+
+    // With the tip the app has read, two.
+    const told = archiveOf(chains.mainnet);
+
+    assert.deepEqual(await sozuGrowth({ archive: told, pool: chains.mainnet.pool, tipHeight: chains.mainnet.tip }), first);
+    assert.equal(told.queries.length, 2);
+  });
+
+  it("takes the pool the status names, and checks its figures against the rate now", async () => {
+    const growth = /** @type {any} */ (await sozuGrowth({ archive: archiveOf(chains.mainnet), pool: chains.mainnet.pool }));
+    // The pool's rate as its latest restake left it.
+    const now = { stake: growth.to.stake, supply: growth.to.supply };
+
+    assert.deepEqual(await sozuGrowth({ archive: archiveOf(chains.mainnet), status: /** @type {any} */ ({ contracts: { pool: chains.mainnet.pool }, pool: now }) }), growth);
+    // Figures that aren't the pool's rate now aren't the pool's.
+    assert.equal(await sozuGrowth({ archive: archiveOf(chains.mainnet), pool: chains.mainnet.pool, status: /** @type {any} */ ({ pool: { stake: now.stake * 2n, supply: now.supply } }) }), null);
+  });
+
+  it("checks each caller's own status, also against what's kept or read at once for another", async () => {
+    const cache = new Map();
+    const archive = archiveOf(chains.mainnet);
+    const growth = /** @type {any} */ (await sozuGrowth({ archive, cache, pool: chains.mainnet.pool }));
+    const off = /** @type {any} */ ({ pool: { stake: growth.to.stake * 2n, supply: growth.to.supply } });
+
+    // Kept without a status, it's still not the pool's for a status it doesn't match.
+    assert.equal(await sozuGrowth({ archive, cache, pool: chains.mainnet.pool, status: off }), null);
+
+    // Read once for two callers at once: each gets its own answer.
+    const both = new Map();
+    const [plain, checked] = await Promise.all([
+      sozuGrowth({ archive: archiveOf(chains.mainnet), cache: both, pool: chains.mainnet.pool }),
+      sozuGrowth({ archive: archiveOf(chains.mainnet), cache: both, pool: chains.mainnet.pool, status: off }),
+    ]);
+
+    assert.deepEqual(plain, growth);
+    assert.equal(checked, null);
+  });
+
+  it("is nothing, and throws nothing, for a status whose pool has no stake or no stDUSK", async () => {
+    const cache = new Map();
+    const archive = archiveOf(chains.mainnet);
+
+    await sozuGrowth({ archive, cache, pool: chains.mainnet.pool });
+    for (const pool of [{ stake: 0n, supply: 1n }, { stake: 1n, supply: 0n }]) {
+      assert.equal(await sozuGrowth({ archive, cache, pool: chains.mainnet.pool, status: /** @type {any} */ ({ pool }) }), null);
+      assert.equal(await sozuGrowth({ archive: archiveOf(chains.mainnet), pool: chains.mainnet.pool, status: /** @type {any} */ ({ pool }) }), null);
+    }
+  });
+
+  it("is nothing where no restake is found at either end, or the archive can't be read: the rate is worked out as before", async () => {
+    const none = { ...chains.mainnet, txs: chains.mainnet.txs.filter((/** @type {any} */ tx) => tx.blockHeight > chains.mainnet.tip - 1000) };
+
+    assert.equal(await sozuGrowth({ archive: archiveOf(none), pool: chains.mainnet.pool }), null);
+    assert.equal(
+      await sozuGrowth({
+        archive: {
+          query: async () => {
+            throw new Error("The archive answers with HTTP 502");
+          },
+        },
+        pool: chains.mainnet.pool,
+      }),
+      null
+    );
+    assert.equal(await sozuGrowth({ archive: archiveOf(chains.mainnet), pool: "not a pool" }), null);
+    assert.equal(sozuRateLine({ growth: null, nativeRate: 0.2, status: STATUS, locale: "en-GB" }), sozuRateLine({ nativeRate: 0.2, status: STATUS, locale: "en-GB" }));
   });
 });
