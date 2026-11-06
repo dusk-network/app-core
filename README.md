@@ -371,7 +371,7 @@ transferLedger({ network, route: "dusk-to-bsc", sent: amountLux, networkFee: [fe
 // ledger.lines: [{ key: "sent", amount, decimals, coin: "DUSK", text: "0.19", exact: "0.190082082", expected: false }, { key: "bridgeFee", … }, { key: "networkFee", … }, { key: "received", … }, { key: "gas", … }]
 ```
 
-Each app shows the same numbers: a row a line's `text`, its detail `exact`. A line is there only where it's known, and a route without such a fee has none. `received` is what arrived, or until then what will (`expected`), and `gas` what was paid in the other chain's coin. Of a transfer that failed, only its fee is left. What left an account holds a gas refund it paid another, which isn't the transfer's.
+Each app shows the same numbers: a row a line's `text`, its detail `exact`. A line is there only where it's known, and a route without such a fee has none. `received` is what arrived, or until then what will (`expected`), and `gas` what was paid in the other chain's coin. Of a transfer that failed, only its fee is left. What left an account holds a gas refund it paid another, which isn't the transfer's; a value from the wallet's own record holds none, as `/requests` reads it too.
 
 ```js
 import { migrationFacts, migrationsOf, transferLedger } from "@dusk-network/app-core/bridge";

@@ -8,9 +8,9 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
 const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./names", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
-const SHARED = ["./src/bridge-common.js", "./src/bridge-evm.js", "./src/bridge-ledger.js", "./src/bridge-status.js", "./src/confusables.js"];
-/** The shared modules that are data, which import nothing. */
-const DATA = ["./src/confusables.js"];
+const SHARED = ["./src/bridge-common.js", "./src/bridge-evm.js", "./src/bridge-ledger.js", "./src/bridge-status.js", "./src/confusables.js", "./src/moved.js"];
+/** The shared modules that need nothing: data, and one rule. */
+const DATA = ["./src/confusables.js", "./src/moved.js"];
 /** The entry points that need nothing from anywhere. */
 const SELF_CONTAINED = ["./amounts", "./text"];
 /** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
@@ -254,6 +254,7 @@ describe("the package", () => {
       "src/export.js",
       "src/history.d.ts",
       "src/history.js",
+      "src/moved.js",
       "src/names.d.ts",
       "src/names.js",
       "src/payment-links.d.ts",

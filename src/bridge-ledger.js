@@ -10,6 +10,7 @@ import { routes } from "@dusk-network/networks";
 
 import { amountLocale, formatAmount } from "./amounts.js";
 import { luxOf, networkOf } from "./bridge-common.js";
+import { movedBy } from "./moved.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
 /** @typedef {import("./bridge.js").LedgerInput} LedgerInput */
@@ -37,8 +38,7 @@ const known = (value) => (value === undefined || value === null || value === "" 
  * @returns {{ kind: Route["kind"] | null, route: Route | null, sent: bigint | null, received: bigint | null }}
  */
 function factsOfRow(row) {
-  const refund = luxOf(row.entry?.refund) ?? 0n;
-  const moved = row.value > refund ? row.value - refund : 0n;
+  const moved = movedBy(row);
   const step = row.bridge?.step;
 
   if (step === "deposit") return { kind: "duskevm-deposit", received: null, route: null, sent: known(row.bridge?.amount) ?? row.value };

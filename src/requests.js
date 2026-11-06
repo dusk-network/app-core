@@ -7,6 +7,7 @@
  * @module
  */
 
+import { movedBy } from "./moved.js";
 import { recipientKind } from "./payment-links.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
@@ -23,23 +24,6 @@ export const AGAIN_MS = 10 * 60_000;
 
 /** @param {string | null | undefined} memo */
 const memoOf = (memo) => (memo ?? "").trim();
-
-/**
- * What a row's transfer moved: its value, less the gas refund its transaction
- * paid to another account than its sender, which isn't the transfer's. A
- * value that's the wallet's record's, as one on chain before its details are
- * read has, holds no refund.
- *
- * @param {ActivityRow} row
- */
-function movedBy(row) {
-  const sentAmount = /** @type {any} */ (row.sent)?.amount;
-  const chains = !row.sent || row.entry?.success === true || sentAmount === undefined || sentAmount === null;
-  const raw = /** @type {unknown} */ (chains ? row.entry?.refund : undefined);
-  const refund = typeof raw === "bigint" ? raw : /^\d+$/.test(String(raw ?? "")) ? BigInt(String(raw)) : 0n;
-
-  return row.value > refund ? row.value - refund : 0n;
-}
 
 /**
  * What a payment has of what a request asked: null for nothing, for a payment

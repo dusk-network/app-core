@@ -101,6 +101,14 @@ describe("a transfer's ledger", () => {
     assert.equal(/** @type {any} */ (transferLedger({ row: /** @type {any} */ (refunded) })).sent.amount, row.value);
   });
 
+  it("takes no refund out of what the wallet's record says it sent, which holds none", () => {
+    // On chain before its details are read: the row's value is the record's.
+    const row = serviceRow();
+    const recorded = { ...row, entry: { ...row.entry, refund: 500n, success: undefined }, sent: { amount: String(row.value), hash: row.hash }, value: row.value };
+
+    assert.equal(/** @type {any} */ (transferLedger({ row: /** @type {any} */ (recorded) })).sent.amount, row.value);
+  });
+
   it("says nothing arrives of one the fee takes whole, and of one the bridge won't pay", () => {
     const under = /** @type {any} */ (transferLedger({ network: 1, route: "dusk-to-bsc", sent: 1_000_000_000n }));
 
