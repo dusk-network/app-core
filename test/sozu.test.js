@@ -131,6 +131,20 @@ describe("what a stake with Sozu did", () => {
     assert.equal(/** @type {any} */ (again.get(recording.stakes[1].origin)).stDusk, tokenTransfer(recording.stakes[1]));
   });
 
+  it("reads again what a cache from 0.7.1 kept, which could be a lux short", async () => {
+    const archive = archiveOf(recording.stakes);
+    const cache = new Map();
+
+    await sozuFacts({ account: ACCOUNT, archive, cache, rows: STAKES });
+
+    // As 0.7.1 kept them: under its own key, an unstake's stDUSK a lux short.
+    const old = new Map([...cache].map(([key, text]) => [key.replace(/^sozu2:/, "sozu:"), text.replace(/"stDusk":"(\d+)"/, (_, n) => `"stDusk":"${BigInt(n) - 1n}"`)]));
+    const read = await sozuFacts({ account: ACCOUNT, archive, cache: old, rows: STAKES });
+
+    assert.equal(archive.asked.length, 2);
+    assert.equal(/** @type {any} */ (read.get(recording.stakes[1].origin)).stDusk, tokenTransfer(recording.stakes[1]));
+  });
+
   it("leaves out what the archive doesn't list yet, and what doesn't read as the row's", async () => {
     const archive = archiveOf([]);
 

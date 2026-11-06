@@ -231,6 +231,10 @@ function factKept(text) {
   }
 }
 
+// What a cache keeps a fact under. 0.7.1 read some unstakes a lux short and
+// kept them under "sozu:": a new key reads them again.
+const CACHE_KEY = "sozu2:";
+
 /**
  * @param {{ archive: Pick<Archive, "query">, account: string, rows: Iterable<ActivityRow>, cache?: FactCache }} options
  * @returns {Promise<Map<string, SozuFact>>}
@@ -244,7 +248,7 @@ export async function sozuFacts({ account, archive, cache, rows }) {
   for (const row of rows ?? []) {
     if (!went(row) || row.source !== "public" || row.blockHeight === null || facts.has(row.hash) || !CONTRACT_ID.test(String(row.contractId ?? ""))) continue;
 
-    const kept = factKept(cache?.get(`sozu:${row.hash}`));
+    const kept = factKept(cache?.get(`${CACHE_KEY}${row.hash}`));
 
     if (kept) facts.set(row.hash, kept);
     else asked.push(row);
@@ -266,7 +270,7 @@ export async function sozuFacts({ account, archive, cache, rows }) {
       if (!fact) continue;
 
       facts.set(row.hash, fact);
-      cache?.set(`sozu:${row.hash}`, keptOf(fact));
+      cache?.set(`${CACHE_KEY}${row.hash}`, keptOf(fact));
     }
   }
 
