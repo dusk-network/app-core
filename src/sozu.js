@@ -352,12 +352,13 @@ function pointOf(list, restake, pool) {
 }
 
 /**
- * How much more a's stDUSK is worth than b's, as a share.
+ * How much more a's stDUSK is worth than b's, as a share: null where either
+ * has nothing to divide by.
  *
  * @param {{ stake: bigint, supply: bigint }} a
  * @param {{ stake: bigint, supply: bigint }} b
  */
-const grownBy = (a, b) => Number((a.stake * b.supply * GROWTH_SCALE) / (a.supply * b.stake) - GROWTH_SCALE) / Number(GROWTH_SCALE);
+const grownBy = (a, b) => (a.supply > 0n && b.stake > 0n ? Number((a.stake * b.supply * GROWTH_SCALE) / (a.supply * b.stake) - GROWTH_SCALE) / Number(GROWTH_SCALE) : null);
 
 /** @param {SozuGrowth} growth */
 const growthKept = (growth) =>
@@ -394,7 +395,11 @@ export async function sozuGrowth({ archive, cache, days = GROWTH_DAYS, maxAgeMs 
   // The growth as this caller has it: none where its status's rate now isn't
   // the latest restake's, as then what was read isn't the pool's figures.
   /** @param {SozuGrowth | null} growth */
-  const ofCaller = (growth) => (growth && (!figures || Math.abs(grownBy(growth.to, figures)) <= RATE_TOLERANCE) ? growth : null);
+  const ofCaller = (growth) => {
+    const apart = growth && figures ? grownBy(growth.to, figures) : 0;
+
+    return growth && apart !== null && Math.abs(apart) <= RATE_TOLERANCE ? growth : null;
+  };
   const kept = growthRead(cache?.get(key));
 
   if (kept && now - kept.readAt >= 0 && now - kept.readAt < maxAgeMs) return ofCaller(kept.growth);
@@ -460,7 +465,9 @@ async function readGrowth(archive, id, days, tipHeight) {
 
     if (!from || !to || span <= 0) return null;
 
-    return { days: Math.round(span / DAY_MS), from, rate: (grownBy(to, from) * YEAR_MS) / span, to };
+    const grown = grownBy(to, from);
+
+    return grown === null ? null : { days: Math.round(span / DAY_MS), from, rate: (grown * YEAR_MS) / span, to };
   } catch {
     // What can't be read says nothing: the rate as it's worked out stands.
     return null;

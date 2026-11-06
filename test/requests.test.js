@@ -66,6 +66,21 @@ describe("what came in for each request", () => {
     }
   });
 
+  it("reads a memo of bytes as no text, which no request's memo is", () => {
+    // Codex's: byte 00 comes as the memo "0x00", marked as bytes.
+    const bytes = payment({ entry: { memoBinary: true }, memo: "0x00" });
+
+    like(matchRequests([asked({ memo: "0x00" })], [bytes]).get("a"), { matched: "amount", state: "check" });
+    assert.deepEqual(matchRequests([asked({ lux: null, memo: "0x00" })], [bytes]).get("a"), { state: "waiting" });
+  });
+
+  it("reads a request's memo as its link sends it, without the spaces around it", () => {
+    like(matchRequests([asked({ memo: "  Factura 33 " })], [payment()]).get("a"), { matched: "amount-memo", state: "paid" });
+    like(matchRequests([asked({ lux: null, memo: " Factura 33" })], [payment({ value: 9n })]).get("a"), { matched: "amount-memo", state: "paid" });
+    // A memo of spaces asks for none.
+    assert.deepEqual(matchRequests([asked({ lux: null, memo: "   " })], [payment({ memo: "" })]).get("a"), { state: "waiting" });
+  });
+
   it("reads what a payment paid, without the gas refund its transaction paid to the account with it", () => {
     const refunded = payment({ entry: { refund: 3_000n }, value: LUX + 3_000n });
 
@@ -174,6 +189,10 @@ describe("the payment a send would make again", () => {
     like(sentAlready([sent({ entry: { refund: 2_000n, success: true }, value: 1_900_000n + 2_000n })], again), { hash: "s1" });
     // On chain before its details are read, its value is the wallet's record's, which has no refund in it.
     like(sentAlready([sent({ entry: { refund: 3_000n }, sent: { amount: "1900000" }, value: 1_900_000n })], again), { hash: "s1" });
+  });
+
+  it("is none for a send whose memo was bytes, though they read as the memo typed", () => {
+    assert.equal(sentAlready([sent({ entry: { memoBinary: true }, memo: "0x00" })], { ...again, memo: "0x00" }), null);
   });
 
   it("is none for a send the node dropped, whatever its memo, though one on its way counts", () => {

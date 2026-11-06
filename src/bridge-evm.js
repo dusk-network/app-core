@@ -213,21 +213,27 @@ async function readMigration(read, { approval: given, hash, head, route, rpcUrl 
   const fact = { ...base, at, block, from: owner, gasWei, lux: went ? moved / WEI_PER_LUX : null, state: went ? "mined" : "failed", totalWei: gasWei };
 
   // A migration that failed spent no approval: the one that spends it counts it.
-  if (!went || !owner) return { fact, final: (await head()) - block >= FINAL_BLOCKS };
+  if (!went || !owner) return { fact, final: at !== null && gasWei !== null && (await head()) - block >= FINAL_BLOCKS };
 
   /** @type {{ state: MigrationEvm["approvalState"], hash?: string }} */
   let spent = await approvalSpent(read, rpcUrl, { block, contract, hash, migrationLogs: logs, owner, token });
 
   // An approval the app names, where the logs can't say which this migration
-  // spent: it's this one's where it allowed exactly what this one sent, as no
-  // earlier migration could have spent from it then.
+  // spent: it's this one's only where the owner sent nothing between them, by
+  // its nonce right before the migration's, so no other approval or spend came between.
   if (given && (spent.state === "unread" || spent.state === "beyond")) {
-    const kept = await read.rpc(rpcUrl, "eth_getTransactionReceipt", [given]);
+    const [kept, approvalTx, migrationTx] = await Promise.all([
+      read.rpc(rpcUrl, "eth_getTransactionReceipt", [given]),
+      read.rpc(rpcUrl, "eth_getTransactionByHash", [given]),
+      read.rpc(rpcUrl, "eth_getTransactionByHash", [hash]),
+    ]);
     /** @type {any[]} */
     const keptLogs = Array.isArray(kept?.logs) ? kept.logs : [];
-    const approval = keptLogs.find((log) => addressOf(log?.address) === token && log?.topics?.[0] === APPROVAL_TOPIC && log.topics[1] === topicOf(owner) && log.topics[2] === topicOf(contract));
+    const approves = keptLogs.some((log) => addressOf(log?.address) === token && log?.topics?.[0] === APPROVAL_TOPIC && log.topics[1] === topicOf(owner) && log.topics[2] === topicOf(contract));
+    const [before, after] = [bigOf(approvalTx?.nonce), bigOf(migrationTx?.nonce)];
+    const next = before !== null && after !== null && before + 1n === after;
 
-    if (approval && addressOf(kept.from) === owner && Number(bigOf(kept.blockNumber) ?? Infinity) <= block && bigOf(approval.data) === moved) spent = { hash: given, state: "found" };
+    if (approves && next && addressOf(kept.from) === owner && addressOf(approvalTx?.from) === owner && Number(bigOf(kept.blockNumber) ?? Infinity) <= block) spent = { hash: given, state: "found" };
   }
 
   if (spent.hash && (spent.state === "found" || spent.state === "earlier")) {
@@ -240,8 +246,8 @@ async function readMigration(read, { approval: given, hash, head, route, rpcUrl 
 
   fact.approvalState = spent.state;
 
-  // Kept for good once it's final and all of it was read: the approval's receipt too.
-  const whole = spent.state !== "unread" && (!fact.approval || (fact.approval.gasWei !== null && fact.approval.at !== null));
+  // Kept for good once it's final and all of it was read: its own time and gas, and the approval's receipt.
+  const whole = at !== null && gasWei !== null && spent.state !== "unread" && (!fact.approval || (fact.approval.gasWei !== null && fact.approval.at !== null));
 
   return { fact, final: whole && (await head()) - block >= FINAL_BLOCKS };
 }

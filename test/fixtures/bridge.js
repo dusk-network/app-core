@@ -121,12 +121,13 @@ export const tokenTransfer = ({ block, from, hash, to, token, wei }) => ({
  * blocks asked, from the contract asked, matching the topics asked (null
  * matching any, a list any of its own), in their order (a log's `index`);
  * with their block's time when `stamps` (as DuskEVM's RPC gives it); and
- * transactions' `receipts`, by hash. It refuses to search more than
+ * transactions' `receipts` and the `transactions` themselves, by hash. It
+ * refuses to search more than
  * `maxRange` blocks at once, as some RPCs do. `calls` keeps each call.
  *
- * @param {{ head: bigint | number, timeAt?: (n: bigint) => number, logs?: any[], receipts?: Record<string, any>, maxRange?: bigint, stamps?: boolean, url?: string }} options
+ * @param {{ head: bigint | number, timeAt?: (n: bigint) => number, logs?: any[], receipts?: Record<string, any>, transactions?: Record<string, any>, maxRange?: bigint, stamps?: boolean, url?: string }} options
  */
-export function fakeChain({ head, logs = [], maxRange, receipts = {}, stamps = false, timeAt = (n) => 1_792_980_000 + Number(n), url }) {
+export function fakeChain({ head, logs = [], maxRange, receipts = {}, stamps = false, timeAt = (n) => 1_792_980_000 + Number(n), transactions = {}, url }) {
   const chain = {
     /** @type {{ method: string, params: any[], url: string }[]} */
     calls: [],
@@ -149,6 +150,7 @@ export function fakeChain({ head, logs = [], maxRange, receipts = {}, stamps = f
       }
 
       if (method === "eth_getTransactionReceipt") return json({ id, jsonrpc: "2.0", result: structuredClone(receipts[String(params[0]).toLowerCase()] ?? null) });
+      if (method === "eth_getTransactionByHash") return json({ id, jsonrpc: "2.0", result: structuredClone(transactions[String(params[0]).toLowerCase()] ?? null) });
 
       if (method === "eth_getLogs") {
         const [filter] = params;

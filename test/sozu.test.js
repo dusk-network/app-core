@@ -436,6 +436,17 @@ describe("how Sozu's stDUSK grew", () => {
     assert.equal(checked, null);
   });
 
+  it("is nothing, and throws nothing, for a status whose pool has no stake or no stDUSK", async () => {
+    const cache = new Map();
+    const archive = archiveOf(chains.mainnet);
+
+    await sozuGrowth({ archive, cache, pool: chains.mainnet.pool });
+    for (const pool of [{ stake: 0n, supply: 1n }, { stake: 1n, supply: 0n }]) {
+      assert.equal(await sozuGrowth({ archive, cache, pool: chains.mainnet.pool, status: /** @type {any} */ ({ pool }) }), null);
+      assert.equal(await sozuGrowth({ archive: archiveOf(chains.mainnet), pool: chains.mainnet.pool, status: /** @type {any} */ ({ pool }) }), null);
+    }
+  });
+
   it("is nothing where no restake is found at either end, or the archive can't be read: the rate is worked out as before", async () => {
     const none = { ...chains.mainnet, txs: chains.mainnet.txs.filter((/** @type {any} */ tx) => tx.blockHeight > chains.mainnet.tip - 1000) };
 

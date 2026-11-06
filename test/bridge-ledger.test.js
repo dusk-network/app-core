@@ -216,13 +216,14 @@ describe("a migration's side on its own chain", () => {
    *
    * @param {{ drop?: string[], logs?: boolean, maxRange?: bigint, receipts?: Record<string, any> }} [options]
    */
-  const chainOf = ({ drop = [], logs = true, maxRange, receipts = {} } = {}) =>
+  const chainOf = ({ drop = [], logs = true, maxRange, receipts = {}, transactions = {} } = {}) =>
     fakeChain({
       head: BigInt(bsc.head),
       logs: logs ? bsc.logs.filter((/** @type {any} */ log) => !drop.includes(log.transactionHash)).map(asLog) : [],
       maxRange,
       receipts: { ...Object.fromEntries(Object.entries(bsc.receipts).filter(([hash]) => !drop.includes(hash))), ...receipts },
       timeAt: (n) => Number(BigInt(bsc.blocks[hex(n)]?.timestamp ?? "0x0")),
+      transactions: { ...bsc.transactions, ...transactions },
     });
   const [payout] = activityRows({
     account: bsc.payouts.entries[0].events[0].data.receiver,
@@ -275,13 +276,13 @@ describe("a migration's side on its own chain", () => {
     like(facts.get(secondMigration), { approvalState: "earlier", totalWei: 2_437_650_000_000n });
   });
 
-  it("counts an approval the app names where the logs can't be read only when it allowed exactly what the migration sent", async () => {
-    // The first approval allowed what the first migration sent, to the wei: it can only be that one's.
+  it("counts an approval the app names where the logs can't be read only when the owner sent it right before the migration", async () => {
+    // The first approval is the owner's transaction right before the first migration: it can only be that one's.
     const own = await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ approval: firstApproval, hash: firstMigration, route }], network: 1 });
 
     like(own.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
 
-    // Named for the second migration, which sent another amount: not counted, as it can't be told.
+    // Named for the second migration, with another approval between them: not counted, as it can't be told.
     const other = await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ approval: firstApproval, hash: secondMigration, route }], network: 1 });
 
     like(other.get(secondMigration), { approvalState: "unread", totalWei: 2_437_650_000_000n });
@@ -337,6 +338,33 @@ describe("a migration's side on its own chain", () => {
     const later = await migrationFacts({ cache, fetch: chainOf().fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
 
     like(later.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+  });
+
+  it("counts no approval the app names, where the logs can't be read, but the one sent right before", async () => {
+    // Codex's: approve X, migrate X, approve X, migrate X. The first approval named for the second
+    // migration allowed what it sent too, but the owner sent another approval between them.
+    const sameAmount = { ...bsc.receipts[secondMigration], logs: bsc.receipts[secondMigration].logs.map((/** @type {any} */ log) => ({ ...log, data: bsc.receipts[firstMigration].logs[0].data })) };
+    const unread = chainOf({ logs: false, receipts: { [secondMigration]: sameAmount } });
+
+    like((await migrationFacts({ fetch: unread.fetch, migrations: [{ approval: firstApproval, hash: secondMigration, route }], network: 1 })).get(secondMigration), { approvalState: "unread", totalWei: 2_437_650_000_000n });
+    // The one sent right before it, by the owner's next nonce, is its own.
+    like((await migrationFacts({ fetch: unread.fetch, migrations: [{ approval: secondApproval, hash: secondMigration, route }], network: 1 })).get(secondMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+  });
+
+  it("keeps nothing for good without the migration's own time and gas", async () => {
+    // Logs without their block's time, and the block not given for a moment.
+    const stampless = Object.fromEntries(Object.entries(bsc.receipts).map(([hash, receipt]) => [hash, { ...(/** @type {any} */ (receipt)), logs: (/** @type {any} */ (receipt)).logs.map(({ blockTimestamp, ...log }) => log) }]));
+    const failedHash = `0x${"f".repeat(64)}`;
+    const failed = { ...bsc.receipts[firstMigration], logs: [], status: "0x0", transactionHash: failedHash };
+    const chain = chainOf({ receipts: { ...stampless, [failedHash]: failed } });
+    /** @param {string} input @param {any} init */
+    const noBlocks = async (input, init) => (JSON.parse(init.body).method === "eth_getBlockByNumber" ? new Response(JSON.stringify({ id: 1, jsonrpc: "2.0", result: null })) : chain.fetch(input, init));
+    const cache = new Map();
+    const facts = await migrationFacts({ cache, fetch: noBlocks, migrations: [{ hash: firstMigration, route }, { hash: failedHash, route }], network: 1 });
+
+    like(facts.get(firstMigration), { approvalState: "found", at: null });
+    like(facts.get(failedHash), { at: null, state: "failed" });
+    assert.equal(cache.size, 0);
   });
 
   it("keeps what's final in a cache, and reads it once", async () => {

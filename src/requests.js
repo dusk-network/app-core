@@ -26,6 +26,14 @@ export const AGAIN_MS = 10 * 60_000;
 const memoOf = (memo) => (memo ?? "").trim();
 
 /**
+ * A row's memo as text: null for a memo of bytes, which `/history` gives as
+ * 0x hex, as no text is those bytes.
+ *
+ * @param {ActivityRow} row
+ */
+const textMemoOf = (row) => (row.entry?.memoBinary === true ? null : memoOf(row.memo));
+
+/**
  * What a payment has of what a request asked: null for nothing, for a payment
  * that came before it, or for one to the profile's other address: a request
  * asks on its public account or on its shielded address, not on both. A
@@ -42,7 +50,9 @@ function matchOf(request, row) {
 
   const anyAmount = request.lux === null;
   const sameAmount = request.lux !== null && movedBy(row) === BigInt(request.lux);
-  const sameMemo = request.memo !== "" && memoOf(row.memo) === request.memo;
+  // As its link sends it: without the spaces around it.
+  const asked = memoOf(request.memo);
+  const sameMemo = asked !== "" && textMemoOf(row) === asked;
 
   return (sameAmount || anyAmount) && sameMemo ? "amount-memo" : sameAmount ? "amount" : sameMemo ? "memo" : null;
 }
@@ -157,7 +167,7 @@ export function sentAlready(rows, { lux, memo, now = Date.now(), to }) {
           !row.dropped &&
           row.counterparty === to &&
           movedBy(row) === lux &&
-          memoOf(row.memo) === said &&
+          textMemoOf(row) === said &&
           row.time !== null &&
           (said !== "" || now - row.time < AGAIN_MS)
       )
