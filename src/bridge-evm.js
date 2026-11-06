@@ -216,18 +216,19 @@ async function readMigration(read, { approval: given, hash, head, route, rpcUrl 
   if (!went || !owner) return { fact, final: (await head()) - block >= FINAL_BLOCKS };
 
   /** @type {{ state: MigrationEvm["approvalState"], hash?: string }} */
-  let spent = { state: "beyond" };
+  let spent = await approvalSpent(read, rpcUrl, { block, contract, hash, migrationLogs: logs, owner, token });
 
-  if (given) {
+  // An approval the app names, where the logs can't say which this migration
+  // spent: it's this one's where it allowed exactly what this one sent, as no
+  // earlier migration could have spent from it then.
+  if (given && (spent.state === "unread" || spent.state === "beyond")) {
     const kept = await read.rpc(rpcUrl, "eth_getTransactionReceipt", [given]);
     /** @type {any[]} */
     const keptLogs = Array.isArray(kept?.logs) ? kept.logs : [];
-    const approves = keptLogs.some((log) => addressOf(log?.address) === token && log?.topics?.[0] === APPROVAL_TOPIC && log.topics[1] === topicOf(owner) && log.topics[2] === topicOf(contract));
+    const approval = keptLogs.find((log) => addressOf(log?.address) === token && log?.topics?.[0] === APPROVAL_TOPIC && log.topics[1] === topicOf(owner) && log.topics[2] === topicOf(contract));
 
-    if (kept && approves && addressOf(kept.from) === owner && Number(bigOf(kept.blockNumber) ?? Infinity) <= block) spent = { hash: given, state: "found" };
+    if (approval && addressOf(kept.from) === owner && Number(bigOf(kept.blockNumber) ?? Infinity) <= block && bigOf(approval.data) === moved) spent = { hash: given, state: "found" };
   }
-
-  if (spent.state !== "found") spent = await approvalSpent(read, rpcUrl, { block, contract, hash, migrationLogs: logs, owner, token });
 
   if (spent.hash && (spent.state === "found" || spent.state === "earlier")) {
     const approvalReceipt = await read.rpc(rpcUrl, "eth_getTransactionReceipt", [spent.hash]);

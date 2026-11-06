@@ -86,7 +86,9 @@ export type RequestMatch = {
 
 /**
  * What came in for each request, by its ID, from `/activity`'s rows: a
- * payment received, through or final, to the address a request asked on (a
+ * payment received that went through (`executed`: what's on its way or whose
+ * outcome isn't read may yet fail), by what its transfer paid, without a gas
+ * refund its transaction paid with it, to the address a request asked on (a
  * public payment for a request on the account, a shielded one for a request
  * on the shielded address), from 5 minutes before it was asked on. Each
  * payment answers one request: one with all of a request goes to the oldest
@@ -97,7 +99,8 @@ export declare function matchRequests(requests: ReadonlyArray<KeptRequest>, rows
 
 /**
  * The latest payment a send would make again: out from this profile, not
- * failed, to the same recipient, of the same amount and with the same memo,
+ * failed or dropped (on its way counts), to the same recipient, of the same
+ * amount (its transfer's, without a gas refund to another account) and with the same memo,
  * in the last 10 minutes, or at any time with a memo, as a request paid
  * already. Null for none, and for no recipient or no amount.
  */

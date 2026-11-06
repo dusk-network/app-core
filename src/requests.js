@@ -25,6 +25,19 @@ export const AGAIN_MS = 10 * 60_000;
 const memoOf = (memo) => (memo ?? "").trim();
 
 /**
+ * What a row's transfer moved: its value, less the gas refund its transaction
+ * paid to another account than its sender, which isn't the transfer's.
+ *
+ * @param {ActivityRow} row
+ */
+function movedBy(row) {
+  const raw = /** @type {unknown} */ (row.entry?.refund);
+  const refund = typeof raw === "bigint" ? raw : /^\d+$/.test(String(raw ?? "")) ? BigInt(String(raw)) : 0n;
+
+  return row.value > refund ? row.value - refund : 0n;
+}
+
+/**
  * What a payment has of what a request asked: null for nothing, for a payment
  * that came before it, or for one to the profile's other address: a request
  * asks on its public account or on its shielded address, not on both. A
@@ -40,7 +53,7 @@ function matchOf(request, row) {
   if (row.privacy !== askedOn || row.time === null || row.time === undefined || row.time < request.at - CLOCK_SKEW_MS) return null;
 
   const anyAmount = request.lux === null;
-  const sameAmount = request.lux !== null && row.value === BigInt(request.lux);
+  const sameAmount = request.lux !== null && movedBy(row) === BigInt(request.lux);
   const sameMemo = request.memo !== "" && memoOf(row.memo) === request.memo;
 
   return (sameAmount || anyAmount) && sameMemo ? "amount-memo" : sameAmount ? "amount" : sameMemo ? "memo" : null;
@@ -55,7 +68,8 @@ export function matchRequests(list, rows) {
   /** @type {Map<string, RequestMatch>} */
   const matches = new Map();
   const taken = new Set(list.flatMap(({ paid }) => (paid ? [paid.hash] : [])));
-  const incoming = rows.filter(({ category, status }) => category === "received" && status !== "failed" && status !== "pending").sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
+  // Only what went through: a row whose outcome isn't read, or a record that timed out unconfirmed, may have failed.
+  const incoming = rows.filter(({ category, status }) => category === "received" && status === "executed").sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
   const oldestFirst = [...list].sort((a, b) => a.at - b.at);
 
   /**
@@ -71,7 +85,7 @@ export function matchRequests(list, rows) {
         matches.set(request.id, {
           at: row.time ?? undefined,
           hash: row.hash,
-          lux: row.value,
+          lux: movedBy(row),
           matched,
           memo: memoOf(row.memo),
           state: matched === "amount-memo" ? "paid" : "check",
@@ -109,7 +123,7 @@ export function matchRequests(list, rows) {
 
         if (matched && (matched === "amount-memo") === exact) {
           taken.add(row.hash);
-          extra.set(request.id, [...(extra.get(request.id) ?? []), { at: row.time ?? undefined, hash: row.hash, lux: row.value, matched, memo: memoOf(row.memo) }]);
+          extra.set(request.id, [...(extra.get(request.id) ?? []), { at: row.time ?? undefined, hash: row.hash, lux: movedBy(row), matched, memo: memoOf(row.memo) }]);
         }
       }
     }
@@ -152,8 +166,9 @@ export function sentAlready(rows, { lux, memo, now = Date.now(), to }) {
         (row) =>
           row.direction === "out" &&
           row.status !== "failed" &&
+          !row.dropped &&
           row.counterparty === to &&
-          row.value === lux &&
+          movedBy(row) === lux &&
           memoOf(row.memo) === said &&
           row.time !== null &&
           (said !== "" || now - row.time < AGAIN_MS)

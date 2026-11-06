@@ -59,9 +59,17 @@ describe("what came in for each request", () => {
       payment({ category: "sent" }),
       payment({ time: NOW - HOUR }),
       payment({ time: null }),
+      // A record that timed out unconfirmed, or a row whose outcome isn't read yet: it may have failed.
+      payment({ status: "unknown" }),
     ]) {
       assert.deepEqual(matchRequests([asked()], [row]).get("a"), { state: "waiting" });
     }
+  });
+
+  it("reads what a payment paid, without the gas refund its transaction paid to the account with it", () => {
+    const refunded = payment({ entry: { refund: 3_000n }, value: LUX + 3_000n });
+
+    assert.deepEqual(matchRequests([asked()], [refunded]).get("a"), { at: NOW + HOUR, hash: "h1", lux: LUX, matched: "amount-memo", memo: "Factura 33", state: "paid" });
   });
 
   it("lets a payment answer one request: the one it matches best, then the oldest", () => {
@@ -160,6 +168,17 @@ describe("the payment a send would make again", () => {
     like(sentAlready([sent({ hash: "old", time: NOW - 60_000 }), sent({ hash: "new", time: NOW - 30_000 })], again), { hash: "new" });
     // One on its way counts as well: it's going.
     like(sentAlready([sent({ status: "pending" })], again), { hash: "s1" });
+  });
+
+  it("is a payment whose transaction refunded its unspent gas to another account, by what it paid", () => {
+    like(sentAlready([sent({ entry: { refund: 2_000n }, value: 1_900_000n + 2_000n })], again), { hash: "s1" });
+  });
+
+  it("is none for a send the node dropped, whatever its memo, though one on its way counts", () => {
+    const paid = { ...again, memo: "Factura 044" };
+
+    assert.equal(sentAlready([sent({ dropped: true, memo: "Factura 044", status: "unknown", time: NOW - 5 * AGAIN_MS })], paid), null);
+    like(sentAlready([sent({ memo: "Factura 044", status: "pending" })], paid), { hash: "s1" });
   });
 
   it("is none for another amount or recipient, one that failed, or the same long ago without a memo", () => {

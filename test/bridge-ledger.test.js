@@ -261,6 +261,24 @@ describe("a migration's side on its own chain", () => {
     assert.equal(facts.get(secondMigration)?.approval?.hash, firstApproval);
   });
 
+  it("gives an approval two migrations spent to the first, also where the app names it for the second", async () => {
+    const facts = await migrationFacts({ fetch: chainOf({ drop: [secondApproval] }).fetch, migrations: [{ approval: firstApproval, hash: secondMigration, route }], network: 1 });
+
+    like(facts.get(secondMigration), { approvalState: "earlier", totalWei: 2_437_650_000_000n });
+  });
+
+  it("counts an approval the app names where the logs can't be read only when it allowed exactly what the migration sent", async () => {
+    // The first approval allowed what the first migration sent, to the wei: it can only be that one's.
+    const own = await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ approval: firstApproval, hash: firstMigration, route }], network: 1 });
+
+    like(own.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+
+    // Named for the second migration, which sent another amount: not counted, as it can't be told.
+    const other = await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ approval: firstApproval, hash: secondMigration, route }], network: 1 });
+
+    like(other.get(secondMigration), { approvalState: "unread", totalWei: 2_437_650_000_000n });
+  });
+
   it("says so where the RPC no longer gives the logs, or the approval is further back than it reads", async () => {
     const unread = await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
 
@@ -271,7 +289,7 @@ describe("a migration's side on its own chain", () => {
     like(beyond.get(firstMigration), { approval: null, approvalState: "beyond", totalWei: 2_437_650_000_000n });
   });
 
-  it("reads narrower windows where the RPC refuses wide ones, and nothing back with the approval's hash given", async () => {
+  it("reads narrower windows where the RPC refuses wide ones, and the logs also for an approval the app names", async () => {
     const narrow = chainOf({ maxRange: 2_000n });
 
     like((await migrationFacts({ fetch: narrow.fetch, migrations: [{ hash: firstMigration, route }], network: 1 })).get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
@@ -284,7 +302,8 @@ describe("a migration's side on its own chain", () => {
     const given = chainOf();
 
     like((await migrationFacts({ fetch: given.fetch, migrations: [{ approval: firstApproval, hash: firstMigration, route }], network: 1 })).get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
-    assert.ok(!given.methods().includes("eth_getLogs"));
+    // Read as without it, for an earlier migration that spent from it first.
+    assert.ok(given.methods().includes("eth_getLogs"));
   });
 
   it("counts no approval for a migration that failed, and says what isn't one or isn't there yet", async () => {

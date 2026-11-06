@@ -653,8 +653,10 @@ export type MigrationEvm = {
  * approval it spent and that approval's receipt, from its route's RPC (the
  * network's, or `rpcUrl`). The approval is the owner's latest of the route's
  * contract on its token before the migration, wherever and whenever it was
- * signed, read back from the migration's block a window of blocks at a time;
- * `approval` is one the app has the hash of, which is checked and read first.
+ * signed, read back from the migration's block a window of blocks at a time.
+ * `approval` is one the app has the hash of: where the logs can't say (too far
+ * back, or no longer given), it counts as this migration's when it allowed
+ * exactly what this one sent, as no earlier migration could have spent it.
  * `route` is the migration's route ID, which a network of one migration route
  * needn't give. A few requests each: what's final is kept in `cache` (a `Map`
  * of text does) and not read again.
