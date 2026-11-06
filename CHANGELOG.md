@@ -6,20 +6,18 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 ### Added
 
-- `/requests`: `matchRequests`, what came in for each payment request, and `sentAlready`, the payment a send would make again; a request of no amount paid with its memo is paid
-- `/amounts`: `defaultCurrency`, euros where the browser's region pays in euros and US dollars elsewhere
-- `/bridge`: `migrationFacts`, a migration's side on its own chain: what it and the approval it spent paid in gas, whichever app signed the approval and whenever, and `migrationsOf`, the migrations a profile's payouts were for
-- `/bridge`: `transferLedger` takes a migration's side on its own chain (`evm`), its gas with its approval's, and says what the gas is for (`parts`)
-- `/export`: what a migration's approval and the migration paid in gas on their chain, on lines of their own at their own times and hashes (`evm`)
-- `/names`: `looksAlike`, `sameName` and `nameSkeleton`, names that read the same or look alike by Unicode's confusables, `nameClash`, a contact's name that takes a profile's or another contact's, and `lookAlikes`
-- `/payment-links`: `readPaymentLink`, a link as Send reads it on the wallet's network: what it fills in, or why not, and the network it's for
-
-- `/sozu`: `sozuGrowth`, how stDUSK grew over the last 30 days, from the pool's own restakes on chain; `sozuRate`, `sozuYear` and `sozuRateLine` go by it once it's read
-- `/text`: `displayText` flags a number whose digits read right to left (`rtl_digits`) or mix digit systems (`mixed_digits`)
+- `/amounts`: `defaultCurrency`, euros where the browser's region pays in them, US dollars elsewhere
+- `/bridge`: `migrationFacts` and `migrationsOf`, a migration's gas on its own chain with the approval it spent, which `transferLedger` takes (`evm`)
+- `/export`: a migration's gas and its approval's, on lines of their own (`evm`)
+- `/names`: `looksAlike`, `sameName`, `nameSkeleton`, `nameClash` and `lookAlikes`, by Unicode's confusables
+- `/payment-links`: `readPaymentLink`, a link as Send reads it on the wallet's network, and the network it's for
+- `/requests`: `matchRequests` and `sentAlready`; a request of no amount paid with its memo is paid
+- `/sozu`: `sozuGrowth`, how stDUSK grew over the last 30 days, which `sozuRate`, `sozuYear` and `sozuRateLine` take
+- `/text`: `displayText` flags digits that read right to left (`rtl_digits`) or mix systems (`mixed_digits`)
 
 ### Changed
 
-- `/payment-links`: `parsePaymentLink` refuses a link that says a field twice, or has a user part before its host
+- `/payment-links`: `parsePaymentLink` refuses a link that says a field twice or has a user part before its host
 
 ## [0.7.2]
 
