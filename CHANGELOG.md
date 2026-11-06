@@ -9,6 +9,8 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/requests`: `matchRequests`, what came in for each payment request, and `sentAlready`, the payment a send would make again; a request of no amount paid with its memo is paid
 - `/payment-links`: `readPaymentLink`, a link as Send reads it on the wallet's network: what it fills in, or why not, and the network it's for
 
+- `/text`: `displayText` flags a number whose digits read right to left (`rtl_digits`) or mix digit systems (`mixed_digits`)
+
 ### Changed
 
 - `/payment-links`: `parsePaymentLink` refuses a link that says a field twice, or has a user part before its host

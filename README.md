@@ -67,7 +67,7 @@ displayText(message, { lineBreaks: true, maxChars: 500 }); // for text written i
 displayText(memo, { isolate: true }); // for a screen: right-to-left words set apart, the rest in the order of the bytes
 ```
 
-Text-direction controls, characters that render as nothing, controls and line breaks show as their codes, never left out, so what's shown is what the bytes say; half a character shows as the replacement mark. `neutralized` says whether anything was, for the app to say so, and `flags` what. On a screen, right-to-left letters turn the numbers and words beside them around: `isolate` sets each run of them, and of their digits, apart, so "Pay א 10 א 1000" doesn't read as "Pay א 1000 א 10". It's for display: sign and send the original.
+Text-direction controls, characters that render as nothing, controls and line breaks show as their codes, never left out, so what's shown is what the bytes say; half a character shows as the replacement mark. `neutralized` says whether anything was, for the app to say so, and `flags` what. Some things are only flagged, the text as it was: a number whose digits read right to left (`rtl_digits`), as N'Ko's 0001 that shows as 1000, or mix digit systems (`mixed_digits`), as 1٠5 with an Arabic-Indic zero that looks like a point. On a screen, right-to-left letters turn the numbers and words beside them around: `isolate` sets each run of them, and of their digits, apart, so "Pay א 10 א 1000" doesn't read as "Pay א 1000 א 10". It's for display: sign and send the original.
 
 ## Payment links
 
