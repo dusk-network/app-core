@@ -5,7 +5,7 @@ import { networks } from "@dusk-network/networks";
 
 import { activityRows } from "../src/activity.js";
 import { amountForField, parseDusk, normalizeAmount, decimalSeparator } from "../src/amounts.js";
-import { MAX_MEMO_BYTES, chainLabel, makePaymentLink, networkMismatch, parsePaymentLink, recipientKind } from "../src/payment-links.js";
+import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, MAX_MEMO_BYTES, chainLabel, makePaymentLink, networkMismatch, parsePaymentLink, readPaymentLink, recipientKind } from "../src/payment-links.js";
 import { A, B, recorded } from "./fixtures/activity.js";
 import { like } from "./fixtures/helpers.js";
 
@@ -152,6 +152,76 @@ describe("a link to the web wallet's Send", () => {
 
     assert.equal(custom.https, `https://wallet.example/dashboard/send?to=${A}&network=dusk%3A3735928559`);
     like(parsePaymentLink(custom.https, { walletUrl: "https://wallet.example" }), { chainId: "dusk:3735928559", form: "https" });
+  });
+});
+
+describe("a link as Send reads it, pasted, scanned or opened", () => {
+  const testnetSend = `${networks.testnet.apps.wallet}/dashboard/send`;
+  const mainnetSend = `${networks.mainnet.apps.wallet}/dashboard/send`;
+
+  it("says at once that a request is for another network, the same as a QR code's dusk: link as pasted", () => {
+    // Nandini's and Chen's: a mainnet request, on testnet.
+    const made = makePaymentLink({ amount: "0.0013", language: "en-GB", memo: "Order 1044", network: 1, to: A });
+    const refused = { chainId: "dusk:1", link: null, network: "Mainnet", problem: "This request is for Mainnet. You are on Testnet.", reason: "other-network" };
+
+    assert.deepEqual(readPaymentLink(made.https, { network: 2 }), refused);
+    assert.deepEqual(readPaymentLink(made.dusk, { network: "testnet" }), refused);
+  });
+
+  it("fills in a request for the wallet's network, and says which that is", () => {
+    const made = makePaymentLink({ amount: "0.0013", language: "en-GB", memo: "Order 1044", network: 2, to: A });
+    const read = /** @type {any} */ (readPaymentLink(made.https, { network: networks.testnet }));
+
+    like(read, { chainId: "dusk:2", network: "Testnet", problem: "", reason: "" });
+    assert.deepEqual(read.link, parsePaymentLink(made.https));
+    like(readPaymentLink(made.dusk, { network: 2 })?.link, { amountDusk: "0.0013", form: "dusk", memo: "Order 1044", to: A });
+    // A dusk: link that names no network fills in on any.
+    like(readPaymentLink(`dusk:public-${A}?amount=1`, { network: 1 }), { chainId: "", network: "", reason: "" });
+  });
+
+  it("refuses a link that says a field twice: it could be read two ways", () => {
+    // Marek's.
+    for (const twice of [`to=${A}&amount=0.001&network=testnet&network=mainnet`, `to=${A}&to=${B}&amount=0.001`, `to=${A}&memo=One&memo=Two`, `to=${A}&label=A&label=B`, `to=${A}&amount=0.001&amount=0.001`]) {
+      const link = `${testnetSend}?${twice}`;
+
+      assert.equal(parsePaymentLink(link), null, twice);
+      like(readPaymentLink(link, { network: 2 }), { link: null, problem: LINK_UNREADABLE, reason: "unreadable" }, twice);
+    }
+
+    assert.equal(parsePaymentLink(`dusk:public-${A}?memo=One&memo=Two`), null);
+  });
+
+  it("says amounts that differ, in DUSK and in lux or one of them twice, as two amounts", () => {
+    for (const amounts of ["amount=0.001&amount=0.15", "amount=1&amountLux=1500000000", "amountLux=1&amountLux=2"]) {
+      like(readPaymentLink(`${testnetSend}?to=${A}&${amounts}`, { network: 2 }), { link: null, problem: LINK_TWO_AMOUNTS, reason: "two-amounts" }, amounts);
+      like(readPaymentLink(`dusk:public-${A}@dusk:2?${amounts}`, { network: 2 }), { reason: "two-amounts" }, amounts);
+    }
+
+    // The same amount, in DUSK and in lux, is one.
+    like(readPaymentLink(`${testnetSend}?to=${A}&amount=1.5&amountLux=1500000000`, { network: 2 })?.link, { lux: 1_500_000_000n });
+  });
+
+  it("refuses a user part before the host, which makes a mainnet link read as testnet's", () => {
+    // Marek's: it goes to mainnet's wallet.
+    const disguised = `https://apps.testnet.dusk.network@apps.dusk.network/wallet/dashboard/send?to=${A}&amount=0.001`;
+
+    assert.equal(parsePaymentLink(disguised), null);
+    like(readPaymentLink(disguised, { network: 1 }), { chainId: "", link: null, problem: LINK_UNREADABLE, reason: "unreadable" });
+    assert.equal(parsePaymentLink(`https://user:pass@apps.dusk.network/wallet/dashboard/send?to=${A}`), null);
+    assert.equal(parsePaymentLink(`${mainnetSend}?to=${A}`)?.form, "https");
+  });
+
+  it("refuses a testnet link that says mainnet, rather than filling in nothing without a word", () => {
+    // Marek's.
+    like(readPaymentLink(`${testnetSend}?to=${A}&amount=0.001&network=mainnet`, { network: 2 }), { link: null, problem: LINK_UNREADABLE, reason: "unreadable" });
+  });
+
+  it("is nothing for what isn't a link, which Send reads as a recipient", () => {
+    for (const text of ["", "  ", A, "name.dusk", `https://evil.example/wallet/dashboard/send?to=${A}`, `https://apps.dusk.network@evil.example/wallet/dashboard/send?to=${A}`]) {
+      assert.equal(readPaymentLink(text, { network: 1 }), null, text);
+    }
+
+    like(readPaymentLink("dusk:invalid", { network: 1 }), { problem: LINK_UNREADABLE, reason: "unreadable" });
   });
 });
 

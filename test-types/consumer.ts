@@ -577,6 +577,14 @@ void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
 // @ts-expect-error a request needs its recipient
 void makePaymentLink({ amount: "1" });
 
+import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
+
+const sendRead: LinkRead | null = readPaymentLink("dusk:public-x@dusk:1", { network: 2, walletUrl: "https://wallet.example" });
+const sendReason: "" | "unreadable" | "two-amounts" | "other-network" | undefined = sendRead?.reason;
+const sendFills: PaymentLink | null | undefined = sendRead?.link;
+const sendWords: string[] = [LINK_UNREADABLE, LINK_TWO_AMOUNTS, sendRead?.problem ?? "", sendRead?.network ?? "", sendRead?.chainId ?? ""];
+void [sendReason, sendFills, sendWords];
+
 // /requests
 import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched } from "@dusk-network/app-core/requests";
 

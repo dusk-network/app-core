@@ -18,6 +18,10 @@
  *
  * const link = parsePaymentLink(made.https); // { form: "https", kind: "public", to, amountDusk: "0.15", memo: "Factura 33", chainId: "dusk:1", … }
  * networkMismatch(link.chainId, 2); // "This request is for Mainnet. You are on Testnet."
+ *
+ * // In Send, as a link is pasted, scanned or opened: on the wallet's network.
+ * readPaymentLink(pasted, { network: 2 });
+ * // { link: null, problem: "This request is for Mainnet. You are on Testnet.", reason: "other-network", chainId: "dusk:1", network: "Mainnet" }
  * ```
  *
  * @module
@@ -54,12 +58,56 @@ export type PaymentLink = {
  * and `@dusk:2` for its network), an https link to the web wallet's Send on
  * any network there's a file for (or at `walletUrl`, the app's own address),
  * or a recipient as it is, as a QR code may hold. Null for nothing, for a
- * `dusk:` link that isn't one of those, for a wallet link without a recipient,
- * and for one that says one network on another network's wallet. An https link
- * to anywhere else is no payment link: it reads as a recipient, which Send
- * refuses. Nothing is checked here but its form: Send checks what it fills in.
+ * `dusk:` link that isn't one of those, for a link that says one of its fields
+ * (`to`, `amount`, `amountLux`, `memo`, `label`, `network`) more than once,
+ * for a wallet link without a recipient, for one that says one network on
+ * another network's wallet, and for one with a user part before its host
+ * (`https://apps.testnet.dusk.network@apps.dusk.network/…`, which goes to the
+ * host after the `@`). An https link to anywhere else is no payment link: it
+ * reads as a recipient, which Send refuses. Nothing is checked here but its
+ * form: Send checks what it fills in.
  */
 export declare function parsePaymentLink(input: unknown, options?: { walletUrl?: string }): PaymentLink | null;
+
+/** "That link can't be read. Ask for a new one." */
+export declare const LINK_UNREADABLE: "That link can't be read. Ask for a new one.";
+
+/** "This link asks for two different amounts. Ask for a new one." */
+export declare const LINK_TWO_AMOUNTS: "This link asks for two different amounts. Ask for a new one.";
+
+/**
+ * A link as Send reads it on the wallet's network: what it fills in, or why it
+ * fills in nothing, and the network it's for either way.
+ */
+export type LinkRead = {
+  /** What it asks of Send; null where it's refused. */
+  link: PaymentLink | null;
+  /** Why it fills in nothing, in plain words; "" when it fills in `link`. */
+  problem: string;
+  /**
+   * "unreadable": not a link that can be read (`LINK_UNREADABLE`);
+   * "two-amounts": it says amounts that differ (`LINK_TWO_AMOUNTS`);
+   * "other-network": it's for another network than the wallet's
+   * (`networkMismatch`'s words); "" when it fills in `link`.
+   */
+  reason: "" | "unreadable" | "two-amounts" | "other-network";
+  /** The network it's for, "dusk:1", where it says one; "" otherwise. */
+  chainId: string;
+  /** That network's name, "Mainnet", as `chainLabel` says it; "" for none. */
+  network: string;
+};
+
+/**
+ * What a link asks of Send, the same whether it's pasted, scanned or opened,
+ * so a wallet says at once what's wrong with it: before Review, and never as
+ * a recipient. Null for what isn't a link, as an address, a name or an https
+ * link to anywhere but the web wallet's Send: Send reads that as a recipient.
+ * `network` is the wallet's (a network, its chain ID, "dusk:2" or its name),
+ * and `walletUrl` the app's own address, as `parsePaymentLink` takes it.
+ * Refused, in this order: amounts that differ (in DUSK and in lux, or one of
+ * them twice); what `parsePaymentLink` can't read; a link for another network.
+ */
+export declare function readPaymentLink(input: unknown, options?: { network?: unknown; walletUrl?: string }): LinkRead | null;
 
 /** What `makePaymentLink` takes. */
 export type PaymentRequest = {
