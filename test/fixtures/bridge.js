@@ -123,11 +123,13 @@ export const tokenTransfer = ({ block, from, hash, to, token, wei }) => ({
  * with their block's time when `stamps` (as DuskEVM's RPC gives it); and
  * transactions' `receipts` and the `transactions` themselves, by hash. It
  * refuses to search more than
- * `maxRange` blocks at once, as some RPCs do. `calls` keeps each call.
+ * `maxRange` blocks at once, as some RPCs do, and with `logsGone` refuses
+ * logs from before that block, with `logsGone.message`, as an RPC that
+ * keeps none so old does. `calls` keeps each call.
  *
- * @param {{ head: bigint | number, timeAt?: (n: bigint) => number, logs?: any[], receipts?: Record<string, any>, transactions?: Record<string, any>, maxRange?: bigint, stamps?: boolean, url?: string }} options
+ * @param {{ head: bigint | number, timeAt?: (n: bigint) => number, logs?: any[], logsGone?: { before: bigint, message: string }, receipts?: Record<string, any>, transactions?: Record<string, any>, maxRange?: bigint, stamps?: boolean, url?: string }} options
  */
-export function fakeChain({ head, logs = [], maxRange, receipts = {}, stamps = false, timeAt = (n) => 1_792_980_000 + Number(n), transactions = {}, url }) {
+export function fakeChain({ head, logs = [], logsGone, maxRange, receipts = {}, stamps = false, timeAt = (n) => 1_792_980_000 + Number(n), transactions = {}, url }) {
   const chain = {
     /** @type {{ method: string, params: any[], url: string }[]} */
     calls: [],
@@ -160,6 +162,8 @@ export function fakeChain({ head, logs = [], maxRange, receipts = {}, stamps = f
         if (maxRange !== undefined && to - from + 1n > maxRange) {
           return json({ error: { code: -32005, message: `query exceeds max block range ${maxRange}` }, id, jsonrpc: "2.0" });
         }
+
+        if (logsGone && from < logsGone.before) return json({ error: { code: -32000, message: logsGone.message }, id, jsonrpc: "2.0" });
 
         const result = chain.logs
           .filter(

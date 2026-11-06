@@ -32,6 +32,8 @@ const MAX_WINDOW = 50_000;
 const MIN_WINDOW = 100;
 /** Blocks under the head after which what a migration did is kept in a cache: it won't change. */
 const FINAL_BLOCKS = 1_000;
+/** An RPC's refusal of logs it no longer keeps: Ethereum's and Sepolia's publicnode a day on. */
+const LOGS_GONE = /pruned|archive requests/i;
 
 /** @param {string} address */
 const topicOf = (address) => `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
@@ -142,6 +144,8 @@ async function approvalSpent(read, rpcUrl, { announces, block, contract, hash, m
     try {
       answer = await read.rpc(rpcUrl, "eth_getLogs", [{ address: token, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}`, topics: [[APPROVAL_TOPIC, TRANSFER_TOPIC], topicOf(owner), topicOf(contract)] }]);
     } catch (error) {
+      // As BSC's gives none: the logs that far back can't be read.
+      if (LOGS_GONE.test(messageOf(error))) return { state: "unread" };
       if (!RANGE_REFUSED.test(messageOf(error)) || width <= MIN_WINDOW) throw error;
 
       width = Math.max(MIN_WINDOW, Math.floor(width / 2));

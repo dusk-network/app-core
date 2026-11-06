@@ -639,7 +639,7 @@ export type MigrationEvm = {
    * between them that a token writing no `Approval` as it's spent doesn't say
    * drew on it or not, so its fee isn't counted; "beyond": none in the blocks
    * read back, over 75,000 at most (an hour on BSC at 5,000, up to about 15
-   * hours); "unread": the RPC no longer gives logs that far back; "none": not
+   * hours); "unread": the RPC no longer gives logs that far back, or refuses them; "none": not
    * looked for, as for a migration that failed, which spent none.
    */
   approvalState: "found" | "earlier" | "uncertain" | "beyond" | "unread" | "none";

@@ -217,12 +217,13 @@ describe("a migration's side on its own chain", () => {
    * BSC's RPC as recorded, without what `drop` names, with `more` logs, and
    * (`quiet`) as for a token that writes no Approval as it's spent.
    *
-   * @param {{ drop?: string[], logs?: boolean, maxRange?: bigint, more?: any[], quiet?: boolean, receipts?: Record<string, any>, transactions?: Record<string, any> }} [options]
+   * @param {{ drop?: string[], logs?: boolean, logsGone?: { before: bigint, message: string }, maxRange?: bigint, more?: any[], quiet?: boolean, receipts?: Record<string, any>, transactions?: Record<string, any> }} [options]
    */
-  const chainOf = ({ drop = [], logs = true, maxRange, more = [], quiet = false, receipts = {}, transactions = {} } = {}) =>
+  const chainOf = ({ drop = [], logs = true, logsGone, maxRange, more = [], quiet = false, receipts = {}, transactions = {} } = {}) =>
     fakeChain({
       head: BigInt(bsc.head),
       logs: logs ? [...bsc.logs, ...more].filter((/** @type {any} */ log) => !drop.includes(log.transactionHash) && !(quiet && spentFrom(log))).map(asLog) : [],
+      logsGone,
       maxRange,
       receipts: {
         ...Object.fromEntries(
@@ -335,6 +336,26 @@ describe("a migration's side on its own chain", () => {
     const beyond = await migrationFacts({ fetch: chainOf({ drop: [firstApproval] }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
 
     like(beyond.get(firstMigration), { approval: null, approvalState: "beyond", totalWei: 2_437_650_000_000n });
+  });
+
+  it("says so too where the RPC refuses logs that far back, as Ethereum's and Sepolia's do, with the migration's gas", async () => {
+    // As ethereum-rpc.publicnode.com and ethereum-sepolia-rpc.publicnode.com answer a day on: the receipts are still there.
+    for (const message of ["Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode", "pruned history unavailable"]) {
+      const logsGone = { before: BigInt(bsc.head), message };
+      const facts = await migrationFacts({ fetch: chainOf({ logsGone }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+      like(facts.get(firstMigration), { approval: null, approvalState: "unread", gasWei: 2_437_650_000_000n, state: "mined", totalWei: 2_437_650_000_000n });
+
+      // An approval the app names, sent right before the migration: its own.
+      const named = await migrationFacts({ fetch: chainOf({ logsGone }).fetch, migrations: [{ approval: firstApproval, hash: firstMigration, route }], network: 1 });
+
+      like(named.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+    }
+
+    // Where the refused blocks are past the first windows read, the approval found in those stands.
+    const older = await migrationFacts({ fetch: chainOf({ logsGone: { before: 131_830_000n, message: "pruned history unavailable" } }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(older.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
   });
 
   it("reads narrower windows where the RPC refuses wide ones, and the logs also for an approval the app names", async () => {
