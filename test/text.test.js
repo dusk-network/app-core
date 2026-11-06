@@ -93,8 +93,9 @@ describe("text a person must trust", () => {
     });
     // Unassigned points of the right-to-left blocks read right to left too.
     assert.equal(displayText("Pay \ufefd 10 \ufefe 1000 DUSK", { isolate: true }).text, ltr(`Pay ${apart("\ufefd")} 10 ${apart("\ufefe")} 1000 DUSK`));
-    // Each line on its own left to right, whatever is around it; a break ends every isolate.
-    assert.equal(displayText(`${ALEF} 10\r\n\n1000 ${ALEF}`, { isolate: true, lineBreaks: true }).text, `${ltr(`${apart(ALEF)} 10`)}\r\n\n${ltr(`1000 ${apart(ALEF)}`)}`);
+    // A line with a run set apart reads left to right whatever is around it; a break ends every isolate;
+    // a line with none is left as it is, so what's copied from it is what was given.
+    assert.equal(displayText(`${ALEF} 10\r\n\n1000 DUSK\n0xAbC 1`, { isolate: true, lineBreaks: true }).text, `${ltr(`${apart(ALEF)} 10`)}\r\n\n1000 DUSK\n0xAbC 1`);
     // Arabic digits move what's between them as letters do: each number on its own.
     assert.equal(displayText("Pay ١٠ב١٠٠٠ DUSK", { isolate: true }).text, ltr(`Pay ${apart("١٠")}${apart("ב")}${apart("١٠٠٠")} DUSK`));
     // A word keeps its marks, and controls show as their codes as ever.
@@ -111,6 +112,8 @@ describe("text a person must trust", () => {
       assert.doesNotMatch(text.replace(/⁨[^⁩]*⁩/gu, ""), rightToLeft, mixed);
       for (const run of runs) assert.ok(/^\p{Nd}+$/u.test(run) || !/\p{Nd}/u.test(run), `${mixed}: ${run}`);
     }
+    // Text with nothing right to left in it stays as it was, asked or not.
+    assert.equal(displayText("Pay 10 to 0xAbC", { isolate: true }).text, "Pay 10 to 0xAbC");
     // Asked for nothing, text that hides nothing stays as it was.
     assert.equal(displayText(`Pay ${ALEF} 10`).text, `Pay ${ALEF} 10`);
   });

@@ -44,44 +44,52 @@ const visible = (char) => Array.from({ length: char.length }, (_, i) => `\\u${ch
 
 /**
  * What's shown, with each run of right-to-left letters, and each run of their
- * digits, in an isolate of its own: a mark keeps to the run it follows. Each
- * line is in a left-to-right isolate too, so it reads in the order of its
- * bytes whatever the text around it.
+ * digits, in an isolate of its own: a mark keeps to the run it follows. A line
+ * with a run set apart is in a left-to-right isolate too, so it reads in the
+ * order of its bytes inside right-to-left text as well. A line without one
+ * stays as it is.
  *
  * @param {string[]} shown Its characters, and the codes in place of hidden ones
  */
 function isolated(shown) {
   let text = "";
+  let line = "";
   /** @type {Run} */
   let open = "";
-  let inLine = false;
+  let setApart = false;
+
+  const endLine = () => {
+    const closed = `${line}${open ? POP_DIRECTIONAL_ISOLATE : ""}`;
+
+    text += setApart ? `${LEFT_TO_RIGHT_ISOLATE}${closed}${POP_DIRECTIONAL_ISOLATE}` : closed;
+    line = "";
+    open = "";
+    setApart = false;
+  };
 
   for (const piece of shown) {
     // A line break ends every isolate: each line has its own.
     if (LINE_BREAK.test(piece)) {
-      text += `${open ? POP_DIRECTIONAL_ISOLATE : ""}${inLine ? POP_DIRECTIONAL_ISOLATE : ""}${piece}`;
-      open = "";
-      inLine = false;
+      endLine();
+      text += piece;
       continue;
-    }
-
-    if (!inLine) {
-      text += LEFT_TO_RIGHT_ISOLATE;
-      inLine = true;
     }
 
     /** @type {Run} */
     const kind = MARK.test(piece) ? open : !RIGHT_TO_LEFT.test(piece) ? "" : DIGIT.test(piece) ? "digits" : "letters";
 
     if (kind !== open) {
-      text += `${open ? POP_DIRECTIONAL_ISOLATE : ""}${kind ? FIRST_STRONG_ISOLATE : ""}`;
+      line += `${open ? POP_DIRECTIONAL_ISOLATE : ""}${kind ? FIRST_STRONG_ISOLATE : ""}`;
       open = kind;
     }
 
-    text += piece;
+    setApart ||= kind !== "";
+    line += piece;
   }
 
-  return `${text}${open ? POP_DIRECTIONAL_ISOLATE : ""}${inLine ? POP_DIRECTIONAL_ISOLATE : ""}`;
+  endLine();
+
+  return text;
 }
 
 /**

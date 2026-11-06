@@ -47,9 +47,12 @@ export type TextFlag = "bidi_control" | "invisible_format" | "line_separator" | 
  * their digits, is set apart in an isolate (U+2068 to U+2069), so what's
  * beside them reads in the order of the bytes, as "Pay א 10 א 1000" does
  * rather than as "Pay א 1000 א 10". Within a run, a word reads as its script
- * writes it. Each line is in a left-to-right isolate (U+2066 to U+2069) as
- * well, so it reads that way inside right-to-left text too. Not for a file:
- * it adds those characters.
+ * writes it. A line with a run set apart is in a left-to-right isolate
+ * (U+2066 to U+2069) as well, so it reads that way inside right-to-left text
+ * too. A line without one gets nothing added, so an address copied from it
+ * stays as it is: show text in an element of its own, isolated left to right
+ * (`dir="ltr"`, `unicode-bidi: isolate`), for its digits to keep their order
+ * beside right-to-left text around it. Not for a file: it adds characters.
  */
 export declare function displayText(
   raw: unknown,
