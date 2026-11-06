@@ -10,14 +10,16 @@ import { DUSK, POOL, entryFrom, entryOf, hash } from "./fixtures/activity.js";
 import { readFixture } from "./fixtures/helpers.js";
 
 // Recorded on Testnet: an account's two stakes, and its status read after them;
-// and another account's unstake and the stake after it.
+// another account's unstake and the stake after it; and a third account's two
+// unstakes that reached a provisioner, the second of all it had.
 const recording = readFixture("sozu-testnet.json");
-const { account: ACCOUNT, other: OTHER } = recording;
+const { account: ACCOUNT, other: OTHER, third: THIRD } = recording;
 const { provisioners, tipHeight } = readFixture("provisioners-mainnet.json");
 const entriesOf = (/** @type {string} */ account, /** @type {any[]} */ list) => list.map((raw) => entryFrom(account, raw, recording.details[raw.origin]));
 const STAKES = activityRows({ public: entriesOf(ACCOUNT, recording.stakes), account: ACCOUNT, network: 2 });
 const ROUND = activityRows({ public: entriesOf(OTHER, recording.round), account: OTHER, network: 2 });
 const [UNSTAKE] = ROUND.filter((row) => row.sozu === "unstake");
+const UNSTAKES = activityRows({ public: entriesOf(THIRD, recording.unstakes), account: THIRD, network: 2 });
 const STATUS = /** @type {any} */ (recording.status);
 const BALANCE = BigInt(STATUS.position.balance);
 const ST_DUSK = BigInt(STATUS.position.stDusk);
@@ -101,6 +103,21 @@ describe("what a stake with Sozu did", () => {
     assert.equal(fact.stDusk, tokenTransfer(raw));
   });
 
+  it("reads the stDUSK an unstake burned where it reached a provisioner, and where it took all there was", async () => {
+    const facts = await sozuFacts({ account: THIRD, archive: archiveOf(recording.unstakes), rows: UNSTAKES });
+    const read = recording.unstakes.map((/** @type {any} */ raw) => {
+      const fact = facts.get(raw.origin);
+
+      return fact && [fact.kind, fact.amount, fact.stDusk];
+    });
+
+    // As the vault has the account's stDUSK: from 98,418,603 lux to 66,591,098, then from 95,163,097 to none.
+    assert.deepEqual(read, [
+      ["unstake", 100_000_000n, 31_827_505n],
+      ["unstake", 299_017_938n, 95_163_097n],
+    ]);
+  });
+
   it("asks once for all of them, and not again with a cache", async () => {
     const archive = archiveOf(recording.stakes);
     const cache = new Map();
@@ -112,6 +129,20 @@ describe("what a stake with Sozu did", () => {
 
     assert.equal(archive.asked.length, 1);
     assert.equal(/** @type {any} */ (again.get(recording.stakes[1].origin)).stDusk, tokenTransfer(recording.stakes[1]));
+  });
+
+  it("reads again what a cache from 0.7.1 kept, which could be a lux short", async () => {
+    const archive = archiveOf(recording.stakes);
+    const cache = new Map();
+
+    await sozuFacts({ account: ACCOUNT, archive, cache, rows: STAKES });
+
+    // As 0.7.1 kept them: under its own key, an unstake's stDUSK a lux short.
+    const old = new Map([...cache].map(([key, text]) => [key.replace(/^sozu2:/, "sozu:"), text.replace(/"stDusk":"(\d+)"/, (_, n) => `"stDusk":"${BigInt(n) - 1n}"`)]));
+    const read = await sozuFacts({ account: ACCOUNT, archive, cache: old, rows: STAKES });
+
+    assert.equal(archive.asked.length, 2);
+    assert.equal(/** @type {any} */ (read.get(recording.stakes[1].origin)).stDusk, tokenTransfer(recording.stakes[1]));
   });
 
   it("leaves out what the archive doesn't list yet, and what doesn't read as the row's", async () => {

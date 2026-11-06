@@ -307,6 +307,18 @@ describe("staking", () => {
     assert.equal(unstake?.["Sent Currency"], "stDUSK");
     assert.equal(unstake?.["Received Amount"], "8664");
     assert.equal(unstake?.Description, "Unstaked from Sozu, 1 stDUSK = 1.513816582 DUSK");
+
+    // Two that reached a provisioner, the second of all the account had: what the vault says it burned.
+    const reached = rowsOf(sozu.third, sozu.unstakes);
+    const file = await accountingCsv({ facts: await sozuFacts({ account: sozu.third, archive: archiveOf(sozu.unstakes), rows: reached }), profile: { account: sozu.third, name: "Lena" }, rows: reached });
+
+    assert.deepEqual(
+      recordsOf(file.csv).map((record) => [record["Sent Amount"], record["Sent Currency"], record["Received Amount"], record["Received Currency"], record["Fee Amount"], record.Tag, record.Description]),
+      [
+        ["0.031827505", "stDUSK", "0.1", "DUSK", "0.002842118", "", "Unstaked from Sozu, 1 stDUSK = 3.141936468 DUSK"],
+        ["0.095163097", "stDUSK", "0.299017938", "DUSK", "0.002882483", "", "Unstaked from Sozu, 1 stDUSK = 3.142162747 DUSK"],
+      ]
+    );
   });
 
   it("says what moved where its stDUSK isn't known, under the staking tags, and invents none", async () => {
@@ -424,9 +436,10 @@ describe("a token", () => {
    * @param {Record<string, unknown>} asset
    * @param {Partial<ExportOptions>} [options]
    * @param {string} [fnName]
+   * @param {Record<string, unknown>} [row] What else the chain's row says
    */
-  const tokenFile = (asset, options, fnName = "transfer") => {
-    const entry = recorded(A, CALLED, { contractId: TOKEN, fnName });
+  const tokenFile = (asset, options, fnName = "transfer", row = {}) => {
+    const entry = recorded(A, CALLED, { contractId: TOKEN, fnName, ...row });
 
     return fileOf(A, {
       pending: [{ amount: "0", asset, contractId: TOKEN, deposit: "0", fnName, hash: entry.hash, kind: "contract_call", privacy: "public", profileIndex: 0, settled: true, status: "executed", submittedAt: entry.timestamp }],
@@ -568,7 +581,8 @@ describe("a token", () => {
   });
 
   it("leaves a token's recipient empty when its record has none, never naming the contract called", async () => {
-    const { records } = await tokenFile({ ...SENT, to: undefined });
+    // The chain's row has the contract called as its counterparty, as it has where the call paid it.
+    const { records } = await tokenFile({ ...SENT, to: undefined }, {}, "transfer", { counterparty: TOKEN });
 
     assert.equal(records[0]["Sent Currency"], "TKN");
     assert.equal(records[0].Counterparty, "");

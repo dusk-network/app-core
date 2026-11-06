@@ -33,6 +33,16 @@ const BLOCKS_PER_YEAR = (365.25 * 24 * 60 * 60) / 10;
 /** Stakes read in one request. */
 const FACTS_BATCH = 25;
 const CONTRACT_ID = /^[0-9a-f]{64}$/;
+/** The pool's event as rkyv writes it, last in its data: four u64s and an account, to 8 bytes. */
+const POOL_EVENT_BYTES = 232;
+/** An account in Sozu's events: a tag, then a contract's 32 bytes or a key's 193. */
+const ACCOUNT_BYTES = 194;
+/** A provisioner's key, as an unstake's event lists them ahead of itself. */
+const PROVISIONER_BYTES = 193;
+/** The stDUSK token's transfer: a u64, then the two accounts, to 8 bytes. */
+const TRANSFER_BYTES = 400;
+/** The zero address the token burns to: a contract's tag and 32 bytes of zero. */
+const ZERO_ADDRESS = "00".repeat(33);
 
 /**
  * Lux from a bigint, a whole number or its text: null for anything else.
@@ -93,28 +103,84 @@ function readStatus(status) {
 const went = (row) => row.status === "executed" && (row.sozu === "stake" || row.sozu === "unstake");
 
 /**
- * A pool event's figures: four little-endian u64s from the start of its data.
+ * Hex an event's data is, in lower case: "" for anything else.
  *
- * @param {unknown} hex
- * @returns {bigint[] | null}
+ * @param {unknown} data
  */
-function poolFigures(hex) {
-  const text = typeof hex === "string" ? hex.toLowerCase() : "";
+const hexOf = (data) => (typeof data === "string" && /^(?:[0-9a-f]{2})+$/i.test(data) ? data.toLowerCase() : "");
 
-  if (text.length < 64 || !/^(?:[0-9a-f]{2})+$/.test(text)) return null;
+/**
+ * A little-endian u64 of hex, from a byte.
+ *
+ * @param {string} hex
+ * @param {number} at
+ */
+function u64At(hex, at) {
+  let value = 0n;
 
-  return Array.from({ length: 4 }, (_, i) => {
-    let value = 0n;
+  for (let byte = 7; byte >= 0; byte -= 1) value = (value << 8n) | BigInt(Number.parseInt(hex.slice((at + byte) * 2, (at + byte) * 2 + 2), 16));
 
-    for (let byte = 7; byte >= 0; byte -= 1) value = (value << 8n) | BigInt(Number.parseInt(text.slice(i * 16 + byte * 2, i * 16 + byte * 2 + 2), 16));
+  return value;
+}
 
-    return value;
-  });
+/**
+ * An account as Sozu's events write it, from a byte: its tag and what its
+ * kind has, a contract's 32 bytes or a key's 193. Null for another tag.
+ *
+ * @param {string} hex
+ * @param {number} at
+ */
+function accountAt(hex, at) {
+  const tag = hex.slice(at * 2, at * 2 + 2);
+  const size = tag === "00" ? 32 : tag === "01" ? 193 : 0;
+
+  return size ? hex.slice(at * 2, (at + 1 + size) * 2) : null;
+}
+
+/**
+ * A pool event's four u64s and the account it names. rkyv writes the event
+ * last, after what it points to: an unstake's provisioners come first, as
+ * many as its first u64's upper half says. A stake's event has nothing before it.
+ *
+ * @param {unknown} data
+ * @param {ActivityRow["sozu"]} kind
+ */
+function poolEvent(data, kind) {
+  const hex = hexOf(data);
+  const start = hex.length / 2 - POOL_EVENT_BYTES;
+
+  if (start < 0) return null;
+
+  const figures = Array.from({ length: 4 }, (_, i) => u64At(hex, start + i * 8));
+  const before = kind === "unstake" ? Math.ceil((Number(figures[0] >> 32n) * PROVISIONER_BYTES) / 8) * 8 : 0;
+
+  return start === before ? { account: accountAt(hex, start + 32), figures } : null;
+}
+
+/**
+ * The stDUSK an unstake burned, as the token says it in the same transaction:
+ * its transfer from the account to the zero address.
+ *
+ * @param {any[]} events
+ * @param {string | null} account
+ * @returns {bigint | null}
+ */
+function burnedBy(events, account) {
+  for (const event of events) {
+    const hex = event.topic === "transfer" ? hexOf(event.data) : "";
+
+    if (account && hex.length === TRANSFER_BYTES * 2 && accountAt(hex, 8) === account && accountAt(hex, 8 + ACCOUNT_BYTES) === ZERO_ADDRESS) return u64At(hex, 0);
+  }
+
+  return null;
 }
 
 /**
  * What a stake or an unstake did, from its transaction's entry in the
- * archive: the pool's own event, as it says it, of the row's amount.
+ * archive: the pool's own event, as it says it, of the row's amount, and the
+ * stDUSK an unstake burned, as the token says it: where an unstake takes all
+ * there is, the pool burns all the account's stDUSK, a lux over what its rate
+ * can come to.
  *
  * @param {any} raw
  * @param {ActivityRow} row
@@ -123,13 +189,14 @@ function poolFigures(hex) {
 function factOf(raw, row) {
   const pool = String(row.contractId ?? "").toLowerCase();
   const topic = row.sozu === "stake" ? "deposit" : "unstake";
+  const events = (Array.isArray(raw?.events) ? raw.events : []).filter((/** @type {any} */ event) => event && event.reverted !== true);
 
-  for (const event of Array.isArray(raw?.events) ? raw.events : []) {
-    const figures = event && event.reverted !== true && event.topic === topic && String(event.target ?? "").toLowerCase() === pool ? poolFigures(event.data) : null;
+  for (const event of events) {
+    const read = event.topic === topic && String(event.target ?? "").toLowerCase() === pool ? poolEvent(event.data, row.sozu) : null;
 
-    if (!figures) continue;
+    if (!read) continue;
 
-    const [first, second, stake, supply] = figures;
+    const [first, second, stake, supply] = read.figures;
 
     if (row.sozu === "stake") {
       if (first !== row.value || second > first) continue;
@@ -138,7 +205,9 @@ function factOf(raw, row) {
 
       if (stDusk !== null) return { amount: first, fee: second, kind: "stake", pool: { stake, supply }, stDusk };
     } else if (second === row.value && stake > 0n) {
-      return { amount: second, fee: 0n, kind: "unstake", pool: { stake, supply }, stDusk: (second * supply) / stake };
+      const stDusk = burnedBy(events, read.account);
+
+      if (stDusk !== null) return { amount: second, fee: 0n, kind: "unstake", pool: { stake, supply }, stDusk };
     }
   }
 
@@ -162,6 +231,10 @@ function factKept(text) {
   }
 }
 
+// What a cache keeps a fact under. 0.7.1 read some unstakes a lux short and
+// kept them under "sozu:": a new key reads them again.
+const CACHE_KEY = "sozu2:";
+
 /**
  * @param {{ archive: Pick<Archive, "query">, account: string, rows: Iterable<ActivityRow>, cache?: FactCache }} options
  * @returns {Promise<Map<string, SozuFact>>}
@@ -175,7 +248,7 @@ export async function sozuFacts({ account, archive, cache, rows }) {
   for (const row of rows ?? []) {
     if (!went(row) || row.source !== "public" || row.blockHeight === null || facts.has(row.hash) || !CONTRACT_ID.test(String(row.contractId ?? ""))) continue;
 
-    const kept = factKept(cache?.get(`sozu:${row.hash}`));
+    const kept = factKept(cache?.get(`${CACHE_KEY}${row.hash}`));
 
     if (kept) facts.set(row.hash, kept);
     else asked.push(row);
@@ -197,7 +270,7 @@ export async function sozuFacts({ account, archive, cache, rows }) {
       if (!fact) continue;
 
       facts.set(row.hash, fact);
-      cache?.set(`sozu:${row.hash}`, keptOf(fact));
+      cache?.set(`${CACHE_KEY}${row.hash}`, keptOf(fact));
     }
   }
 

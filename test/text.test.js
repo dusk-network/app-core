@@ -79,6 +79,53 @@ describe("text a person must trust", () => {
     assert.deepEqual(displayText("short", { maxChars: 5 }), { flags: [], neutralized: false, text: "short" });
   });
 
+  it("sets right-to-left words and Arabic digits apart where asked, so the rest reads in the order of its bytes", () => {
+    const [open, close, line] = ["⁨", "⁩", "⁦"];
+    const apart = (/** @type {string} */ text) => `${open}${text}${close}`;
+    const ltr = (/** @type {string} */ text) => `${line}${text}${close}`;
+    const ALEF = "א";
+
+    // Marek's: on a screen this reads "Pay א 1000 א 10 א DUSK".
+    assert.deepEqual(displayText(`Pay ${ALEF} 10 ${ALEF} 1000 ${ALEF} DUSK`, { isolate: true }), {
+      flags: [],
+      neutralized: false,
+      text: ltr(`Pay ${apart(ALEF)} 10 ${apart(ALEF)} 1000 ${apart(ALEF)} DUSK`),
+    });
+    // Unassigned points of the right-to-left blocks read right to left too.
+    assert.equal(displayText("Pay \ufefd 10 \ufefe 1000 DUSK", { isolate: true }).text, ltr(`Pay ${apart("\ufefd")} 10 ${apart("\ufefe")} 1000 DUSK`));
+    // A line with a run set apart reads left to right whatever is around it; a break ends every isolate;
+    // a line with none is left as it is, so what's copied from it is what was given.
+    assert.equal(displayText(`${ALEF} 10\r\n\n1000 DUSK\n0xAbC 1`, { isolate: true, lineBreaks: true }).text, `${ltr(`${apart(ALEF)} 10`)}\r\n\n1000 DUSK\n0xAbC 1`);
+    // Digits of two blocks are set apart from each other: N'Ko's read right to left, Arabic-Indic's don't.
+    assert.equal(displayText("Pay ١٠߀١٠٠٠ DUSK", { isolate: true }).text, ltr(`Pay ${apart("١٠")}${apart("߀")}${apart("١٠٠٠")} DUSK`));
+    // So are numerals that aren't digits, as Rumi's: one and ten stay where they were.
+    assert.equal(displayText("Pay \u{10e60}א\u{10e69} DUSK", { isolate: true }).text, ltr(`Pay ${apart("\u{10e60}")}${apart("א")}${apart("\u{10e69}")} DUSK`));
+    // Arabic digits move what's between them as letters do: each number on its own.
+    assert.equal(displayText("Pay ١٠ב١٠٠٠ DUSK", { isolate: true }).text, ltr(`Pay ${apart("١٠")}${apart("ב")}${apart("١٠٠٠")} DUSK`));
+    // A word keeps its marks, and controls show as their codes as ever.
+    assert.equal(displayText("pay ‮0001‬ שָׁלוֹם א́", { isolate: true }).text, ltr(`pay \\u202e0001\\u202c ${apart("שָׁלוֹם")} ${apart("א́")}`));
+    // Cut first, by the characters given.
+    assert.deepEqual(displayText(`${ALEF}בג x`, { isolate: true, maxChars: 2 }), { flags: ["truncated"], neutralized: false, text: ltr(apart(`${ALEF}ב`)) });
+
+    // Whatever mixes them, nothing outside a run set apart reads right to left, and no run holds digits and letters both.
+    const rightToLeft = /[֐-ࣿיִ-﷿ﹰ-ﻼ\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]/u;
+    for (const mixed of [`=HYPERLINK(1) pay ‮0001‬ ${ALEF} 10 ${ALEF} 1000`, "المبلغ ١٫٥ و 10", "Pay ߁ 10 ߂ 1000 DUSK", "١٠߀١٠٠٠ ۱۲߃", "Pay \u{10e60}א\u{10e69} DUSK", "שׁﭐ 9 \u{10800} 8 \u{1e900}"]) {
+      const { text } = displayText(mixed, { isolate: true });
+      const runs = [...text.matchAll(/⁨([^⁩]*)⁩/gu)].map(([, run]) => run);
+
+      assert.doesNotMatch(text.replace(/⁨[^⁩]*⁩/gu, ""), rightToLeft, mixed);
+      for (const run of runs) assert.ok(/^\p{N}+$/u.test(run) || !/\p{N}/u.test(run), `${mixed}: ${run}`);
+      // A run of numerals holds one block's: one bidi class.
+      for (const run of runs.filter((run) => /^\p{N}+$/u.test(run))) {
+        assert.equal(new Set([...run].map((digit) => Math.floor(/** @type {number} */ (digit.codePointAt(0)) / 16))).size, 1, `${mixed}: ${run}`);
+      }
+    }
+    // Text with nothing right to left in it stays as it was, asked or not.
+    assert.equal(displayText("Pay 10 to 0xAbC", { isolate: true }).text, "Pay 10 to 0xAbC");
+    // Asked for nothing, text that hides nothing stays as it was.
+    assert.equal(displayText(`Pay ${ALEF} 10`).text, `Pay ${ALEF} 10`);
+  });
+
   it("reads what isn't text as its text", () => {
     assert.deepEqual(displayText(null), { flags: [], neutralized: false, text: "" });
     assert.deepEqual(displayText(undefined), { flags: [], neutralized: false, text: "" });

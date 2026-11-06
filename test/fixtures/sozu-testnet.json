@@ -1,5 +1,5 @@
 {
- "note": "Recorded on Testnet on 2026-11-05. `stakes`: an account's two stakes with Sozu, whole, as the archive's moonlightHistory(sender:) gives them, with its pool status read then (`status`, as readSozuStatus gives it, amounts as text). `round`: another account's unstake and the stake after it. `details`: each transaction as tx(hash:) gives it.",
+ "note": "Recorded on Testnet on 2026-11-05. `stakes`: an account's two stakes with Sozu, whole, as the archive's moonlightHistory(sender:) gives them, with its pool status read then (`status`, as readSozuStatus gives it, amounts as text). `round`: another account's unstake and the stake after it. `unstakes`: a third account's two unstakes that reached a provisioner, the second of all it had with Sozu. `details`: each transaction as tx(hash:) gives it.",
  "nodeUrl": "https://testnet.nodes.dusk.network",
  "account": "oUgxBUWEPyFAekXW9T2UdJBcMF7xAuBfstrCX8ATXFk7MusqddFGoq2LN9euCbwVuXpSM5rGLKNUb6NVPFUVM5g4pA6CnXjNfNVBiy91NcH9eBVcdcG1eYUaKWQSYQ9t2um",
  "stakes": [
@@ -263,6 +263,197 @@
    "origin": "03163a955ce99b0a80b292aef55e1d0902d9e70989873dab61b5748d53231901"
   }
  ],
+ "third": "z7Sdc2TyVKd8VotKfMT5E8UivFzDqUuCcds6qrQ8Si5cNKpSJR1RBeJkXKxvAu2pPVKQMC2B2yJ3SCWh6ZQvsSkbmP56ZuHypnZRzWq2KU2LiH4BnQsCRqpt3VzQNpABzQM",
+ "unstakes": [
+  {
+   "block_height": 4773726,
+   "events": [
+    {
+     "data": {
+      "receiver": "51ced4fad52fc590def2736969c9e3e30013275a996c53714b81d8a08774aa37",
+      "sender": "0200000000000000000000000000000000000000000000000000000000000000",
+      "value": "100000000"
+     },
+     "reverted": false,
+     "target": "0100000000000000000000000000000000000000000000000000000000000000",
+     "topic": "contract_to_contract"
+    },
+    {
+     "data": {
+      "keys": {
+       "account": "23LAD6LbE618oRSMGXgjkgpoXzBQeGop7iv1LbuJy8tbr7xzCM8XGQYjhZm3uiEYDgGLzy7jBE5YNjWGFBFogQDiy1FQf6GbpzJartasmgcVGwCpzbmFyiNnRrzny8Yk5QTm",
+       "owner": {
+        "Contract": "51ced4fad52fc590def2736969c9e3e30013275a996c53714b81d8a08774aa37"
+       }
+      },
+      "locked": "0",
+      "value": "100000000"
+     },
+     "reverted": false,
+     "target": "0200000000000000000000000000000000000000000000000000000000000000",
+     "topic": "unstake"
+    },
+    {
+     "data": {
+      "receiver": "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+      "sender": "51ced4fad52fc590def2736969c9e3e30013275a996c53714b81d8a08774aa37",
+      "value": "100000000"
+     },
+     "reverted": false,
+     "target": "0100000000000000000000000000000000000000000000000000000000000000",
+     "topic": "contract_to_contract"
+    },
+    {
+     "data": "636170616369747902000000000000009915df3adea20a009934e934dea20a0008000000e0ffffff0100000063757272656e740701e3cc0c1220bdf9f9631fd70bd4029d1e2373fc55f0722bf61213b82b89989ad3b394e41c281d8148b0d98059a6d03c0aee31f235b4a65211e9512124271c97dce16ff58f2ad00f5ff71a3c7222e54e61e2395fc4e8c1c81a3cf3987b1d2d470ac9442742826faf07af8a6a9cadfa6fdb608a9da7779b1679d3b436f7a8d94599e41ef7241d5397744bc14ba675dccd0e1c75867c0eef28b5ef5e89a45455171ea22ccb4693a725e4a78ab3f3fdd37de2067a9cfb831fda6367da16efea457218000000",
+     "reverted": false,
+     "target": "0077ecbf88aa20d6d0a6afa20bd26300a2b562fdbac368bf1e3c1325e8555941",
+     "topic": "operator_update"
+    },
+    {
+     "data": "6163746976655f7374616b650000000002000000000000006bb1c90ff05930006bd0d309f05930000c000000d8ffffff",
+     "reverted": false,
+     "target": "0077ecbf88aa20d6d0a6afa20bd26300a2b562fdbac368bf1e3c1325e8555941",
+     "topic": "runtime_update"
+    },
+    {
+     "data": "7374616b65642d6475736b00000000000b000000f0ffffffabbfdd05000000007a19f80300000000eafcfbbb96630f00b95616ba96630f00012c42c08e309cb9136134985814957b0c3071cd67c77f48b82314ffd8a7830c48b1b5857521d35915efc5a37f08636d16017ca9c5ac960a507a76b5ca924b1d1ec673e61e9d61ee3e9f850e363659dea3351d15b119154a414637b10e723a8c0b9b29d5861325f487f9b120924bf6bdd970b3dd2fa166bff902ab671d1f79994313d5f7a05f68defd29c5d0a89a735811a50b00eb8604f353d571575953d8b5441f3d07fcd0419af6acbd85e284532c862bb04739a3810b5f451257b75e85610900010000000000",
+     "reverted": false,
+     "target": "79635912e56834fa41aa01048cdb54f7b26756d97b3571345a64df7a0641dfce",
+     "topic": "token_treasury"
+    },
+    {
+     "data": "31a6e50100000000012c42c08e309cb9136134985814957b0c3071cd67c77f48b82314ffd8a7830c48b1b5857521d35915efc5a37f08636d16017ca9c5ac960a507a76b5ca924b1d1ec673e61e9d61ee3e9f850e363659dea3351d15b119154a414637b10e723a8c0b9b29d5861325f487f9b120924bf6bdd970b3dd2fa166bff902ab671d1f79994313d5f7a05f68defd29c5d0a89a735811a50b00eb8604f353d571575953d8b5441f3d07fcd0419af6acbd85e284532c862bb04739a3810b5f451257b75e85610900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+     "reverted": false,
+     "target": "fdbf49102e76cf58224003451c6cb9e3403c54ff1d9042f8bc46ec25c6a4337c",
+     "topic": "transfer"
+    },
+    {
+     "data": "5698964d41587d55a1ec2bc64ab3d392cbca7b8a70bcb8a2cfed428e397b056cee90f252559d7279541a4b47f40c94015871570f1da01cab9ffe979982ff8e181e29ee37b0e2714a1d5bd9389c5348746b87665fb5e9bdcda19f2f1a5022c20f6f934df5bdb010502ecaa8b32075368858cecbdbf39559a5256c978ed0077b0e62964ca9021ce7f7683001d6c3f0f60b0a43beab1165a9a5aa7ade29eb96dae504576364d965ebb671334394464dd50f3b231baae49f55eff8f056285267a602000000000000000038ffffff0100000000e1f505000000006bb1c90ff0593000eafcfbbb96630f00012c42c08e309cb9136134985814957b0c3071cd67c77f48b82314ffd8a7830c48b1b5857521d35915efc5a37f08636d16017ca9c5ac960a507a76b5ca924b1d1ec673e61e9d61ee3e9f850e363659dea3351d15b119154a414637b10e723a8c0b9b29d5861325f487f9b120924bf6bdd970b3dd2fa166bff902ab671d1f79994313d5f7a05f68defd29c5d0a89a735811a50b00eb8604f353d571575953d8b5441f3d07fcd0419af6acbd85e284532c862bb04739a3810b5f451257b75e85610900000000000000",
+     "reverted": false,
+     "target": "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+     "topic": "unstake"
+    },
+    {
+     "data": {
+      "receiver": "z7Sdc2TyVKd8VotKfMT5E8UivFzDqUuCcds6qrQ8Si5cNKpSJR1RBeJkXKxvAu2pPVKQMC2B2yJ3SCWh6ZQvsSkbmP56ZuHypnZRzWq2KU2LiH4BnQsCRqpt3VzQNpABzQM",
+      "sender": "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+      "value": "100000000"
+     },
+     "reverted": false,
+     "target": "0100000000000000000000000000000000000000000000000000000000000000",
+     "topic": "contract_to_account"
+    },
+    {
+     "data": {
+      "gas_spent": "2842118",
+      "memo": "",
+      "receiver": null,
+      "refund_info": null,
+      "sender": "z7Sdc2TyVKd8VotKfMT5E8UivFzDqUuCcds6qrQ8Si5cNKpSJR1RBeJkXKxvAu2pPVKQMC2B2yJ3SCWh6ZQvsSkbmP56ZuHypnZRzWq2KU2LiH4BnQsCRqpt3VzQNpABzQM",
+      "value": "0"
+     },
+     "reverted": false,
+     "target": "0100000000000000000000000000000000000000000000000000000000000000",
+     "topic": "moonlight"
+    }
+   ],
+   "origin": "c3bfd59d234f69965780beadcf436ad7af62c5cd758a1a58db1b98873f61343c"
+  },
+  {
+   "block_height": 4773808,
+   "events": [
+    {
+     "data": {
+      "receiver": "51ced4fad52fc590def2736969c9e3e30013275a996c53714b81d8a08774aa37",
+      "sender": "0200000000000000000000000000000000000000000000000000000000000000",
+      "value": "299017938"
+     },
+     "reverted": false,
+     "target": "0100000000000000000000000000000000000000000000000000000000000000",
+     "topic": "contract_to_contract"
+    },
+    {
+     "data": {
+      "keys": {
+       "account": "23LAD6LbE618oRSMGXgjkgpoXzBQeGop7iv1LbuJy8tbr7xzCM8XGQYjhZm3uiEYDgGLzy7jBE5YNjWGFBFogQDiy1FQf6GbpzJartasmgcVGwCpzbmFyiNnRrzny8Yk5QTm",
+       "owner": {
+        "Contract": "51ced4fad52fc590def2736969c9e3e30013275a996c53714b81d8a08774aa37"
+       }
+      },
+      "locked": "0",
+      "value": "299017938"
+     },
+     "reverted": false,
+     "target": "0200000000000000000000000000000000000000000000000000000000000000",
+     "topic": "unstake"
+    },
+    {
+     "data": {
+      "receiver": "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+      "sender": "51ced4fad52fc590def2736969c9e3e30013275a996c53714b81d8a08774aa37",
+      "value": "299017938"
+     },
+     "reverted": false,
+     "target": "0100000000000000000000000000000000000000000000000000000000000000",
+     "topic": "contract_to_contract"
+    },
+    {
+     "data": "6361706163697479020000000000000019023e1794ef0a00475b6b0594ef0a0008000000e0ffffff0100000063757272656e740701e3cc0c1220bdf9f9631fd70bd4029d1e2373fc55f0722bf61213b82b89989ad3b394e41c281d8148b0d98059a6d03c0aee31f235b4a65211e9512124271c97dce16ff58f2ad00f5ff71a3c7222e54e61e2395fc4e8c1c81a3cf3987b1d2d470ac9442742826faf07af8a6a9cadfa6fdb608a9da7779b1679d3b436f7a8d94599e41ef7241d5397744bc14ba675dccd0e1c75867c0eef28b5ef5e89a45455171ea22ccb4693a725e4a78ab3f3fdd37de2067a9cfb831fda6367da16efea457218000000",
+     "reverted": false,
+     "target": "0077ecbf88aa20d6d0a6afa20bd26300a2b562fdbac368bf1e3c1325e8555941",
+     "topic": "operator_update"
+    },
+    {
+     "data": "6163746976655f7374616b6500000000020000000000000011b9c310a5a730003f12f1fea4a730000c000000d8ffffff",
+     "reverted": false,
+     "target": "0077ecbf88aa20d6d0a6afa20bd26300a2b562fdbac368bf1e3c1325e8555941",
+     "topic": "runtime_update"
+    },
+    {
+     "data": "7374616b65642d6475736b00000000000b000000f0ffffffd912ac050000000000000000000000006eecca18097c0f0095d91e13097c0f00012c42c08e309cb9136134985814957b0c3071cd67c77f48b82314ffd8a7830c48b1b5857521d35915efc5a37f08636d16017ca9c5ac960a507a76b5ca924b1d1ec673e61e9d61ee3e9f850e363659dea3351d15b119154a414637b10e723a8c0b9b29d5861325f487f9b120924bf6bdd970b3dd2fa166bff902ab671d1f79994313d5f7a05f68defd29c5d0a89a735811a50b00eb8604f353d571575953d8b5441f3d07fcd0419af6acbd85e284532c862bb04739a3810b5f451257b75e85610900010000000000",
+     "reverted": false,
+     "target": "79635912e56834fa41aa01048cdb54f7b26756d97b3571345a64df7a0641dfce",
+     "topic": "token_treasury"
+    },
+    {
+     "data": "d912ac0500000000012c42c08e309cb9136134985814957b0c3071cd67c77f48b82314ffd8a7830c48b1b5857521d35915efc5a37f08636d16017ca9c5ac960a507a76b5ca924b1d1ec673e61e9d61ee3e9f850e363659dea3351d15b119154a414637b10e723a8c0b9b29d5861325f487f9b120924bf6bdd970b3dd2fa166bff902ab671d1f79994313d5f7a05f68defd29c5d0a89a735811a50b00eb8604f353d571575953d8b5441f3d07fcd0419af6acbd85e284532c862bb04739a3810b5f451257b75e85610900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+     "reverted": false,
+     "target": "fdbf49102e76cf58224003451c6cb9e3403c54ff1d9042f8bc46ec25c6a4337c",
+     "topic": "transfer"
+    },
+    {
+     "data": "5698964d41587d55a1ec2bc64ab3d392cbca7b8a70bcb8a2cfed428e397b056cee90f252559d7279541a4b47f40c94015871570f1da01cab9ffe979982ff8e181e29ee37b0e2714a1d5bd9389c5348746b87665fb5e9bdcda19f2f1a5022c20f6f934df5bdb010502ecaa8b32075368858cecbdbf39559a5256c978ed0077b0e62964ca9021ce7f7683001d6c3f0f60b0a43beab1165a9a5aa7ade29eb96dae504576364d965ebb671334394464dd50f3b231baae49f55eff8f056285267a602000000000000000038ffffff01000000d2a6d2110000000011b9c310a5a730006eecca18097c0f00012c42c08e309cb9136134985814957b0c3071cd67c77f48b82314ffd8a7830c48b1b5857521d35915efc5a37f08636d16017ca9c5ac960a507a76b5ca924b1d1ec673e61e9d61ee3e9f850e363659dea3351d15b119154a414637b10e723a8c0b9b29d5861325f487f9b120924bf6bdd970b3dd2fa166bff902ab671d1f79994313d5f7a05f68defd29c5d0a89a735811a50b00eb8604f353d571575953d8b5441f3d07fcd0419af6acbd85e284532c862bb04739a3810b5f451257b75e85610900000000000000",
+     "reverted": false,
+     "target": "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+     "topic": "unstake"
+    },
+    {
+     "data": {
+      "receiver": "z7Sdc2TyVKd8VotKfMT5E8UivFzDqUuCcds6qrQ8Si5cNKpSJR1RBeJkXKxvAu2pPVKQMC2B2yJ3SCWh6ZQvsSkbmP56ZuHypnZRzWq2KU2LiH4BnQsCRqpt3VzQNpABzQM",
+      "sender": "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+      "value": "299017938"
+     },
+     "reverted": false,
+     "target": "0100000000000000000000000000000000000000000000000000000000000000",
+     "topic": "contract_to_account"
+    },
+    {
+     "data": {
+      "gas_spent": "2882483",
+      "memo": "",
+      "receiver": null,
+      "refund_info": null,
+      "sender": "z7Sdc2TyVKd8VotKfMT5E8UivFzDqUuCcds6qrQ8Si5cNKpSJR1RBeJkXKxvAu2pPVKQMC2B2yJ3SCWh6ZQvsSkbmP56ZuHypnZRzWq2KU2LiH4BnQsCRqpt3VzQNpABzQM",
+      "value": "0"
+     },
+     "reverted": false,
+     "target": "0100000000000000000000000000000000000000000000000000000000000000",
+     "topic": "moonlight"
+    }
+   ],
+   "origin": "f1abe645d1c5c83dcf2ea1b709fc2a7b6214d29da90b99c205a0f8823bb7d255"
+  }
+ ],
  "details": {
   "411ceee3ca38a78309d66d7e0e4a5c22ab676e8863fe8c8d4d35ea9ae1b44a4e": {
    "blockHash": "5bc1007f3e873039caa8056ebcd57ad7a05665ac97e4cef139c1bc0368a84516",
@@ -328,6 +519,40 @@
      "fnName": "sozu_stake"
     },
     "gasLimit": 2000000000,
+    "gasPrice": 1,
+    "memo": null
+   }
+  },
+  "c3bfd59d234f69965780beadcf436ad7af62c5cd758a1a58db1b98873f61343c": {
+   "blockHash": "f99786b8dc10c1ee421cb7864ff2108ee44b9461ff1b78ec342cd0f956cff4ab",
+   "blockHeight": 4773726,
+   "blockTimestamp": 1793844725,
+   "err": null,
+   "gasSpent": 2842118,
+   "id": "c3bfd59d234f69965780beadcf436ad7af62c5cd758a1a58db1b98873f61343c",
+   "tx": {
+    "callData": {
+     "contractId": "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+     "fnName": "sozu_unstake"
+    },
+    "gasLimit": 10000000,
+    "gasPrice": 1,
+    "memo": null
+   }
+  },
+  "f1abe645d1c5c83dcf2ea1b709fc2a7b6214d29da90b99c205a0f8823bb7d255": {
+   "blockHash": "907592aff225d0cb376ebc8e573623e61b8caed289c01ea5b564b917466f42a6",
+   "blockHeight": 4773808,
+   "blockTimestamp": 1793845545,
+   "err": null,
+   "gasSpent": 2882483,
+   "id": "f1abe645d1c5c83dcf2ea1b709fc2a7b6214d29da90b99c205a0f8823bb7d255",
+   "tx": {
+    "callData": {
+     "contractId": "72883945ac1aa032a88543aacc9e358d1dfef07717094c05296ce675f23078f2",
+     "fnName": "sozu_unstake"
+    },
+    "gasLimit": 10000000,
     "gasPrice": 1,
     "memo": null
    }

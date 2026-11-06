@@ -43,7 +43,7 @@ export type SozuStatusLike = {
   } | null;
 };
 
-/** What one stake or unstake did, as the pool's event says it. Amounts are lux. */
+/** What one stake or unstake did, as the pool's event says it, and an unstake's stDUSK as the token says it burned. Amounts are lux. */
 export type SozuFact = {
   kind: "stake" | "unstake";
   /** What went in or came out, in DUSK's lux. */
@@ -58,7 +58,8 @@ export type SozuFact = {
 
 /**
  * What each stake and unstake that went through did, by its row's hash, from
- * the pool's event in its transaction: a request for each 25, of the account's
+ * the pool's event in its transaction, and the stDUSK an unstake burned from
+ * the token's own transfer in it: a request for each 25, of the account's
  * own history at their heights. No data driver is needed. With `cache`, a `Map`
  * of text does, each is read once. A transaction the archive doesn't list yet
  * isn't in the map: read it again later.
