@@ -8,7 +8,7 @@
  */
 
 /** @typedef {import("./text.js").TextFlag} TextFlag */
-/** @typedef {"" | "digits" | "letters"} Run What's set apart: a run of right-to-left letters, of their digits, or nothing */
+/** @typedef {string} Run What's set apart: "letters", a run of right-to-left letters; "digits" and the first of their block, a run of digits of one script; or "", nothing */
 
 const BIDI_CONTROL = /\p{Bidi_Control}/u;
 const FORMAT_CONTROL = /\p{Cf}/u;
@@ -27,6 +27,28 @@ const REPLACEMENT = "\ufffd";
 // code.
 const RIGHT_TO_LEFT = /^[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefe\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]$/u;
 const DIGIT = /^\p{Nd}$/u;
+// The zero of each block of digits the right-to-left blocks hold: Arabic-Indic,
+// Extended Arabic-Indic, N'Ko, Hanifi Rohingya, Garay and Adlam. Each block has
+// one bidi class, and they differ, N'Ko's and Adlam's reading right to left:
+// digits of two blocks together could turn their run around.
+const DIGIT_ZEROS = [0x660, 0x6f0, 0x7c0, 0x10d30, 0x10d40, 0x1e950];
+
+/**
+ * The run a right-to-left digit belongs to: one of its own block's.
+ *
+ * @param {string} digit
+ * @returns {Run}
+ */
+const digitsOf = (digit) => {
+  const code = /** @type {number} */ (digit.codePointAt(0));
+  let block = 0;
+
+  for (const zero of DIGIT_ZEROS) {
+    if (zero <= code) block = zero;
+  }
+
+  return `digits ${block}`;
+};
 const MARK = /^\p{M}$/u;
 const LEFT_TO_RIGHT_ISOLATE = "\u2066";
 const FIRST_STRONG_ISOLATE = "\u2068";
@@ -76,7 +98,7 @@ function isolated(shown) {
     }
 
     /** @type {Run} */
-    const kind = MARK.test(piece) ? open : !RIGHT_TO_LEFT.test(piece) ? "" : DIGIT.test(piece) ? "digits" : "letters";
+    const kind = MARK.test(piece) ? open : !RIGHT_TO_LEFT.test(piece) ? "" : DIGIT.test(piece) ? digitsOf(piece) : "letters";
 
     if (kind !== open) {
       line += `${open ? POP_DIRECTIONAL_ISOLATE : ""}${kind ? FIRST_STRONG_ISOLATE : ""}`;
