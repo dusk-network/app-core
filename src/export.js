@@ -586,21 +586,29 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
       continue;
     }
 
-    if (period && (row.time < period.from || row.time >= period.to)) {
-      left.outOfPeriod += 1;
-      continue;
-    }
-
     // A migration's side on its own chain, with the payout it was paid with: named by its memo, as text.
     const migration = row.route?.kind === "migration" && row.direction === "in" ? evm?.get((memoTextOf(row) ?? "").toLowerCase()) : undefined;
+    /** @param {number} at */
+    const inPeriod = (at) => !period || (at >= period.from && at < period.to);
+    const rowIn = inPeriod(row.time);
 
-    for (const line of [...evmLines(row, migration), ...linesOf(row, { address: Boolean(profile?.address), facts, own, self })]) {
+    // Each line goes in the period of its own time: a migration's fees on its
+    // own chain may be in one before its payout's, the rest of a row in its.
+    if (!rowIn) {
+      left.outOfPeriod += 1;
+      if (!migration) continue;
+    }
+
+    for (const line of [...evmLines(row, migration), ...(rowIn ? linesOf(row, { address: Boolean(profile?.address), facts, own, self }) : [])]) {
+      const at = line.at ?? row.time;
+
+      if (!inPeriod(at)) continue;
+
       // A token's own line says who it went to, or that it isn't known: never the contract called.
       const ownParty = "counterparty" in line;
       const party = ownParty ? line.counterparty : row.counterparty;
       const internal = party && !self.has(party) ? own.get(party) : undefined;
       const name = line.partyName ?? internal ?? (ownParty ? null : row.counterpartyName) ?? (ownParty && !party ? null : row.toName) ?? (party ? contactName?.(party) : "") ?? "";
-      const at = line.at ?? row.time;
       const memo = line.memo ?? row.memo ?? "";
       const unit = price && line.valued !== null ? await priceAt(at) : null;
 
