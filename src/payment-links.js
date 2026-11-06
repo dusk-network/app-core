@@ -16,6 +16,7 @@ import { formatDuskPlain, parseDusk, readAmount } from "./amounts.js";
 /** @typedef {import("./payment-links.js").PaymentLink} PaymentLink */
 /** @typedef {import("./payment-links.js").PaymentRequest} PaymentRequest */
 /** @typedef {import("./payment-links.js").MadePaymentLink} MadePaymentLink */
+/** @typedef {import("./payment-links.js").LinkRead} LinkRead */
 /** @typedef {import("@dusk-network/networks").Network} Network */
 
 export const MAX_MEMO_BYTES = 512;
@@ -297,15 +298,15 @@ function amountsDiffer(params) {
 /**
  * A link read, with the name of the network it's for.
  *
- * @param {Omit<import("./payment-links.js").LinkRead, "network">} read
- * @returns {import("./payment-links.js").LinkRead}
+ * @param {Omit<LinkRead, "network">} read
+ * @returns {LinkRead}
  */
 const said = (read) => ({ ...read, network: chainLabel(read.chainId) });
 
 /**
  * @param {unknown} input
  * @param {{ network?: unknown, walletUrl?: string }} [options]
- * @returns {import("./payment-links.js").LinkRead | null}
+ * @returns {LinkRead | null}
  */
 export function readPaymentLink(input, { network, walletUrl } = {}) {
   const raw = textOf(input);

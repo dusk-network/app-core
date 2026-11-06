@@ -11,6 +11,7 @@ import { routes } from "@dusk-network/networks";
 import { EVM_HASH, RANGE_REFUSED, TIMEOUT_MS, TRANSFER_TOPIC, WEI_PER_LUX, addressOf, messageOf, networkOf, reader, urlOf } from "./bridge-common.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
+/** @typedef {import("./bridge.js").BridgeNetwork} BridgeNetwork */
 /** @typedef {import("./bridge.js").FactCache} FactCache */
 /** @typedef {import("./bridge.js").FetchLike} FetchLike */
 /** @typedef {import("./bridge.js").MigrationEvm} MigrationEvm */
@@ -242,7 +243,7 @@ async function readMigration(read, { approval: given, hash, head, route, rpcUrl 
 }
 
 /**
- * @param {{ network: import("./bridge.js").BridgeNetwork, migrations: Iterable<{ hash: string, route?: string | null, approval?: string | null }>, fetch?: FetchLike, rpcUrl?: string, cache?: FactCache, timeoutMs?: number }} options
+ * @param {{ network: BridgeNetwork, migrations: Iterable<{ hash: string, route?: string | null, approval?: string | null }>, fetch?: FetchLike, rpcUrl?: string, cache?: FactCache, timeoutMs?: number }} options
  * @returns {Promise<Map<string, MigrationEvm>>}
  */
 export async function migrationFacts({ cache, fetch: fetchFn, migrations, network, rpcUrl, timeoutMs = TIMEOUT_MS }) {
