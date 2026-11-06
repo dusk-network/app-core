@@ -34,7 +34,9 @@ describe("names that look alike", () => {
   it("reads a capital I as a small l, and what renders as nothing as nothing", () => {
     assert.equal(looksAlike("Ian", "lan"), true);
     assert.equal(looksAlike("Profile 2", "ProfiIe 2"), true);
-    assert.equal(looksAlike("Alice", "Ali​ce"), true);
+    assert.equal(looksAlike("Alice", "Ali\u200bce"), true);
+    // What renders as nothing is no name read the same: it looks alike, in other characters.
+    assert.equal(sameName("Alice", "Ali\u200bce"), false);
     assert.equal(sameName("Amélie", "Amelie"), true);
     assert.equal(nameSkeleton("rn"), nameSkeleton("m"));
   });

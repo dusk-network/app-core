@@ -28,8 +28,9 @@ export declare function nameSkeleton(name: unknown): string;
 
 /**
  * Whether two names read as the same name: whatever their case, accents,
- * spaces and punctuation, as "Estudio Marta" and "estudio marta." do. False
- * for a name of none of its letters or digits.
+ * spaces and punctuation, as "Estudio Marta" and "estudio marta." do. A
+ * character that renders as nothing makes it another name, one that looks
+ * alike (`looksAlike`). False for a name of none of its letters or digits.
  */
 export declare function sameName(a: unknown, b: unknown): boolean;
 

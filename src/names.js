@@ -31,7 +31,9 @@ function table() {
 }
 
 const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
-const NOT_LETTER_OR_DIGIT = /[^\p{L}\p{N}]/gu;
+// What a name is read by: its letters and digits, and what renders as nothing,
+// which makes it another name that looks like it rather than the same one.
+const NOT_LETTER_OR_DIGIT = /[^\p{L}\p{N}\p{Default_Ignorable_Code_Point}]/gu;
 
 /**
  * @param {unknown} name
@@ -48,7 +50,7 @@ export function nameSkeleton(name) {
 
 /**
  * What's left to tell names apart once their case, accents, spaces and
- * punctuation are off.
+ * punctuation are off: what renders as nothing stays, for the skeleton to take out.
  *
  * @param {string} text
  */
