@@ -7,6 +7,7 @@
     "./text": "./src/text.js",
     "./payment-links": "./src/payment-links.js",
     "./requests": "./src/requests.js",
+    "./names": "./src/names.js",
     "./history": "./src/history.js",
     "./shielded": "./src/shielded.js",
     "./activity": "./src/activity.js",

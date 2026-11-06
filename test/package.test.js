@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./names", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
-const SHARED = ["./src/bridge-common.js", "./src/bridge-ledger.js", "./src/bridge-status.js"];
+const SHARED = ["./src/bridge-common.js", "./src/bridge-ledger.js", "./src/bridge-status.js", "./src/confusables.js"];
+/** The shared modules that are data, which import nothing. */
+const DATA = ["./src/confusables.js"];
 /** The entry points that need nothing from anywhere. */
 const SELF_CONTAINED = ["./amounts", "./text"];
 /** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
@@ -121,6 +123,11 @@ describe("the package", () => {
     assert.equal(parsePaymentLink(""), null);
     assert.equal(makePaymentLink({ to: "" }).ok, false);
 
+    const { looksAlike, nameClash } = await import("@dusk-network/app-core/names");
+
+    assert.equal(looksAlike("Bob", "Bօb"), true);
+    assert.equal(nameClash("x"), null);
+
     const { matchRequests, sentAlready } = await import("@dusk-network/app-core/requests");
 
     assert.deepEqual(matchRequests([], []), new Map());
@@ -193,7 +200,7 @@ describe("the package", () => {
       assert.doesNotMatch(code, /\(\?<[=!]/, file);
       // Its imports are the networks' rules and the package's own modules,
       // and for DuskEVM's withdrawals viem, which no other entry point takes.
-      assert.ok(from.length > 0 || SELF_CONTAINED.includes(/** @type {string} */ (entry)), file);
+      assert.ok(from.length > 0 || SELF_CONTAINED.includes(/** @type {string} */ (entry)) || DATA.includes(file), file);
       assert.equal([...code.matchAll(/^import\b/gm)].length, [...code.matchAll(/^import\b[^;]*?\bfrom\s+"[^"]+";/gm)].length, `${file}: every import is read`);
       for (const each of from) {
         assert.ok(
@@ -239,12 +246,15 @@ describe("the package", () => {
       "src/bridge-status.js",
       "src/bridge.d.ts",
       "src/bridge.js",
+      "src/confusables.js",
       "src/duskevm-withdrawals.d.ts",
       "src/duskevm-withdrawals.js",
       "src/export.d.ts",
       "src/export.js",
       "src/history.d.ts",
       "src/history.js",
+      "src/names.d.ts",
+      "src/names.js",
       "src/payment-links.d.ts",
       "src/payment-links.js",
       "src/requests.d.ts",

@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/requests`: `matchRequests`, what came in for each payment request, and `sentAlready`, the payment a send would make again; a request of no amount paid with its memo is paid
+- `/names`: `looksAlike`, `sameName` and `nameSkeleton`, names that read the same or look alike by Unicode's confusables, `nameClash`, a contact's name that takes a profile's or another contact's, and `lookAlikes`
 - `/payment-links`: `readPaymentLink`, a link as Send reads it on the wallet's network: what it fills in, or why not, and the network it's for
 
 - `/text`: `displayText` flags a number whose digits read right to left (`rtl_digits`) or mix digit systems (`mixed_digits`)

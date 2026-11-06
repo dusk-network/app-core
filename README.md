@@ -30,6 +30,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits` |
 | `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) |
 | `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), as Send reads them on the wallet's network (`readPaymentLink`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
+| `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; the name a contact's takes (`nameClash`); and which in a list to show with their address (`lookAlikes`) |
 | `@dusk-network/app-core/requests` | Payment requests: what came in for each request a wallet made (`matchRequests`), and the payment a send would make again (`sentAlready`) |
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
@@ -91,6 +92,23 @@ readPaymentLink(pastedOrScanned, { network: walletChain });
 - `readPaymentLink` is Send's reading, the same pasted, scanned or opened, for a wallet to say what's wrong at once and never fill a link in as a recipient: `link` to fill in, or `problem` in the wallets' words, by `reason`: "two-amounts" (amounts that differ, in DUSK and in lux or one of them twice), "unreadable", or "other-network"; and either way the network it's for, `chainId` and its name `network`. What isn't a link is null, for Send to read as a recipient.
 - `makePaymentLink` checks what Send checks, and says what's wrong by the field: a recipient that is one, an amount above 0 with 9 decimals at most, and a memo of 512 bytes at most.
 - The https link ends with its network, so a mail or chat client that cuts a link's last punctuation cuts none of it.
+
+## Names
+
+```js
+import { lookAlikes, looksAlike, nameClash } from "@dusk-network/app-core/names";
+
+looksAlike("Bob", "Bօb"); // true: an Armenian օ
+nameClash("Profile 2", { profiles, contacts, except: editedId });
+// { kind: "profile", same: true, entry: profiles[1] }: a contact named like a profile, to refuse
+nameClash("Estudio Mаrta", { profiles, contacts }); // { kind: "contact", same: false, entry }: another's, in other letters
+lookAlikes([...profiles, ...contacts]); // the entries to show with their address
+```
+
+- Names look alike when they read as the same name, whatever their case, accents, spaces and punctuation (`sameName`), or have the same skeleton by Unicode's confusables (UTS #39), as written or in lower case: Cyrillic, Greek, Armenian and Cherokee letters that look like Latin ones, a capital I that looks like a small l, rn that looks like m. The table is Unicode's, version 18.0.0, kept in the package as data: `npm run generate:confusables` makes `src/confusables.js` again from the pinned file, once its hash is checked.
+- `nameClash` says whose name a new or changed contact's takes: one of the person's profiles first, as a contact named like a profile would read as that profile on Review; then another contact's. `same` says it reads as that name, rather than looking like it.
+- `lookAlikes` gives the entries whose name looks like another's of another address, for a list or a picker to show each with its address.
+- For what a person reads only: a payment goes to an address, and a name never stands for one.
 
 ## Requests
 
@@ -409,4 +427,4 @@ const claimCall = await withdrawals.claimCall(txHash, { submitter: account }); /
 
 ## License
 
-MPL-2.0
+MPL-2.0. `src/confusables.js` is Unicode's data, © Unicode, Inc., under the [Unicode License v3](https://www.unicode.org/license.txt).
