@@ -19,6 +19,11 @@
  *
  * sozuRateLine({ nativeRate, status, provisioners, tipHeight });
  * // "15.5 DUSK a block to stakers, 206.9M DUSK staked now: about 24% a year. Less Sozu's 15%: about 20%, and a little over as it restakes rewards every hour."
+ *
+ * // What stDUSK did, from the chain: then it's the rate, and the line says it.
+ * const growth = await sozuGrowth({ archive, pool: status.contracts.pool, status, cache });
+ * sozuRate(nativeRate, status, growth); // 0.204
+ * sozuRateLine({ growth }); // "stDUSK went from 1.2740 to 1.2953 DUSK over the last 30 days, after Sozu's share."
  * ```
  *
  * @module
@@ -109,12 +114,58 @@ export declare function sozuPosition(input?: {
   complete?: boolean;
 }): SozuPosition;
 
+/** How long `sozuGrowth` keeps what it read in `cache`: an hour, in milliseconds, as Sozu restakes every hour. */
+export declare const GROWTH_MAX_AGE_MS: 3600000;
+
+/** What one stDUSK was worth once a restake of the pool's went through: the pool's stake over its stDUSK, both in lux, at its block. */
+export type SozuPoint = { height: number; at: number; stake: bigint; supply: bigint };
+
 /**
- * About what Sozu pays a year, as a fraction: native staking's rate as the
- * wallets show it, to the percent, less Sozu's share of rewards, as both
- * wallets work it out. Null without either.
+ * How Sozu's stDUSK grew over a period, from the pool's own records on chain:
+ * after a restake about `days` before the latest, and after the latest. Its
+ * growth is what a holder earned, Sozu's share already off.
  */
-export declare function sozuRate(nativeRate: number | null | undefined, status: SozuStatusLike | null | undefined): number | null;
+export type SozuGrowth = {
+  from: SozuPoint;
+  to: SozuPoint;
+  /** The days between the two, rounded. */
+  days: number;
+  /** What that growth comes to in a year of 365.25 days, simply, as a fraction: `sozuRate`'s, given this. */
+  rate: number;
+};
+
+/**
+ * How Sozu's stDUSK grew over the last `days` (30 unless asked), read from
+ * the chain: the pool's restakes, its hourly `recycle`, found among the
+ * transactions calling it near the tip and near the period's start, and what
+ * one stDUSK was worth after each, as the pool's reward event says. Two
+ * requests of the archive, or three without the app's `tipHeight`: about
+ * 120 kB on mainnet. `pool` is the pool's contract ID, or `status`'s
+ * `contracts.pool`; with `status`'s pool figures, the latest restake's must
+ * be its rate now, within half a percent. With `cache`, a `Map` of text does,
+ * what it read is kept for `maxAgeMs`, an hour unless asked, and two reads at
+ * once make one. Null where no restake is found at either end (a pool younger
+ * than the period), the figures don't agree, or the archive can't be read:
+ * then the rate is worked out as before.
+ */
+export declare function sozuGrowth(options: {
+  archive: Pick<Archive, "query">;
+  pool?: string | null;
+  status?: (SozuStatusLike & { contracts?: { pool?: string | null } | null }) | null;
+  days?: number;
+  tipHeight?: number | bigint | null;
+  cache?: FactCache;
+  maxAgeMs?: number;
+  now?: number;
+}): Promise<SozuGrowth | null>;
+
+/**
+ * About what Sozu pays a year, as a fraction: with `growth`, how its stDUSK
+ * grew, as a year; else native staking's rate as the wallets show it, to the
+ * percent, less Sozu's share of rewards, as both wallets work it out. Null
+ * without either.
+ */
+export declare function sozuRate(nativeRate: number | null | undefined, status: SozuStatusLike | null | undefined, growth?: SozuGrowth | null): number | null;
 
 /** What an amount does in a year at the present rate, in lux; each is null where its figures weren't read. */
 export type SozuYear = {
@@ -130,17 +181,21 @@ export type SozuYear = {
   earned: bigint | null;
 };
 
-/** What `amount` (lux) earns in a year at the present rate, after Sozu's share and the deposit fee. `nativeRate`: `nativeRateEstimate`'s. */
-export declare function sozuYear(input: { amount: bigint | number | string; nativeRate?: number | null; status?: SozuStatusLike | null }): SozuYear;
+/** What `amount` (lux) earns in a year at the present rate, after Sozu's share and the deposit fee. `nativeRate`: `nativeRateEstimate`'s; `growth`: `sozuGrowth`'s, which goes first. */
+export declare function sozuYear(input: { amount: bigint | number | string; nativeRate?: number | null; status?: SozuStatusLike | null; growth?: SozuGrowth | null }): SozuYear;
 
 /**
- * One line of what the rate is made of, whether it compounds, and over what:
- * it's now's, from one read of the provisioners. With `provisioners` and
- * `tipHeight`, the node's own figures, what a block pays stakers and what's
- * staked; with `nativeRate` alone, the rate across the network. Without Sozu's
- * fee it stops before Sozu's share; null without a rate.
+ * One line of what the rate is made of. With `growth`, what stDUSK was worth
+ * at each end and over how many days, after Sozu's share: "stDUSK went from
+ * 1.2740 to 1.2953 DUSK over the last 30 days, after Sozu's share.", to four
+ * decimals, or six where four would read the same. Else whether it compounds,
+ * and over what: it's now's, from one read of the provisioners. With
+ * `provisioners` and `tipHeight`, the node's own figures, what a block pays
+ * stakers and what's staked; with `nativeRate` alone, the rate across the
+ * network. Without Sozu's fee it stops before Sozu's share; null without a rate.
  */
 export declare function sozuRateLine(input: {
+  growth?: SozuGrowth | null;
   nativeRate?: number | null;
   status?: SozuStatusLike | null;
   provisioners?: ReadonlyArray<{ amount?: unknown; eligibility?: unknown }> | null;

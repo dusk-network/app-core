@@ -626,6 +626,13 @@ const yearRate: number | null = sozuRate(0.2, sozuStatus);
 const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2, provisioners: [{ amount: 1, eligibility: 1 }], status: sozuStatus, tipHeight: 1 });
 void [sozuRead, earnedSoFar, year, yearRate, rateLine];
 
+import { GROWTH_MAX_AGE_MS, sozuGrowth, type SozuGrowth, type SozuPoint } from "@dusk-network/app-core/sozu";
+
+const growthRead: Promise<SozuGrowth | null> = sozuGrowth({ archive, cache: new Map(), days: 30, maxAgeMs: GROWTH_MAX_AGE_MS, now: 1, pool: "a", status: sozuStatus, tipHeight: 1n });
+const growthLine = growthRead.then((growth) => [sozuRateLine({ growth, locale: "en" }), sozuRate(0.2, extensionStatus, growth), sozuYear({ amount: 1n, growth, status: sozuStatus }).rewards]);
+const growthEnd = growthRead.then((growth): SozuPoint | undefined => growth?.to);
+void [growthLine, growthEnd];
+
 // /export
 import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, type ExportOptions, type ExportPeriod, type ExportResult } from "@dusk-network/app-core/export";
 

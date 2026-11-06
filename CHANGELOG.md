@@ -10,6 +10,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/names`: `looksAlike`, `sameName` and `nameSkeleton`, names that read the same or look alike by Unicode's confusables, `nameClash`, a contact's name that takes a profile's or another contact's, and `lookAlikes`
 - `/payment-links`: `readPaymentLink`, a link as Send reads it on the wallet's network: what it fills in, or why not, and the network it's for
 
+- `/sozu`: `sozuGrowth`, how stDUSK grew over the last 30 days, from the pool's own restakes on chain; `sozuRate`, `sozuYear` and `sozuRateLine` go by it once it's read
 - `/text`: `displayText` flags a number whose digits read right to left (`rtl_digits`) or mix digit systems (`mixed_digits`)
 
 ### Changed
