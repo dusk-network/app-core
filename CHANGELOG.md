@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.8.1]
+
+### Fixed
+
+- `/bridge`: `migrationFacts` reads an RPC's refusal of old logs, as Ethereum's gives a day on, as `"unread"` with the migration's gas, not an error
+
 ## [0.8.0]
 
 ### Added
