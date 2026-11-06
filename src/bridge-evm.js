@@ -240,7 +240,10 @@ async function readMigration(read, { approval: given, hash, head, route, rpcUrl 
 
   fact.approvalState = spent.state;
 
-  return { fact, final: (await head()) - block >= FINAL_BLOCKS && spent.state !== "unread" };
+  // Kept for good once it's final and all of it was read: the approval's receipt too.
+  const whole = spent.state !== "unread" && (!fact.approval || (fact.approval.gasWei !== null && fact.approval.at !== null));
+
+  return { fact, final: whole && (await head()) - block >= FINAL_BLOCKS };
 }
 
 /**

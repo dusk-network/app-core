@@ -31,7 +31,8 @@
  *   text isn't changed: it's for the app to say;
  * - "mixed_digits": a number whose digits are of more than one system, as
  *   "1٠5", whose Arabic-Indic zero looks like a point. A number goes on past
- *   one decimal or group mark between its digits, not past a space, and a
+ *   one decimal or group mark between its digits, not past a space, and holds
+ *   an emoji's selector or a keycap's mark on its digits; a
  *   numeral that's no decimal digit, as ½, is a system of its own. The text
  *   isn't changed: it's for the app to say;
  * - "rtl_digits": numerals that read right to left, as N'Ko's and Adlam's

@@ -390,72 +390,81 @@ export async function sozuGrowth({ archive, cache, days = GROWTH_DAYS, maxAgeMs 
   if (!Number.isSafeInteger(days) || days < 1) throw new RangeError("A period is a whole number of days");
 
   const key = `sozu-growth:${id}:${days}`;
+  const figures = readStatus(status).pool;
+  // The growth as this caller has it: none where its status's rate now isn't
+  // the latest restake's, as then what was read isn't the pool's figures.
+  /** @param {SozuGrowth | null} growth */
+  const ofCaller = (growth) => (growth && (!figures || Math.abs(grownBy(growth.to, figures)) <= RATE_TOLERANCE) ? growth : null);
   const kept = growthRead(cache?.get(key));
 
-  if (kept && now - kept.readAt >= 0 && now - kept.readAt < maxAgeMs) return kept.growth;
+  if (kept && now - kept.readAt >= 0 && now - kept.readAt < maxAgeMs) return ofCaller(kept.growth);
 
   const under = cache ? growthsUnderWay.get(cache)?.get(key) : undefined;
 
-  if (under) return under;
+  if (under) return ofCaller(await under);
 
-  const answer = (async () => {
-    try {
-      const tip = tipHeight === undefined || tipHeight === null ? Number((await archive.query("query { tip: block(height: -1) { header { height } } }"))?.tip?.header?.height) : Number(tipHeight);
-      const then = tip - days * BLOCKS_PER_DAY;
+  const answer = readGrowth(archive, id, days, tipHeight);
+  const reads = cache ? (growthsUnderWay.get(cache) ?? new Map()) : null;
 
-      if (!Number.isSafeInteger(tip) || then < TXS_BLOCKS * TXS_WINDOWS) return null;
-
-      // The latest restake, and the one nearest the period's start.
-      const latest = Array.from({ length: TXS_WINDOWS }, (_, i) => [`n${i}`, tip - TXS_BLOCKS * (i + 1) + 1, tip - TXS_BLOCKS * i]);
-      const first = Array.from({ length: TXS_WINDOWS }, (_, i) => [`t${i}`, then - (TXS_BLOCKS * TXS_WINDOWS) / 2 + TXS_BLOCKS * i, then - (TXS_BLOCKS * TXS_WINDOWS) / 2 + TXS_BLOCKS * (i + 1) - 1]);
-      const listed = await archive.query(
-        `query { ${[...latest, ...first].map(([alias, from, to]) => `${alias}: blockTxs(range: [${from}, ${to}], contract: ${JSON.stringify(id)}) { id blockHeight blockTimestamp err tx { json } }`).join(" ")} }`
-      );
-      /** @param {(string | number)[][]} windows */
-      const restakesIn = (windows) => windows.flatMap(([alias]) => (Array.isArray(listed?.[alias]) ? listed[alias] : [])).map((each) => restakeOf(each, id)).filter((each) => each !== null);
-      const end = restakesIn(latest).sort((a, b) => b.height - a.height)[0];
-      const start = restakesIn(first).sort((a, b) => Math.abs(a.height - then) - Math.abs(b.height - then))[0];
-
-      if (!end || !start || start.height >= end.height) return null;
-
-      const blocks = await archive.query(`query { a: contractEvents(height: ${start.height}) { json } b: contractEvents(height: ${end.height}) { json } }`);
-      const from = pointOf(blocks?.a?.json, start, id);
-      const to = pointOf(blocks?.b?.json, end, id);
-      const pool = readStatus(status).pool;
-
-      // What the latest restake says is the pool's rate now, or it isn't the pool's figures.
-      if (!from || !to || (pool && Math.abs(grownBy(to, pool)) > RATE_TOLERANCE)) return null;
-
-      const span = to.at - from.at;
-
-      if (span <= 0) return null;
-
-      /** @type {SozuGrowth} */
-      const growth = { days: Math.round(span / DAY_MS), from, rate: (grownBy(to, from) * YEAR_MS) / span, to };
-
-      cache?.set(key, JSON.stringify({ growth: JSON.parse(growthKept(growth)), readAt: now }));
-
-      return growth;
-    } catch {
-      // What can't be read says nothing: the rate as it's worked out stands.
-      return null;
-    }
-  })();
-
-  if (cache) {
-    const reads = growthsUnderWay.get(cache) ?? new Map();
-
+  if (cache && reads) {
     growthsUnderWay.set(cache, reads);
     reads.set(key, answer);
-
-    try {
-      return await answer;
-    } finally {
-      reads.delete(key);
-    }
   }
 
-  return answer;
+  try {
+    const growth = await answer;
+
+    // Kept where this caller's status agrees with it, or it has none to say.
+    if (growth && ofCaller(growth)) cache?.set(key, JSON.stringify({ growth: JSON.parse(growthKept(growth)), readAt: now }));
+
+    return ofCaller(growth);
+  } finally {
+    reads?.delete(key);
+  }
+}
+
+/**
+ * How the pool's stDUSK grew over `days`, as the chain says: null where it
+ * can't be read. Nothing here knows what any caller's status says.
+ *
+ * @param {Pick<Archive, "query">} archive
+ * @param {string} id The pool's contract ID
+ * @param {number} days
+ * @param {number | bigint | null | undefined} tipHeight
+ * @returns {Promise<SozuGrowth | null>}
+ */
+async function readGrowth(archive, id, days, tipHeight) {
+  try {
+    const tip = tipHeight === undefined || tipHeight === null ? Number((await archive.query("query { tip: block(height: -1) { header { height } } }"))?.tip?.header?.height) : Number(tipHeight);
+    const then = tip - days * BLOCKS_PER_DAY;
+
+    if (!Number.isSafeInteger(tip) || then < TXS_BLOCKS * TXS_WINDOWS) return null;
+
+    // The latest restake, and the one nearest the period's start.
+    const latest = Array.from({ length: TXS_WINDOWS }, (_, i) => [`n${i}`, tip - TXS_BLOCKS * (i + 1) + 1, tip - TXS_BLOCKS * i]);
+    const first = Array.from({ length: TXS_WINDOWS }, (_, i) => [`t${i}`, then - (TXS_BLOCKS * TXS_WINDOWS) / 2 + TXS_BLOCKS * i, then - (TXS_BLOCKS * TXS_WINDOWS) / 2 + TXS_BLOCKS * (i + 1) - 1]);
+    const listed = await archive.query(
+      `query { ${[...latest, ...first].map(([alias, from, to]) => `${alias}: blockTxs(range: [${from}, ${to}], contract: ${JSON.stringify(id)}) { id blockHeight blockTimestamp err tx { json } }`).join(" ")} }`
+    );
+    /** @param {(string | number)[][]} windows */
+    const restakesIn = (windows) => windows.flatMap(([alias]) => (Array.isArray(listed?.[alias]) ? listed[alias] : [])).map((each) => restakeOf(each, id)).filter((each) => each !== null);
+    const end = restakesIn(latest).sort((a, b) => b.height - a.height)[0];
+    const start = restakesIn(first).sort((a, b) => Math.abs(a.height - then) - Math.abs(b.height - then))[0];
+
+    if (!end || !start || start.height >= end.height) return null;
+
+    const blocks = await archive.query(`query { a: contractEvents(height: ${start.height}) { json } b: contractEvents(height: ${end.height}) { json } }`);
+    const from = pointOf(blocks?.a?.json, start, id);
+    const to = pointOf(blocks?.b?.json, end, id);
+    const span = from && to ? to.at - from.at : 0;
+
+    if (!from || !to || span <= 0) return null;
+
+    return { days: Math.round(span / DAY_MS), from, rate: (grownBy(to, from) * YEAR_MS) / span, to };
+  } catch {
+    // What can't be read says nothing: the rate as it's worked out stands.
+    return null;
+  }
 }
 
 /**

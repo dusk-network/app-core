@@ -416,6 +416,26 @@ describe("how Sozu's stDUSK grew", () => {
     assert.equal(await sozuGrowth({ archive: archiveOf(chains.mainnet), pool: chains.mainnet.pool, status: /** @type {any} */ ({ pool: { stake: now.stake * 2n, supply: now.supply } }) }), null);
   });
 
+  it("checks each caller's own status, also against what's kept or read at once for another", async () => {
+    const cache = new Map();
+    const archive = archiveOf(chains.mainnet);
+    const growth = /** @type {any} */ (await sozuGrowth({ archive, cache, pool: chains.mainnet.pool }));
+    const off = /** @type {any} */ ({ pool: { stake: growth.to.stake * 2n, supply: growth.to.supply } });
+
+    // Kept without a status, it's still not the pool's for a status it doesn't match.
+    assert.equal(await sozuGrowth({ archive, cache, pool: chains.mainnet.pool, status: off }), null);
+
+    // Read once for two callers at once: each gets its own answer.
+    const both = new Map();
+    const [plain, checked] = await Promise.all([
+      sozuGrowth({ archive: archiveOf(chains.mainnet), cache: both, pool: chains.mainnet.pool }),
+      sozuGrowth({ archive: archiveOf(chains.mainnet), cache: both, pool: chains.mainnet.pool, status: off }),
+    ]);
+
+    assert.deepEqual(plain, growth);
+    assert.equal(checked, null);
+  });
+
   it("is nothing where no restake is found at either end, or the archive can't be read: the rate is worked out as before", async () => {
     const none = { ...chains.mainnet, txs: chains.mainnet.txs.filter((/** @type {any} */ tx) => tx.blockHeight > chains.mainnet.tip - 1000) };
 

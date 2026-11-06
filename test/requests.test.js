@@ -171,7 +171,9 @@ describe("the payment a send would make again", () => {
   });
 
   it("is a payment whose transaction refunded its unspent gas to another account, by what it paid", () => {
-    like(sentAlready([sent({ entry: { refund: 2_000n }, value: 1_900_000n + 2_000n })], again), { hash: "s1" });
+    like(sentAlready([sent({ entry: { refund: 2_000n, success: true }, value: 1_900_000n + 2_000n })], again), { hash: "s1" });
+    // On chain before its details are read, its value is the wallet's record's, which has no refund in it.
+    like(sentAlready([sent({ entry: { refund: 3_000n }, sent: { amount: "1900000" }, value: 1_900_000n })], again), { hash: "s1" });
   });
 
   it("is none for a send the node dropped, whatever its memo, though one on its way counts", () => {

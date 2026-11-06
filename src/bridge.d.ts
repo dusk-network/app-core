@@ -641,7 +641,7 @@ export type MigrationEvm = {
    * which spent none.
    */
   approvalState: "found" | "earlier" | "beyond" | "unread" | "none";
-  /** What the migration and its own approval paid in gas together, to the wei. */
+  /** What the migration and its own approval paid in gas together, to the wei: the migration's alone while the approval's receipt can't be read. */
   totalWei: bigint | null;
   /** The chain's coin, "BNB" or "ETH". */
   coin: string;

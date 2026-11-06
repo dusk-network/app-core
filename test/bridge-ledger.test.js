@@ -317,6 +317,20 @@ describe("a migration's side on its own chain", () => {
     like(facts.get(`0x${"a".repeat(64)}`), { state: "pending", totalWei: null });
   });
 
+  it("keeps nothing for good while the approval's receipt can't be read, and reads it again", async () => {
+    const cache = new Map();
+    // The RPC lists the approval, but has no receipt of it for a moment.
+    const brief = chainOf({ receipts: { [firstApproval]: null } });
+    const first = await migrationFacts({ cache, fetch: brief.fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(first.get(firstMigration), { approvalState: "found", totalWei: 2_437_650_000_000n });
+    assert.equal(cache.size, 0);
+
+    const later = await migrationFacts({ cache, fetch: chainOf().fetch, migrations: [{ hash: firstMigration, route }], network: 1 });
+
+    like(later.get(firstMigration), { approvalState: "found", totalWei: 4_748_550_000_000n });
+  });
+
   it("keeps what's final in a cache, and reads it once", async () => {
     const cache = new Map();
     const chain = chainOf();

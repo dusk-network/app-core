@@ -86,7 +86,8 @@ function zeroOf(digit) {
  * digits are of more than one system, as 1٠5 with an Arabic-Indic zero that
  * looks like a point, and one in numerals that read right to left, as N'Ko's
  * 0001 that shows as 1000. A number goes on past one separator between its
- * numerals; a numeral that's no decimal digit is a system of its own.
+ * numerals, and holds the selectors and marks on them; a numeral that's no
+ * decimal digit is a system of its own.
  *
  * @param {string} source
  */
@@ -103,6 +104,9 @@ function numberFlags(source) {
       found.mixed ||= systems.size > 1;
       found.rightToLeft ||= RIGHT_TO_LEFT.test(char) && !LEFT_TO_RIGHT_NUMERALS.test(char);
       separated = false;
+    } else if (systems && (EMOJI_SELECTOR.test(char) || MARK.test(char))) {
+      // An emoji's selector or a keycap's mark, kept as it is: part of the numeral it's on.
+      continue;
     } else if (systems && !separated && NUMBER_SEPARATOR.test(char)) {
       separated = true;
     } else {

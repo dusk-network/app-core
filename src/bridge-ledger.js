@@ -105,7 +105,10 @@ export function transferLedger({ arrival, bridgeFee, evm, failed, gasWei, locale
 
   const parts = {
     bridgeFee: wentThrough ? line("bridgeFee", bridgeCut, { round: "nearest" }) : null,
-    gas: gasLine && chainGas !== null && ownChain ? { ...gasLine, parts: ownChain.approvalState === "found" ? /** @type {const} */ (["approval", "migration"]) : /** @type {const} */ (["migration"]) } : gasLine,
+    gas:
+      gasLine && chainGas !== null && ownChain
+        ? { ...gasLine, parts: ownChain.approvalState === "found" && ownChain.approval?.gasWei !== null && ownChain.approval?.gasWei !== undefined ? /** @type {const} */ (["approval", "migration"]) : /** @type {const} */ (["migration"]) }
+        : gasLine,
     networkFee: line("networkFee", fees.length ? fees.reduce((sum, fee) => sum + fee, 0n) : null, { round: "nearest" }),
     received: wentThrough ? line("received", paid ?? worked, { expected: paid === null, unit: kind === "service" ? (token ?? coin) : coin }) : null,
     sent: wentThrough ? line("sent", toSend ?? (kind === "migration" ? paid : null), { unit: kind === "migration" ? (token ?? coin) : coin }) : null,

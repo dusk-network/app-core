@@ -134,6 +134,8 @@ describe("text a person must trust", () => {
     // Adlam's digits read right to left too, and a single one turns what's beside it around.
     assert.deepEqual(displayText("Pay \u{1e951}\u{1e950} DUSK").flags, ["rtl_digits"]);
     assert.deepEqual(displayText("Pay ߁ 10 ߂ 1000 DUSK").flags, ["rtl_digits"]);
+    // An emoji's selector or a keycap's mark is part of the number it's on: it shows as the digits do.
+    for (const mixed of ["1\ufe0f\u0660\ufe0f5", "1\ufe0f\u20e3\u0660\ufe0f\u20e35\ufe0f\u20e3", "1\ufe0e\u0660"]) assert.deepEqual(displayText(mixed).flags, ["mixed_digits"], mixed);
     // A number goes on past a decimal or group mark, not past a space.
     for (const mixed of ["1.٠5", "1,٠٠٠", "1'٠00", "١٢٣۴", "𝟏𝟙", "1½", "١0"]) assert.deepEqual(displayText(mixed).flags, ["mixed_digits"], mixed);
     // With what else it flags, as it's shown.
