@@ -649,6 +649,26 @@ describe("the bridge", () => {
     assert.match(record.Description, /^From BNB Smart Chain · 0xea3e4e/);
   });
 
+  it("puts a migration's fees on its own chain in the period of their own time, not their payout's", async () => {
+    // Codex's: a fee of 30 September went in Q4 with its payout of 1 October, and out of Q3.
+    const bsc = readFixture("bridge-migration-bsc.json");
+    const receiver = bsc.payouts.entries[0].events[0].data.receiver;
+    const rows = activityRows({ account: receiver, network: 1, public: bsc.payouts.entries.map((/** @type {any} */ raw) => entryFrom(receiver, raw, bsc.payouts.details[raw.origin], {}, { network: 1 })) });
+    const chain = fakeChain({
+      head: BigInt(bsc.head),
+      logs: bsc.logs.map((/** @type {any} */ log) => ({ address: log.address, block: BigInt(log.blockNumber), data: log.data, hash: log.transactionHash, index: Number(BigInt(log.logIndex)), topics: log.topics })),
+      receipts: bsc.receipts,
+      timeAt: (n) => Number(BigInt(bsc.blocks[hex(n)]?.timestamp ?? "0x0")),
+    });
+    const evm = await migrationFacts({ fetch: chain.fetch, migrations: migrationsOf(rows), network: 1 });
+    // Both migrations and their approvals before it, both payouts after it.
+    const boundary = 1_793_892_000_000;
+    const coinsOf = async (period) => recordsOf((await accountingCsv({ evm, period, profile: { account: receiver, name: "Lena" }, rows })).csv).map((record) => record["Sent Currency"] || record["Received Currency"]);
+
+    assert.deepEqual(await coinsOf({ from: 0, label: "before", to: boundary }), ["BNB", "BNB", "BNB", "BNB"]);
+    assert.deepEqual(await coinsOf({ from: boundary, label: "after", to: Number.MAX_SAFE_INTEGER }), ["DUSK", "DUSK"]);
+  });
+
   it("writes what a migration paid on its own chain, its approval and itself, each at its own time and hash, with its payout", async () => {
     // Recorded on BNB Smart Chain and Dusk: a migration after its own approval, and its payout.
     const bsc = readFixture("bridge-migration-bsc.json");

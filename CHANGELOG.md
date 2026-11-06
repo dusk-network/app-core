@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.8.2]
+
+### Fixed
+
+- `/export`: `accountingCsv` puts a migration's fees on its own chain in the period of their own time, not their payout's
+
 ## [0.8.1]
 
 ### Fixed

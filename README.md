@@ -303,8 +303,8 @@ The file is [Koinly's universal CSV](https://support.koinly.io/en/articles/94899
 - A stake with Sozu is a trade of DUSK for stDUSK, and an unstake the trade back, once `facts` says its stDUSK, with its deposit fee and what a stDUSK was worth in the description. Until then, it's what moved under the staking tags.
 - A token's transfer is what it moved, with its amount, currency and recipient in the same columns, from the wallet's record of it (`sent.asset`, which `settleSends` keeps), with no value in fiat. An allowance is its fee, saying what it allows and to whom. What the wallet has no record of stays what the chain says: a call, and its fee.
 - A memo with commas, quotes and line breaks comes through, with nothing in it that hides or reorders what it says, and is never read as a formula.
-- A migration's side on its own chain, given as `evm` (`migrationFacts` of `/bridge`), has lines of its own before its payout's: what its approval and it paid in gas there, in that chain's coin, as costs, each at its own time, with its own hash and its EVM address as the account. They're in the file of the payout's period.
-- `rows` must be all of the period's: read the history down to it first. What was left out is counted: on its way, not looked up yet, or outside the period.
+- A migration's side on its own chain, given as `evm` (`migrationFacts` of `/bridge`), has lines of its own before its payout's: what its approval and it paid in gas there, in that chain's coin, as costs, each at its own time, with its own hash and its EVM address as the account. Each is in the file of its own time's period, which may be one before its payout's.
+- `rows` must be all of the period's, and with `evm`, every migration's payout from the period's start on: one after the period can have fees in it. Read the history down to the period first. What was left out is counted: on its way, not looked up yet, or outside the period.
 
 ## Sozu
 

@@ -81,7 +81,12 @@ export type ExportProfile = { name?: string | null; account?: string | null; add
 
 /** What `accountingCsv` takes. */
 export type ExportOptions = {
-  /** `/activity`'s rows of the account, all of them for the period. */
+  /**
+   * `/activity`'s rows of the account, all of them for the period; with
+   * `evm`, every migration's payout from the period's start on too, as a
+   * migration's fees go in the period of their own time, which may be before
+   * their payout's.
+   */
   rows: Iterable<ActivityRow>;
   /** The profile the file is of. */
   profile: ExportProfile;
