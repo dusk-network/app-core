@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./amounts", "./text", "./payment-links", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
 const SHARED = ["./src/bridge-common.js", "./src/bridge-ledger.js", "./src/bridge-status.js"];
 /** The entry points that need nothing from anywhere. */
@@ -120,6 +120,11 @@ describe("the package", () => {
 
     assert.equal(parsePaymentLink(""), null);
     assert.equal(makePaymentLink({ to: "" }).ok, false);
+
+    const { matchRequests, sentAlready } = await import("@dusk-network/app-core/requests");
+
+    assert.deepEqual(matchRequests([], []), new Map());
+    assert.equal(sentAlready([], { lux: 1n, memo: "", to: "" }), null);
 
     const { accountingCsv, quarterPeriod } = await import("@dusk-network/app-core/export");
 
@@ -242,6 +247,8 @@ describe("the package", () => {
       "src/history.js",
       "src/payment-links.d.ts",
       "src/payment-links.js",
+      "src/requests.d.ts",
+      "src/requests.js",
       "src/shielded.d.ts",
       "src/shielded.js",
       "src/sozu.d.ts",

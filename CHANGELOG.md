@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.8.0]
+
+### Added
+
+- `/requests`: `matchRequests`, what came in for each payment request, and `sentAlready`, the payment a send would make again; a request of no amount paid with its memo is paid
+
 ## [0.7.2]
 
 ### Added

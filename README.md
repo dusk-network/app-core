@@ -30,6 +30,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits` |
 | `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) |
 | `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
+| `@dusk-network/app-core/requests` | Payment requests: what came in for each request a wallet made (`matchRequests`), and the payment a send would make again (`sentAlready`) |
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
@@ -85,6 +86,20 @@ networkMismatch(link.chainId, walletChain); // "This request is for Mainnet. You
 - `parsePaymentLink` reads a `dusk:` link, an https link to the web wallet's Send on a network there's a file for (or at `walletUrl`, the app's own address), or a recipient as it is. An https link anywhere else is no payment link: it reads as a recipient, which Send refuses. One that says a network other than its wallet's is null.
 - `makePaymentLink` checks what Send checks, and says what's wrong by the field: a recipient that is one, an amount above 0 with 9 decimals at most, and a memo of 512 bytes at most.
 - The https link ends with its network, so a mail or chat client that cuts a link's last punctuation cuts none of it.
+
+## Requests
+
+```js
+import { matchRequests, sentAlready } from "@dusk-network/app-core/requests";
+
+const matches = matchRequests(kept, rows); // the wallet's requests, as it keeps them, and `/activity`'s rows
+// matches.get(id): { state: "paid", matched: "amount-memo", hash, at, lux, memo, more: [{ hash, at, lux, matched, memo }] }
+sentAlready(rows, { to, lux, memo }); // before a send: the row of the payment it would make again, or null
+```
+
+- A request is kept as `{ id, to, lux, memo, network, at, paid? }`: `lux` as text, null for any amount, and `paid` the payment that paid it, for it to stay paid once that payment is too far back to read.
+- "paid" takes the amount and the memo asked, both, in one payment, or the memo of a request of no amount; anything less is "check", with what `matched`, never paid. "waiting" is none yet. A payment answers one request, to the address it asked on, from 5 minutes before it was asked: the oldest it pays in full, before any it matches less. `more` holds what else came in for it, oldest first: one with all of it again (`matched` "amount-memo") paid it twice.
+- `sentAlready` is a payment out to the same recipient, of the same amount and memo, that didn't fail: in the last 10 minutes, or at any time with a memo.
 
 ## History
 

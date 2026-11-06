@@ -577,6 +577,20 @@ void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
 // @ts-expect-error a request needs its recipient
 void makePaymentLink({ amount: "1" });
 
+// /requests
+import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched } from "@dusk-network/app-core/requests";
+
+declare const readRowsForRequests: import("@dusk-network/app-core/activity").ActivityRow[];
+const keptRequests: KeptRequest[] = [{ at: 1, id: "a", lux: null, memo: "Factura 33", network: "testnet", to: "account" }];
+const requestMatches: Map<string, RequestMatch> = matchRequests(keptRequests, readRowsForRequests);
+const requestState: "check" | "paid" | "waiting" | undefined = requestMatches.get("a")?.state;
+const paidAgain: RequestMatched[] | undefined = requestMatches.get("a")?.more?.map((each) => each.matched);
+const repeat: import("@dusk-network/app-core/activity").ActivityRow | null = sentAlready(readRowsForRequests, { lux: 1n, memo: "", to: "account" });
+const requestWindows: [300000, 600000] = [CLOCK_SKEW_MS, AGAIN_MS];
+void [requestState, paidAgain, repeat, requestWindows];
+// @ts-expect-error a request's amount is lux as text, or null
+void matchRequests([{ at: 1, id: "a", lux: 1n, memo: "", to: "account" }], []);
+
 // /sozu
 import { sozuFacts, sozuPosition, sozuRate, sozuRateLine, sozuYear, type SozuFact, type SozuPosition, type SozuStatusLike, type SozuYear } from "@dusk-network/app-core/sozu";
 import type { ActivityRow as ReadRow } from "@dusk-network/app-core/activity";
