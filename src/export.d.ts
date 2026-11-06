@@ -55,6 +55,7 @@
  */
 
 import type { ActivityRow } from "./activity.js";
+import type { MigrationEvm } from "./bridge.js";
 import type { SozuFact } from "./sozu.js";
 
 /** The file's columns: Koinly's universal twelve, then what it ignores. */
@@ -99,6 +100,12 @@ export type ExportOptions = {
   currency?: string;
   /** What each stake and unstake with Sozu did (`sozuFacts` of `/sozu`). */
   facts?: ReadonlyMap<string, SozuFact>;
+  /**
+   * Each migration's side on its own chain, by its hash (`migrationFacts` of
+   * `/bridge`): a payout's migration has a line of what its own approval and
+   * it paid in gas there, each at its own time and hash, of its EVM address.
+   */
+  evm?: ReadonlyMap<string, MigrationEvm>;
   /** The person's own name for a counterparty, only when they asked for their contact names to be in the file. */
   contactName?: (counterparty: string) => string | null | undefined;
   /** The network's name: the file's name says it, unless it's "mainnet". */

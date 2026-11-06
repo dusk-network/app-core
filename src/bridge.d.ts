@@ -543,6 +543,8 @@ export type LedgerLine = {
   exact: string;
   /** Worked out from what was sent: what will arrive, not yet what did. */
   expected: boolean;
+  /** A migration's gas, read by `migrationFacts`: what it's for, the approval it spent and the migration, or the migration alone. */
+  parts?: ReadonlyArray<"approval" | "migration">;
 };
 
 /**
@@ -587,6 +589,8 @@ export type LedgerInput = {
   arrival?: Arrival | null;
   /** The gas it paid on the other chain, in wei: `gasUsed` × `effectiveGasPrice` of its receipt. */
   gasWei?: bigint | number | string | null;
+  /** A migration's side on its own chain, as `migrationFacts` read it: its gas, with the approval it spent, and what it sent. `gasWei` goes first. */
+  evm?: MigrationEvm | null;
   /** It failed on Dusk: the row's status says, unless given. */
   failed?: boolean;
   /** Whose separators the amounts are written in; `amountLocale()`'s by default. */
@@ -598,6 +602,74 @@ export type LedgerInput = {
  * a line's `text`, its detail `exact`. Null for a row that's no bridge transfer.
  */
 export declare function transferLedger(input?: LedgerInput): TransferLedger | null;
+
+/** An ERC-20 token's `Approval(owner, spender, value)` topic. */
+export declare const APPROVAL_TOPIC: "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
+
+/**
+ * A migration's side on its own chain, BNB Smart Chain or Ethereum: what it
+ * sent and paid there, and the approval it spent. Amounts in that chain's
+ * smallest unit (wei), but what it sent, which is in lux.
+ */
+export type MigrationEvm = {
+  /** The migration's transaction there, in lower case. */
+  hash: string;
+  route: string;
+  /**
+   * "mined": it went through; "failed": it's in a block but failed, its gas
+   * paid; "pending": the RPC has no receipt of it yet; "not-migration": it's
+   * no call of the route's contract; "error": the RPC couldn't be read (`error`).
+   */
+  state: "mined" | "failed" | "pending" | "not-migration" | "error";
+  /** The EVM address that sent it, in lower case. */
+  from: string | null;
+  block: number | null;
+  /** Its block's time, in milliseconds. */
+  at: number | null;
+  /** What it sent of the token, in lux. */
+  lux: bigint | null;
+  /** What it paid in gas: `gasUsed` × `effectiveGasPrice`. */
+  gasWei: bigint | null;
+  /** The approval it spent: its transaction, block, time and gas. */
+  approval: { hash: string; block: number; at: number | null; gasWei: bigint | null } | null;
+  /**
+   * "found": the approval it spent, its own; "earlier": the approval it spent,
+   * which an earlier migration spent from first, and whose fee is that one's;
+   * "beyond": none in the blocks read back, over 75,000 at most (an hour on
+   * BSC at 5,000, up to about 15 hours); "unread": the RPC no longer gives
+   * logs that far back; "none": not looked for, as for a migration that failed,
+   * which spent none.
+   */
+  approvalState: "found" | "earlier" | "beyond" | "unread" | "none";
+  /** What the migration and its own approval paid in gas together, to the wei. */
+  totalWei: bigint | null;
+  /** The chain's coin, "BNB" or "ETH". */
+  coin: string;
+  error?: string;
+};
+
+/**
+ * Each migration's side on its own chain, by its hash: its receipt, the
+ * approval it spent and that approval's receipt, from its route's RPC (the
+ * network's, or `rpcUrl`). The approval is the owner's latest of the route's
+ * contract on its token before the migration, wherever and whenever it was
+ * signed, read back from the migration's block a window of blocks at a time;
+ * `approval` is one the app has the hash of, which is checked and read first.
+ * `route` is the migration's route ID, which a network of one migration route
+ * needn't give. A few requests each: what's final is kept in `cache` (a `Map`
+ * of text does) and not read again.
+ */
+export declare function migrationFacts(options: {
+  network: BridgeNetwork;
+  migrations: Iterable<{ hash: string; route?: string | null; approval?: string | null }>;
+  fetch?: FetchLike;
+  rpcUrl?: string;
+  cache?: FactCache;
+  timeoutMs?: number;
+}): Promise<Map<string, MigrationEvm>>;
+
+/** The migrations `/activity`'s rows were paid for: each payout on Dusk a migration's route paid, with the migration's hash, which is its memo, its route and the payout's hash. */
+export declare function migrationsOf(rows: Iterable<ActivityRow>): { hash: string; route: string; payout: string }[];
 
 /** How long `bridgeStatus` keeps what it read: 10 minutes, in milliseconds. */
 export declare const STATUS_MAX_AGE_MS: 600000;

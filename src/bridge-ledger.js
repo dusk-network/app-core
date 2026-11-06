@@ -14,6 +14,7 @@ import { luxOf, networkOf } from "./bridge-common.js";
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
 /** @typedef {import("./bridge.js").LedgerInput} LedgerInput */
 /** @typedef {import("./bridge.js").LedgerLine} LedgerLine */
+/** @typedef {import("./bridge.js").MigrationEvm} MigrationEvm */
 /** @typedef {import("./bridge.js").TransferLedger} TransferLedger */
 /** @typedef {import("@dusk-network/networks").Route} Route */
 
@@ -70,9 +71,9 @@ function routeOf(route, network, kind) {
  * @param {LedgerInput} [input]
  * @returns {TransferLedger | null}
  */
-export function transferLedger({ arrival, bridgeFee, failed, gasWei, locale = amountLocale(), network, networkFee, received, route, row, sent } = {}) {
+export function transferLedger({ arrival, bridgeFee, evm, failed, gasWei, locale = amountLocale(), network, networkFee, received, route, row, sent } = {}) {
   const fromRow = row ? factsOfRow(row) : null;
-  const chosen = routeOf(route ?? fromRow?.route, network, fromRow?.kind ?? null);
+  const chosen = routeOf(route ?? fromRow?.route ?? evm?.route, network, fromRow?.kind ?? (evm ? "migration" : null));
   const kind = chosen?.kind ?? fromRow?.kind ?? null;
 
   if (!kind) return null;
@@ -80,9 +81,11 @@ export function transferLedger({ arrival, bridgeFee, failed, gasWei, locale = am
   const coin = "DUSK";
   const token = chosen?.chain && "tokenLabel" in chosen.chain ? chosen.chain.tokenLabel : undefined;
   const fees = (networkFee === undefined ? [row?.fee] : Array.isArray(networkFee) ? networkFee : [networkFee]).map(known).filter((fee) => fee !== null);
-  const wentThrough = !(failed ?? row?.status === "failed");
+  // A migration's side on its own chain, as `migrationFacts` read it.
+  const ownChain = kind === "migration" && evm && (evm.state === "mined" || evm.state === "failed") ? evm : null;
+  const wentThrough = !(failed ?? (row?.status === "failed" || ownChain?.state === "failed"));
   const bridgeCut = kind === "service" ? (known(bridgeFee) ?? (chosen?.kind === "service" ? chosen.feeLux : null)) : null;
-  const toSend = known(sent) ?? fromRow?.sent ?? null;
+  const toSend = known(sent) ?? ownChain?.lux ?? fromRow?.sent ?? null;
   const arrived = arrival?.state === "arrived" ? arrival.amount : null;
   const paidNothing = arrival?.state === "unknown" && arrival.reason === "no-payout";
   const paid = known(received) ?? arrived ?? (paidNothing ? 0n : null) ?? fromRow?.received ?? null;
@@ -96,10 +99,13 @@ export function transferLedger({ arrival, bridgeFee, failed, gasWei, locale = am
    */
   const line = (key, amount, { decimals = LUX_DECIMALS, unit = coin, round = "down", expected = false } = {}) =>
     amount === null ? null : { amount, coin: unit, decimals, expected, key, ...formatAmount(amount, { decimals, locale, round }) };
+  // The gas of a migration's own chain: the approval it spent with it, where that's its own.
+  const chainGas = known(gasWei) === null && ownChain?.totalWei !== undefined && ownChain.totalWei !== null ? ownChain.totalWei : null;
+  const gasLine = line("gas", known(gasWei) ?? chainGas, { decimals: WEI_DECIMALS, round: "nearest", unit: chosen?.chain?.currency?.symbol ?? ownChain?.coin ?? coin });
 
   const parts = {
     bridgeFee: wentThrough ? line("bridgeFee", bridgeCut, { round: "nearest" }) : null,
-    gas: line("gas", known(gasWei), { decimals: WEI_DECIMALS, round: "nearest", unit: chosen?.chain?.currency?.symbol ?? coin }),
+    gas: gasLine && chainGas !== null && ownChain ? { ...gasLine, parts: ownChain.approvalState === "found" ? /** @type {const} */ (["approval", "migration"]) : /** @type {const} */ (["migration"]) } : gasLine,
     networkFee: line("networkFee", fees.length ? fees.reduce((sum, fee) => sum + fee, 0n) : null, { round: "nearest" }),
     received: wentThrough ? line("received", paid ?? worked, { expected: paid === null, unit: kind === "service" ? (token ?? coin) : coin }) : null,
     sent: wentThrough ? line("sent", toSend ?? (kind === "migration" ? paid : null), { unit: kind === "migration" ? (token ?? coin) : coin }) : null,

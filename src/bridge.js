@@ -52,6 +52,7 @@ import { DETAILS_BATCH, TRANSFER_CONTRACT, fetchTxDetails, historyRange } from "
 
 export { CREDIT_WINDOW_MS, ETH_BRIDGE_FINALIZED_TOPIC, EXPLORER_PAGES, TRANSFER_TOPIC, WAIT_MS } from "./bridge-common.js";
 export { depositArrivalsFromExplorer } from "./bridge-explorer.js";
+export { APPROVAL_TOPIC, migrationFacts, migrationsOf } from "./bridge-evm.js";
 export { transferLedger } from "./bridge-ledger.js";
 export { STATUS_MAX_AGE_MS, bridgeStatus } from "./bridge-status.js";
 

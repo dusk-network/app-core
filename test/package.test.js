@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
 const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./names", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
-const SHARED = ["./src/bridge-common.js", "./src/bridge-ledger.js", "./src/bridge-status.js", "./src/confusables.js"];
+const SHARED = ["./src/bridge-common.js", "./src/bridge-evm.js", "./src/bridge-ledger.js", "./src/bridge-status.js", "./src/confusables.js"];
 /** The shared modules that are data, which import nothing. */
 const DATA = ["./src/confusables.js"];
 /** The entry points that need nothing from anywhere. */
@@ -240,6 +240,7 @@ describe("the package", () => {
       "src/amounts.d.ts",
       "src/amounts.js",
       "src/bridge-common.js",
+      "src/bridge-evm.js",
       "src/bridge-explorer.d.ts",
       "src/bridge-explorer.js",
       "src/bridge-ledger.js",

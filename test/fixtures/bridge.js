@@ -117,15 +117,16 @@ export const tokenTransfer = ({ block, from, hash, to, token, wei }) => ({
 
 /**
  * An EVM chain's JSON-RPC: blocks up to `head`, block n made at `timeAt(n)`
- * (seconds), and `logs`, which eth_getLogs gives as a node does: in the
+ * (seconds), `logs`, which eth_getLogs gives as a node does: in the
  * blocks asked, from the contract asked, matching the topics asked (null
- * matching any); with their block's time when `stamps` (as DuskEVM's RPC
- * gives it). It refuses to search more than `maxRange` blocks at once, as
- * some RPCs do. `calls` keeps each call.
+ * matching any, a list any of its own), in their order (a log's `index`);
+ * with their block's time when `stamps` (as DuskEVM's RPC gives it); and
+ * transactions' `receipts`, by hash. It refuses to search more than
+ * `maxRange` blocks at once, as some RPCs do. `calls` keeps each call.
  *
- * @param {{ head: bigint | number, timeAt?: (n: bigint) => number, logs?: any[], maxRange?: bigint, stamps?: boolean, url?: string }} options
+ * @param {{ head: bigint | number, timeAt?: (n: bigint) => number, logs?: any[], receipts?: Record<string, any>, maxRange?: bigint, stamps?: boolean, url?: string }} options
  */
-export function fakeChain({ head, logs = [], maxRange, stamps = false, timeAt = (n) => 1_792_980_000 + Number(n), url }) {
+export function fakeChain({ head, logs = [], maxRange, receipts = {}, stamps = false, timeAt = (n) => 1_792_980_000 + Number(n), url }) {
   const chain = {
     /** @type {{ method: string, params: any[], url: string }[]} */
     calls: [],
@@ -147,6 +148,8 @@ export function fakeChain({ head, logs = [], maxRange, stamps = false, timeAt = 
         return json({ id, jsonrpc: "2.0", result: n > chain.head ? null : { number: hex(n), timestamp: hex(timeAt(n)) } });
       }
 
+      if (method === "eth_getTransactionReceipt") return json({ id, jsonrpc: "2.0", result: structuredClone(receipts[String(params[0]).toLowerCase()] ?? null) });
+
       if (method === "eth_getLogs") {
         const [filter] = params;
         const from = BigInt(filter.fromBlock);
@@ -162,13 +165,14 @@ export function fakeChain({ head, logs = [], maxRange, stamps = false, timeAt = 
               log.block >= from &&
               log.block <= to &&
               log.address.toLowerCase() === String(filter.address).toLowerCase() &&
-              filter.topics.every((/** @type {string | null} */ topic, /** @type {number} */ i) => topic === null || log.topics[i] === topic)
+              filter.topics.every((/** @type {string | string[] | null} */ topic, /** @type {number} */ i) => topic === null || (Array.isArray(topic) ? topic.includes(log.topics[i]) : log.topics[i] === topic))
           )
+          .sort((a, b) => (a.block < b.block ? -1 : a.block > b.block ? 1 : (a.index ?? 0) - (b.index ?? 0)))
           .map((log) => ({
             address: log.address.toLowerCase(),
             blockNumber: hex(log.block),
             data: log.data,
-            logIndex: "0x0",
+            logIndex: hex(log.index ?? 0),
             removed: false,
             topics: log.topics,
             transactionHash: log.hash,

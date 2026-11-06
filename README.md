@@ -37,7 +37,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
 | `@dusk-network/app-core/export` | An account's activity as the file an accountant or a tax tool reads, for a quarter or any dates: Koinly's universal CSV (`accountingCsv`, `quarterPeriod`, `datesPeriod`) |
 | `@dusk-network/app-core/sozu` | A stake with Sozu: put in, taken out, worth now and earned (`sozuPosition`), what an amount earns in a year (`sozuYear`, `sozuRate`), how stDUSK grew, from the chain (`sozuGrowth`), what the rate is made of (`sozuRateLine`), and what each stake and unstake did (`sozuFacts`) |
-| `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); the arrivals as `/activity` takes them (`arrivalsOf`); a transfer's exact amounts (`transferLedger`); and how a route is doing (`bridgeStatus`) |
+| `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); the arrivals as `/activity` takes them (`arrivalsOf`); a migration's side on its own chain, its gas and the approval it spent (`migrationFacts`, `migrationsOf`); a transfer's exact amounts (`transferLedger`); and how a route is doing (`bridgeStatus`) |
 | `@dusk-network/app-core/bridge-explorer` | Where a deposit to DuskEVM arrived, on DuskEVM's explorer alone (`depositArrivalsFromExplorer`): `/bridge`'s explorer path, for an app that reads nothing else, without the RPC path and `/history` |
 | `@dusk-network/app-core/duskevm-withdrawals` | A DuskEVM withdrawal's life, signing aside: its start on DuskEVM (`withdrawalCall`), finding an address's withdrawals (`syncWithdrawals`, `explorerWithdrawals`, `withdrawalsByNonce`), and on Dusk where each is, its proof and its claim, ready for the app's wallet to sign (`createWithdrawals`) |
 
@@ -302,6 +302,7 @@ The file is [Koinly's universal CSV](https://support.koinly.io/en/articles/94899
 - A stake with Sozu is a trade of DUSK for stDUSK, and an unstake the trade back, once `facts` says its stDUSK, with its deposit fee and what a stDUSK was worth in the description. Until then, it's what moved under the staking tags.
 - A token's transfer is what it moved, with its amount, currency and recipient in the same columns, from the wallet's record of it (`sent.asset`, which `settleSends` keeps), with no value in fiat. An allowance is its fee, saying what it allows and to whom. What the wallet has no record of stays what the chain says: a call, and its fee.
 - A memo with commas, quotes and line breaks comes through, with nothing in it that hides or reorders what it says, and is never read as a formula.
+- A migration's side on its own chain, given as `evm` (`migrationFacts` of `/bridge`), has lines of its own before its payout's: what its approval and it paid in gas there, in that chain's coin, as costs, each at its own time, with its own hash and its EVM address as the account. They're in the file of the payout's period.
 - `rows` must be all of the period's: read the history down to it first. What was left out is counted: on its way, not looked up yet, or outside the period.
 
 ## Sozu
@@ -370,6 +371,17 @@ transferLedger({ network, route: "dusk-to-bsc", sent: amountLux, networkFee: [fe
 ```
 
 Each app shows the same numbers: a row a line's `text`, its detail `exact`. A line is there only where it's known, and a route without such a fee has none. `received` is what arrived, or until then what will (`expected`), and `gas` what was paid in the other chain's coin. Of a transfer that failed, only its fee is left. What left an account holds a gas refund it paid another, which isn't the transfer's.
+
+```js
+import { migrationFacts, migrationsOf, transferLedger } from "@dusk-network/app-core/bridge";
+
+const evm = await migrationFacts({ network: chainId, migrations: migrationsOf(rows), fetch, cache }); // or [{ hash, route, approval }] the app keeps
+transferLedger({ row, evm: evm.get(row.memo) }).gas; // { key: "gas", coin: "BNB", exact: "0.00000474855", parts: ["approval", "migration"], … }
+```
+
+- A migration's gas is what it paid on its own chain and what the approval it spent paid, to the wei, whichever app signed either and whenever: the approval is the owner's latest of the route's contract on its token before the migration, found among their logs read back from the migration's block, 5,000 blocks first and twice as many each window after, 75,000 at most. The token writes an approval of what's left as a migration spends one: that's no approval. Where an earlier migration spent from the same approval, its fee is that one's (`approvalState: "earlier"`). An RPC that no longer gives logs that far back says nothing, and that's said too (`"unread"`): the migration's gas alone, its `parts` saying so. With the approval's hash (`approval`), it's read from its receipt. A migration that failed spent no approval.
+- `migrationsOf` gives the migrations `/activity`'s rows were paid for: a migration's payout on Dusk has its hash as the memo.
+- A transfer to BNB Smart Chain brings no gas money on mainnet: its payout address only mints and pays out the token. The 0.01 ETH testnet's test chain sends a recipient that holds little comes from a wallet of the test chain's own, and isn't the transfer's.
 
 ### A route's status
 
