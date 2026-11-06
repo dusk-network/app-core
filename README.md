@@ -27,7 +27,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 
 | Import | What it gives |
 |---|---|
-| `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits` |
+| `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits`; and the currency a wallet starts on, by the browser's region (`defaultCurrency`) |
 | `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) |
 | `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), as Send reads them on the wallet's network (`readPaymentLink`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
 | `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; the name a contact's takes (`nameClash`); and which in a list to show with their address (`lookAlikes`) |
@@ -56,6 +56,7 @@ readAmount("1.234", "es-ES"); // { lux: null, problem: "Is that 1234 or 1,234? W
 ```
 
 - The one rule for an amount, of DUSK or an EVM token: a row and a balance line show `text`, its detail shows `exact`. `text` has at most 4 decimals, 2 significant digits under 0.01, and is never 0 for an amount that isn't. It rounds down for an amount or a balance, to the nearest for a fee paid, and up for the most a fee can be.
+- `defaultCurrency` is the fiat currency a wallet starts on: "EUR" where the browser's region pays in euros (the euro area, Bulgaria in it since 2026; Andorra, Monaco, San Marino, the Vatican, Montenegro, Kosovo; France's overseas regions and the collectivities that use it; Åland, the Canary Islands, Ceuta and Melilla), "USD" anywhere else. A language without a region takes the one it's most spoken in: "de" and "fr" are EUR, "en" and "pt" (Brazil) USD.
 - An amount reads back as itself or is refused, never as another. A language's own groups are read: `1 000` with any of its spaces in French, `1'000` in Swiss German, `12,34,567` in Hindi. A lone point or comma before three digits that could mean two things stays unclear (`unclearAmount`).
 
 ## Text

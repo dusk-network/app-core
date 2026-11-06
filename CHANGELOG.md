@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/requests`: `matchRequests`, what came in for each payment request, and `sentAlready`, the payment a send would make again; a request of no amount paid with its memo is paid
+- `/amounts`: `defaultCurrency`, euros where the browser's region pays in euros and US dollars elsewhere
 - `/bridge`: `migrationFacts`, a migration's side on its own chain: what it and the approval it spent paid in gas, whichever app signed the approval and whenever, and `migrationsOf`, the migrations a profile's payouts were for
 - `/bridge`: `transferLedger` takes a migration's side on its own chain (`evm`), its gas with its approval's, and says what the gas is for (`parts`)
 - `/export`: what a migration's approval and the migration paid in gas on their chain, on lines of their own at their own times and hashes (`evm`)

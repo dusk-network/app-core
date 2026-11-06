@@ -238,6 +238,35 @@ export function amountLocale(language = globalThis.navigator?.language || "en-US
 export const decimalSeparator = (language) => localeParts(amountLocale(language)).decimal;
 
 /**
+ * The regions that pay in euros: the euro area, Bulgaria in it since 2026;
+ * the states that use it by agreement or on their own; France's overseas
+ * regions and the collectivities that use it; and the parts of Finland and
+ * Spain that are regions of their own to a browser.
+ */
+const EURO_REGIONS = new Set([
+  ...["AT", "BE", "BG", "CY", "DE", "EE", "ES", "FI", "FR", "GR", "HR", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PT", "SI", "SK"],
+  ...["AD", "MC", "SM", "VA", "ME", "XK"],
+  ...["GF", "GP", "MQ", "RE", "YT", "BL", "MF", "PM", "TF"],
+  ...["AX", "IC", "EA"],
+]);
+
+/**
+ * @param {string} [language] The browser's, unless given
+ * @returns {"EUR" | "USD"}
+ */
+export function defaultCurrency(language = globalThis.navigator?.language || "en-US") {
+  try {
+    const locale = new Intl.Locale(language);
+    // A language alone: the region it's most spoken in.
+    const region = locale.region ?? locale.maximize().region;
+
+    return region && EURO_REGIONS.has(region.toUpperCase()) ? "EUR" : "USD";
+  } catch {
+    return "USD";
+  }
+}
+
+/**
  * @param {bigint | number | string} whole A whole number
  * @param {string} [language] The browser's, unless given
  * @returns {string} It grouped as the language groups, in digits a person can type back: "1.484" in Dutch

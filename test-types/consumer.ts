@@ -555,6 +555,11 @@ const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 
 const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
 void [weiShown, hint, readTyped, readFrench];
 
+import { defaultCurrency } from "@dusk-network/app-core/amounts";
+
+const startsOn: "EUR" | "USD" = defaultCurrency("de-DE");
+void [startsOn, defaultCurrency()];
+
 // /text
 import { displayText, type TextFlag } from "@dusk-network/app-core/text";
 
@@ -662,6 +667,19 @@ const ledgerLines: LedgerLine[] | undefined = ledger?.lines;
 const ledgerExact: string | undefined = ledger?.received?.exact;
 const ledgerFromRow: TransferLedger | null = transferLedger({ row: readRows[0] });
 void [ledgerLines, ledgerExact, ledgerFromRow];
+
+import { APPROVAL_TOPIC, migrationFacts, migrationsOf, type MigrationEvm } from "@dusk-network/app-core/bridge";
+
+const wayBack: Promise<Map<string, MigrationEvm>> = migrationFacts({ cache: new Map(), fetch, migrations: [...migrationsOf(readRows), { approval: "0x", hash: "0x", route: "bsc-to-dusk" }], network: 1, rpcUrl: "https://rpc", timeoutMs: 1 });
+const wayBackGas = wayBack.then((facts) => {
+  const fact = facts.get("0x");
+  const parts: ReadonlyArray<"approval" | "migration"> | undefined = transferLedger({ evm: fact, row: readRows[0] })?.gas?.parts;
+  const states: [MigrationEvm["state"] | undefined, MigrationEvm["approvalState"] | undefined, bigint | null | undefined] = [fact?.state, fact?.approvalState, fact?.totalWei];
+
+  return [parts, states, fact?.approval?.gasWei, APPROVAL_TOPIC];
+});
+const wayBackFile: Promise<ExportResult> = wayBack.then((evm) => accountingCsv({ evm, profile: { account: "a", name: "Lena" }, rows: readRows }));
+void [wayBackGas, wayBackFile];
 
 // /bridge's status
 import { STATUS_MAX_AGE_MS, bridgeStatus, type BridgeStatus } from "@dusk-network/app-core/bridge";

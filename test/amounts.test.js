@@ -6,6 +6,7 @@ import {
   amountForField,
   amountLocale,
   decimalSeparator,
+  defaultCurrency,
   formatAmount,
   formatDusk,
   formatDuskPlain,
@@ -358,5 +359,29 @@ describe("reading amounts", () => {
     assert.match(groupDigits(1234567n), /^[0-9,.]+$/);
     inLanguage("not a language");
     assert.equal(amountLocale(), "en-US");
+  });
+});
+
+describe("the currency a wallet starts on", () => {
+  it("is euros where the browser's region pays in euros: the euro area, Bulgaria since 2026, the states that use it, France's overseas regions", () => {
+    // Lena's.
+    for (const language of ["de-DE", "fr-FR", "es-ES", "nl-NL", "it-IT", "bg-BG", "hr-HR", "el-GR", "pt-PT", "de-AT", "fr-BE", "ca-AD", "fr-MC", "it-SM", "it-VA", "sr-Latn-ME", "sq-XK", "fr-RE", "fr-GP", "fr-GF", "fr-YT", "sv-AX", "es-IC", "fr-PM"]) {
+      assert.equal(defaultCurrency(language), "EUR", language);
+    }
+  });
+
+  it("is US dollars anywhere else, Singapore and Switzerland among them", () => {
+    for (const language of ["en-US", "en-GB", "en-SG", "zh-SG", "de-CH", "fr-CH", "en-IN", "hi-IN", "ja-JP", "pt-BR", "es-MX", "sv-SE", "da-DK", "pl-PL", "cs-CZ", "ro-RO", "fr-CA", "en-150"]) {
+      assert.equal(defaultCurrency(language), "USD", language);
+    }
+  });
+
+  it("takes a language's main region where it names none, and dollars for what isn't a language", () => {
+    for (const [language, currency] of [["de", "EUR"], ["fr", "EUR"], ["es", "EUR"], ["it", "EUR"], ["nl", "EUR"], ["bg", "EUR"], ["ca", "EUR"], ["en", "USD"], ["pt", "USD"], ["sv", "USD"], ["zh", "USD"]]) {
+      assert.equal(defaultCurrency(language), currency, language);
+    }
+
+    assert.equal(defaultCurrency("not a language!"), "USD");
+    assert.equal(defaultCurrency(""), "USD");
   });
 });
