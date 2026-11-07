@@ -259,6 +259,17 @@ function factKept(text) {
 const CACHE_KEY = "sozu2:";
 
 /**
+ * @param {{ stake: bigint, supply: bigint } | null | undefined} pool
+ * @returns {bigint | null}
+ */
+export function stDuskWorth(pool) {
+  const stake = pool?.stake;
+  const supply = pool?.supply;
+
+  return typeof stake === "bigint" && typeof supply === "bigint" && supply > 0n ? (LUX_PER_DUSK * stake) / supply : null;
+}
+
+/**
  * @param {{ archive: Pick<Archive, "query">, account: string, rows: Iterable<ActivityRow>, cache?: FactCache }} options
  * @returns {Promise<Map<string, SozuFact>>}
  */

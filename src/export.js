@@ -39,6 +39,7 @@
 
 import { formatDuskPlain } from "./amounts.js";
 import { memoTextOf } from "./moved.js";
+import { stDuskWorth } from "./sozu.js";
 import { displayText } from "./text.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
@@ -214,9 +215,9 @@ const sozuWord = (row) => (row.sozu === "stake" ? "Staked with Sozu" : row.sozu 
  * @param {SozuFact} fact
  */
 function rateWords(fact) {
-  const { stake, supply } = fact.pool;
+  const worth = stDuskWorth(fact.pool);
 
-  return supply > 0n ? `1 stDUSK = ${formatDuskPlain((1_000_000_000n * stake) / supply)} DUSK` : "";
+  return worth === null ? "" : `1 stDUSK = ${formatDuskPlain(worth)} DUSK`;
 }
 
 /**

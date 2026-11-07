@@ -626,7 +626,7 @@ void [requestState, cameIn, paidAgain, repeat, requestWindows];
 void matchRequests([{ at: 1, id: "a", lux: 1n, memo: "", to: "account" }], []);
 
 // /sozu
-import { sozuFacts, sozuPosition, sozuRate, sozuRateLine, sozuYear, type SozuFact, type SozuPosition, type SozuStatusLike, type SozuYear } from "@dusk-network/app-core/sozu";
+import { stDuskWorth, sozuFacts, sozuPosition, sozuRate, sozuRateLine, sozuYear, type SozuFact, type SozuPosition, type SozuStatusLike, type SozuYear } from "@dusk-network/app-core/sozu";
 import type { ActivityRow as ReadRow } from "@dusk-network/app-core/activity";
 
 declare const readRows: ReadRow[];
@@ -638,7 +638,8 @@ const extensionStatus: SozuStatusLike = { fees: { deposit: { denominator: "400",
 const year: SozuYear = sozuYear({ amount: 1n, nativeRate: 0.2, status: extensionStatus });
 const yearRate: number | null = sozuRate(0.2, sozuStatus);
 const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2, provisioners: [{ amount: 1, eligibility: 1 }], status: sozuStatus, tipHeight: 1 });
-void [sozuRead, earnedSoFar, year, yearRate, rateLine];
+const worthThen: Promise<bigint | null> = sozuRead.then((facts) => stDuskWorth(facts.get("h")?.pool));
+void [sozuRead, earnedSoFar, year, yearRate, rateLine, worthThen];
 
 import { GROWTH_MAX_AGE_MS, sozuGrowth, type SozuGrowth, type SozuPoint } from "@dusk-network/app-core/sozu";
 

@@ -11,6 +11,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/text`: `searchKey`, text as a search compares it, without accents, case or what can't be seen, so "ilustracion" finds "Ilustración"
 - `/amounts`: `amountsMeant`, the amounts of DUSK a search can mean, with either decimal mark
 - `/requests`: a request's kept payment holds what it paid (`paid.lux`), which `matchRequests` gives for a request kept paid, as the chain's where its payment is read
+- `/sozu`: `stDuskWorth`, what one stDUSK was worth when a stake or an unstake went through, as the export says it
 
 ### Changed
 

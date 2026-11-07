@@ -62,6 +62,15 @@ export type SozuFact = {
 };
 
 /**
+ * What one stDUSK was worth when a stake or an unstake went through, in lux
+ * of DUSK, rounded down: the DUSK staked over the stDUSK there was, as the
+ * pool's event gave them (`pool` of a `SozuFact`). The rate a stake's or an
+ * unstake's details and the export say: "1 stDUSK = 1.840349526 DUSK". Null
+ * for a pool of no stDUSK.
+ */
+export declare function stDuskWorth(pool: { stake: bigint; supply: bigint } | null | undefined): bigint | null;
+
+/**
  * What each stake and unstake that went through did, by its row's hash, from
  * the pool's event in its transaction, and the stDUSK an unstake burned from
  * the token's own transfer in it: a request for each 25, of the account's
