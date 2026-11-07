@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { nameSkeleton } from "../src/names.js";
 import { displayText } from "../src/text.js";
 
 describe("text a person must trust", () => {
@@ -140,6 +141,38 @@ describe("text a person must trust", () => {
     for (const mixed of ["1.٠5", "1,٠٠٠", "1'٠00", "١٢٣۴", "𝟏𝟙", "1½", "١0"]) assert.deepEqual(displayText(mixed).flags, ["mixed_digits"], mixed);
     // With what else it flags, as it's shown.
     assert.deepEqual(displayText("pay \u202e1٠5\u202c", { isolate: true }), { flags: ["bidi_control", "mixed_digits"], neutralized: true, text: `⁦pay \\u202e1⁨٠⁩5\\u202c⁩` });
+  });
+
+  it("flags a number whose digits look like other digits than they are, and changes nothing", () => {
+    // Marek's: Bengali's 4 looks like 8, Gurmukhi's 44 like 88, Oriya's 2 and Malayalam's 7 like 9.
+    for (const misread of ["Pay \u09ea DUSK to unlock", "Pay \u0a6a\u0a6a DUSK", "Pay \u0b68 DUSK", "Pay \u0d6d DUSK"]) {
+      assert.deepEqual(displayText(misread), { flags: ["lookalike_digits"], neutralized: false, text: misread }, misread);
+    }
+    assert.deepEqual(displayText("Pay 1\u09ea DUSK").flags, ["mixed_digits", "lookalike_digits"]);
+
+    // Every digit Unicode's table (UTS #39) gives the skeleton of another Latin digit, and no other.
+    const DIGIT = /^\p{Nd}$/u;
+    const latin = Array.from({ length: 10 }, (_, value) => nameSkeleton(String(value)));
+    let flagged = 0;
+
+    for (let code = 0x80; code <= 0x10ffff; code += 1) {
+      const digit = String.fromCodePoint(code);
+
+      if (code >= 0xd800 && code <= 0xdfff) continue;
+      if (!DIGIT.test(digit)) continue;
+
+      let zero = code;
+
+      while (DIGIT.test(String.fromCodePoint(zero - 1))) zero -= 1;
+
+      const value = (code - zero) % 10;
+      const misread = latin.some((look, other) => other !== value && look === nameSkeleton(digit));
+
+      assert.equal(displayText(`Pay ${digit} DUSK`).flags.includes("lookalike_digits"), misread, code.toString(16));
+      if (misread) flagged += 1;
+    }
+
+    assert.equal(flagged, 7);
   });
 
   it("leaves numbers of one system alone, in any script, and numbers of two kept apart", () => {

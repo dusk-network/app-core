@@ -564,7 +564,8 @@ void [startsOn, defaultCurrency()];
 import { displayText, type TextFlag } from "@dusk-network/app-core/text";
 
 const safe: { text: string; neutralized: boolean; flags: TextFlag[] } = displayText("memo", { lineBreaks: true, maxChars: 10 });
-void safe;
+const lookalike: TextFlag = "lookalike_digits";
+void [safe, lookalike];
 
 // /payment-links
 import { MAX_MEMO_BYTES, chainLabel, makePaymentLink, networkMismatch, parsePaymentLink, recipientKind, type MadePaymentLink, type PaymentLink, type PaymentRequest } from "@dusk-network/app-core/payment-links";

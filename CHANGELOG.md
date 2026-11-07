@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/names`: `nameHides` and `NAME_HIDES`, a name holding what can't be seen, as a right-to-left override, to refuse
+- `/text`: `displayText` flags a number whose digits look like other Latin digits than they are (`lookalike_digits`), as Bengali's ৪ that looks like an 8
 
 ### Changed
 

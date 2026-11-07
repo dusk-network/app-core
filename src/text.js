@@ -46,6 +46,11 @@ const DIGIT = /^\p{Nd}$/u;
 // Rumi's numerals. Every other numeral there reads right to left, as N'Ko's
 // and Adlam's digits do (Unicode 18's bidi classes).
 const LEFT_TO_RIGHT_NUMERALS = /^[\u0660-\u0669\u06f0-\u06f9\u{10d30}-\u{10d49}\u{10e60}-\u{10e7e}]$/u;
+// The digits that look like another Latin digit than they are, by Unicode's
+// confusables (UTS #39, 18.0.0): Bengali's 4 and 7, which look like 8 and 9,
+// Gurmukhi's 1 and 4, like 9 and 8, Oriya's 2, Malayalam's 7 and Wancho's 2,
+// like 9. Its test checks them against the table.
+const MISREAD_DIGIT = /^[\u09ea\u09ed\u0a67\u0a6a\u0b68\u0d6d\u{1e2f2}]$/u;
 // What goes between a number's digits: a decimal point or comma, a group's
 // mark or its narrow space. A space ends a number.
 const NUMBER_SEPARATOR = /^[.,'\u2019\u066b\u066c\u00a0\u202f\u2009]$/u;
@@ -84,15 +89,16 @@ function zeroOf(digit) {
 /**
  * What the numbers in a text show that their bytes don't say: one whose
  * digits are of more than one system, as 1٠5 with an Arabic-Indic zero that
- * looks like a point, and one in numerals that read right to left, as N'Ko's
- * 0001 that shows as 1000. A number goes on past one separator between its
- * numerals, and holds the selectors and marks on them; a numeral that's no
- * decimal digit is a system of its own.
+ * looks like a point, one in numerals that read right to left, as N'Ko's
+ * 0001 that shows as 1000, and one with digits that look like other digits,
+ * as Bengali's ৪, a 4 that looks like an 8. A number goes on past one
+ * separator between its numerals, and holds the selectors and marks on them;
+ * a numeral that's no decimal digit is a system of its own.
  *
  * @param {string} source
  */
 function numberFlags(source) {
-  const found = { mixed: false, rightToLeft: false };
+  const found = { lookalike: false, mixed: false, rightToLeft: false };
   /** @type {Set<number | string> | null} */
   let systems = null;
   let separated = false;
@@ -103,6 +109,7 @@ function numberFlags(source) {
       systems.add(DIGIT.test(char) ? zeroOf(char) : "other");
       found.mixed ||= systems.size > 1;
       found.rightToLeft ||= RIGHT_TO_LEFT.test(char) && !LEFT_TO_RIGHT_NUMERALS.test(char);
+      found.lookalike ||= MISREAD_DIGIT.test(char);
       separated = false;
     } else if (systems && (EMOJI_SELECTOR.test(char) || MARK.test(char))) {
       // An emoji's selector or a keycap's mark, kept as it is: part of the numeral it's on.
@@ -219,6 +226,7 @@ export function displayText(raw, { isolate = false, lineBreaks = false, maxChars
 
   if (numbers.mixed) flags.add("mixed_digits");
   if (numbers.rightToLeft) flags.add("rtl_digits");
+  if (numbers.lookalike) flags.add("lookalike_digits");
   if (source.normalize("NFC") !== source) flags.add("non_nfc");
   if (out.length > maxChars) flags.add("truncated");
 
