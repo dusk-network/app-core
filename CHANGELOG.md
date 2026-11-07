@@ -13,6 +13,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/requests`: a request's kept payment holds what it paid (`paid.lux`), which `matchRequests` gives for a request kept paid, as the chain's where its payment is read
 - `/sozu`: `stDuskWorth`, what one stDUSK was worth when a stake or an unstake went through, as the export says it
 - `/requests`: `refundOf`, a payment that paid a request again, sent back to its sender with the request's memo
+- `/export`: `accountingCsv` takes `evmAddresses`, the EVM addresses the app knows as the person's own, and then writes a migration's gas only where one of them sent it
 
 ### Changed
 
@@ -22,7 +23,6 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Fixed
 
 - `/payment-links`: a `dusk:` link's `network=` names its network, as an https link's does, so one for another network is refused
-- `/export`: `accountingCsv` writes a migration's gas only where it was sent from one of `evmAddresses`, the EVM addresses the app knows as the person's own
 
 ## [0.8.2]
 

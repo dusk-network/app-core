@@ -540,10 +540,10 @@ function slugOf(name) {
  * @param {ExportOptions} options
  * @returns {Promise<ExportResult>}
  */
-export async function accountingCsv({ bom = false, contactName, currency = "EUR", evm, evmAddresses = [], facts, network, period, price, profile, profiles = [], rows }) {
+export async function accountingCsv({ bom = false, contactName, currency = "EUR", evm, evmAddresses, facts, network, period, price, profile, profiles = [], rows }) {
   const account = String(profile?.account ?? "");
-  // The EVM addresses the app knows as the person's: anyone can migrate to an account.
-  const ownEvm = new Set([...evmAddresses].map((address) => String(address ?? "").toLowerCase()));
+  // The EVM addresses the app knows as the person's, where it gives them: anyone can migrate to an account.
+  const ownEvm = evmAddresses === undefined || evmAddresses === null ? null : new Set([...evmAddresses].map((address) => String(address ?? "").toLowerCase()));
   /** @type {ReadonlySet<string>} */
   const self = new Set([profile?.account, profile?.address].flatMap((id) => (typeof id === "string" && id !== "" ? [id] : [])));
   /** @type {Map<string, string>} */
@@ -590,9 +590,9 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
     }
 
     // A migration's side on its own chain, with the payout it was paid with: named by its memo, as text,
-    // and sent from an address of the person's. Another's gas is no cost of theirs.
+    // and, where the app gives the person's EVM addresses, sent from one of them. Another's gas is no cost of theirs.
     const fact = row.route?.kind === "migration" && row.direction === "in" ? evm?.get((memoTextOf(row) ?? "").toLowerCase()) : undefined;
-    const migration = fact?.from && ownEvm.has(fact.from.toLowerCase()) ? fact : undefined;
+    const migration = !ownEvm || (fact?.from && ownEvm.has(fact.from.toLowerCase())) ? fact : undefined;
     /** @param {number} at */
     const inPeriod = (at) => !period || (at >= period.from && at < period.to);
     const rowIn = inPeriod(row.time);

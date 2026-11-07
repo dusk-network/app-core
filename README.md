@@ -300,7 +300,7 @@ const { csv, fileName, count, left, unpriced } = await accountingCsv({
   currency: "EUR",
   facts, // optional: `sozuFacts` of `/sozu`, what each stake and unstake did
   evm, // optional: `migrationFacts` of `/bridge`, what each migration paid on its own chain
-  evmAddresses, // with `evm`: the EVM addresses the app knows as the person's, whose gas is theirs
+  evmAddresses, // optional, with `evm`: the EVM addresses the app knows as the person's, the only ones whose gas is written then
   contactName, // optional: the person's own names, only when they asked for them in the file
   network, // the file's name says it, unless it's "mainnet"
 });
@@ -314,7 +314,7 @@ The file is [Koinly's universal CSV](https://support.koinly.io/en/articles/94899
 - A stake with Sozu is a trade of DUSK for stDUSK, and an unstake the trade back, once `facts` says its stDUSK, with its deposit fee and what a stDUSK was worth in the description. Until then, it's what moved under the staking tags.
 - A token's transfer is what it moved, with its amount, currency and recipient in the same columns, from the wallet's record of it (`sent.asset`, which `settleSends` keeps), with no value in fiat. An allowance is its fee, saying what it allows and to whom. What the wallet has no record of stays what the chain says: a call, and its fee.
 - A memo with commas, quotes and line breaks comes through, with nothing in it that hides or reorders what it says, and is never read as a formula.
-- A migration's side on its own chain, given as `evm` (`migrationFacts` of `/bridge`), has lines of its own before its payout's: what its approval and it paid in gas there, in that chain's coin, as costs, each at its own time, with its own hash and its EVM address as the account. Each is in the file of its own time's period, which may be one before its payout's. Only a migration sent from one of `evmAddresses`, the EVM addresses the app knows as the person's own, as one it connected, has them: anyone can migrate to an account, as a customer to a shop's, and their gas is no cost of its owner's. Without `evmAddresses`, a payout has no such lines.
+- A migration's side on its own chain, given as `evm` (`migrationFacts` of `/bridge`), has lines of its own before its payout's: what its approval and it paid in gas there, in that chain's coin, as costs, each at its own time, with its own hash and its EVM address as the account. Each is in the file of its own time's period, which may be one before its payout's. Where the app gives `evmAddresses`, the EVM addresses it knows as the person's own, as those it connected, only a migration sent from one of them has these lines: anyone can migrate to an account, as a customer to a shop's, and their gas is no cost of its owner's. Without it, every migration has them.
 - `rows` must be all of the period's, and with `evm`, every migration's payout from the period's start on: one after the period can have fees in it. Read the history down to the period first. What was left out is counted: on its way, not looked up yet, or outside the period.
 
 ## Sozu
