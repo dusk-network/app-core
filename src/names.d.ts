@@ -2,13 +2,15 @@
  * Names a person gives, as a contact's or a profile's, for both wallets:
  * whether two read as the same name, or look alike though they're written in
  * other letters, by Unicode's confusables (UTS #39, version 18.0.0, kept in
- * the package as data). For what a person reads only: a payment goes to an
- * address, and a name never stands for one.
+ * the package as data), and whether one holds what can't be seen. For what a
+ * person reads only: a payment goes to an address, and a name never stands
+ * for one.
  *
  * @example
  * ```js
- * import { lookAlikes, looksAlike, nameClash } from "@dusk/app-core/names";
+ * import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides } from "@dusk/app-core/names";
  *
+ * nameHides("\u202eecilA"); // true: it reads as "Alice". Refuse it, saying NAME_HIDES
  * looksAlike("Bob", "Bօb"); // true: an Armenian օ
  * nameClash("Profile 2", { profiles, contacts, except: editedId });
  * // { kind: "profile", same: true, entry: { name: "Profile 2", … } }: refuse it
@@ -28,11 +30,27 @@ export declare function nameSkeleton(name: unknown): string;
 
 /**
  * Whether two names read as the same name: whatever their case, accents,
- * spaces and punctuation, as "Estudio Marta" and "estudio marta." do. A
- * character that renders as nothing makes it another name, one that looks
- * alike (`looksAlike`). False for a name of none of its letters or digits.
+ * spaces and punctuation, as "Estudio Marta" and "estudio marta." do, and
+ * without what can't be seen in them (`nameHides`), as "Ali\u200bce" and
+ * "Alice". False for a name of none of its letters or digits.
  */
 export declare function sameName(a: unknown, b: unknown): boolean;
+
+/**
+ * Whether a name holds what can't be seen as it's shown, which can make it
+ * read as another: a control that turns text around (U+202E makes
+ * "\u202e2 eliforP" read as "Profile 2"), a character that renders as
+ * nothing (a zero-width space or joiner, a soft hyphen, a Hangul filler, a
+ * joiner between emoji), a line break, another control, or half a character.
+ * What `displayText` of `/text` shows as codes; an emoji's own selector and
+ * accents aren't. Refuse a new or changed contact's or profile's name that
+ * does (`NAME_HIDES`), and show one kept from before with
+ * `displayText(name).text`, which shows them as codes.
+ */
+export declare function nameHides(name: unknown): boolean;
+
+/** "This name has hidden characters. Type it again without them." */
+export declare const NAME_HIDES: "This name has hidden characters. Type it again without them.";
 
 /**
  * Whether two names look alike: they read as the same name, or have the same

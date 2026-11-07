@@ -2,6 +2,16 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `/names`: `nameHides` and `NAME_HIDES`, a name holding what can't be seen, as a right-to-left override, to refuse
+
+### Changed
+
+- `/names`: `sameName`, `nameClash` and `lookAlikes` compare names without what can't be seen in them
+
 ## [0.8.2]
 
 ### Fixed

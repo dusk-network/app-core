@@ -591,7 +591,7 @@ const sendWords: string[] = [LINK_UNREADABLE, LINK_TWO_AMOUNTS, sendRead?.proble
 void [sendReason, sendFills, sendWords];
 
 // /names
-import { lookAlikes, looksAlike, nameClash, nameSkeleton, sameName } from "@dusk-network/app-core/names";
+import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, sameName } from "@dusk-network/app-core/names";
 
 const contactsHere = [{ address: "q", id: "c1", name: "Estudio Marta" }];
 const profilesHere = [{ account: "p", name: "Profile 2" }];
@@ -600,7 +600,9 @@ const clashKind: "profile" | "contact" | undefined = clash?.kind;
 const clashAccount: string | undefined = clash?.kind === "profile" ? clash.entry.account : clash?.entry.address;
 const alikeHere: Set<{ address: string; id: string; name: string }> = lookAlikes(contactsHere);
 const nameChecks: [boolean, boolean, string] = [looksAlike("Bob", "Bօb"), sameName("a", "A"), nameSkeleton("rn")];
-void [clashKind, clashAccount, alikeHere, nameChecks];
+const hiddenName: boolean = nameHides("\u202eecilA");
+const hiddenWords: "This name has hidden characters. Type it again without them." = NAME_HIDES;
+void [clashKind, clashAccount, alikeHere, nameChecks, hiddenName, hiddenWords];
 
 // /requests
 import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched } from "@dusk-network/app-core/requests";
