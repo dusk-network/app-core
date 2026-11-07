@@ -9,10 +9,11 @@
  *
  * @example
  * ```js
- * import { matchRequests, sentAlready } from "@dusk/app-core/requests";
+ * import { matchRequests, refundOf, sentAlready } from "@dusk/app-core/requests";
  *
  * const matches = matchRequests(kept, rows); // the wallet's requests, `/activity`'s rows
  * matches.get(id); // { state: "paid", matched: "amount-memo", hash, at, lux, memo, more: [{ … }] }
+ * refundOf(request, matches.get(id).more[0], rows); // { to, lux, memo: "Refund: Factura 33" }: Send back
  *
  * // Before a send: the same payment, made already.
  * sentAlready(rows, { to, lux, memo }); // the row of the payment it would make again, or null
@@ -100,6 +101,19 @@ export type RequestMatch = {
  * paid keeps its payment.
  */
 export declare function matchRequests(requests: ReadonlyArray<KeptRequest>, rows: ReadonlyArray<ActivityRow>): Map<string, RequestMatch>;
+
+/**
+ * What a payment that paid a request again (`more` of its match) is sent back
+ * with, for Send to be filled in: to whoever sent it, as `rows` say, what it
+ * brought, and the request's memo after "Refund: " where that fits in a
+ * memo's 512 bytes, else "Refund". Null where whoever sent it isn't known, as
+ * for a shielded payment or one not among `rows`.
+ */
+export declare function refundOf(
+  request: KeptRequest,
+  payment: RequestPayment,
+  rows: ReadonlyArray<ActivityRow>
+): { to: string; lux: bigint; memo: string } | null;
 
 /**
  * The latest payment a send would make again: out from this profile, not

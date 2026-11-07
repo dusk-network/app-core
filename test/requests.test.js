@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { AGAIN_MS, matchRequests, sentAlready } from "../src/requests.js";
+import { AGAIN_MS, matchRequests, refundOf, sentAlready } from "../src/requests.js";
 import { like } from "./fixtures/helpers.js";
 
 /** @typedef {import("../src/activity.js").ActivityRow} ActivityRow */
@@ -192,6 +192,35 @@ describe("what came in for each request", () => {
     for (const lux of [undefined, "abc", "-1", 5]) {
       assert.deepEqual(matchRequests([kept(lux)], []).get("a"), { at: NOW + HOUR, hash: "h1", matched: "amount-memo", state: "paid" }, String(lux));
     }
+  });
+});
+
+describe("a payment that paid a request again, sent back", () => {
+  const PAYER = "payer-account";
+  const rows = [payment({ counterparty: PAYER }), payment({ counterparty: PAYER, hash: "h2", time: NOW + 2 * HOUR, value: 7n })];
+  const again = /** @type {import("../src/requests.js").RequestPayment} */ ({ at: NOW + 2 * HOUR, hash: "h2", lux: 7n, matched: "amount-memo", memo: "Factura 33" });
+
+  it("goes to whoever sent it, with what it brought and the request's memo after Refund", () => {
+    // Sofia's: a request paid twice, the second to send back.
+    assert.deepEqual(refundOf(asked(), again, rows), { lux: 7n, memo: "Refund: Factura 33", to: PAYER });
+    // As both wallets find it: the second payment of a request paid twice.
+    const matched = matchRequests([asked({ lux: null })], rows).get("a")?.more?.[0];
+
+    assert.deepEqual(refundOf(asked({ lux: null }), /** @type {any} */ (matched), rows), { lux: 7n, memo: "Refund: Factura 33", to: PAYER });
+  });
+
+  it("says Refund alone where the request had no memo, or its memo leaves no room in a memo's 512 bytes", () => {
+    assert.equal(refundOf(asked({ memo: "" }), again, rows)?.memo, "Refund");
+    assert.equal(refundOf(asked({ memo: "x".repeat(504) }), again, rows)?.memo, `Refund: ${"x".repeat(504)}`);
+    assert.equal(refundOf(asked({ memo: "x".repeat(505) }), again, rows)?.memo, "Refund");
+    // Counted as bytes: three for each €.
+    assert.equal(refundOf(asked({ memo: "\u20ac".repeat(169) }), again, rows)?.memo, "Refund");
+  });
+
+  it("is nothing where whoever sent it isn't known: a shielded payment, or one that isn't among the rows", () => {
+    assert.equal(refundOf(asked(), again, [payment({ counterparty: null, hash: "h2", privacy: "shielded" })]), null);
+    assert.equal(refundOf(asked(), again, [payment({ counterparty: PAYER })]), null);
+    assert.equal(refundOf(asked(), again, [payment({ category: "sent", counterparty: PAYER, hash: "h2" })]), null);
   });
 });
 

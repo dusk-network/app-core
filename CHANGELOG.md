@@ -12,6 +12,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/amounts`: `amountsMeant`, the amounts of DUSK a search can mean, with either decimal mark
 - `/requests`: a request's kept payment holds what it paid (`paid.lux`), which `matchRequests` gives for a request kept paid, as the chain's where its payment is read
 - `/sozu`: `stDuskWorth`, what one stDUSK was worth when a stake or an unstake went through, as the export says it
+- `/requests`: `refundOf`, a payment that paid a request again, sent back to its sender with the request's memo
 
 ### Changed
 
