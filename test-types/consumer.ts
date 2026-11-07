@@ -555,17 +555,19 @@ const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 
 const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
 void [weiShown, hint, readTyped, readFrench];
 
-import { defaultCurrency } from "@dusk-network/app-core/amounts";
+import { amountsMeant, defaultCurrency } from "@dusk-network/app-core/amounts";
 
 const startsOn: "EUR" | "USD" = defaultCurrency("de-DE");
-void [startsOn, defaultCurrency()];
+const meant: { from: bigint; to: bigint }[] = amountsMeant("0.2", "de-DE");
+void [startsOn, defaultCurrency(), meant];
 
 // /text
-import { displayText, type TextFlag } from "@dusk-network/app-core/text";
+import { displayText, searchKey, type TextFlag } from "@dusk-network/app-core/text";
 
 const safe: { text: string; neutralized: boolean; flags: TextFlag[] } = displayText("memo", { lineBreaks: true, maxChars: 10 });
 const lookalike: TextFlag = "lookalike_digits";
-void [safe, lookalike];
+const searched: string = searchKey("Ilustración");
+void [safe, lookalike, searched];
 
 // /payment-links
 import { MAX_MEMO_BYTES, chainLabel, makePaymentLink, networkMismatch, parsePaymentLink, recipientKind, type MadePaymentLink, type PaymentLink, type PaymentRequest } from "@dusk-network/app-core/payment-links";

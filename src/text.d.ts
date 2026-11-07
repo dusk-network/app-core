@@ -3,17 +3,21 @@
  * show: nothing in it can reorder or hide what it says. What's hidden is made
  * visible, never left out, so a sign request that reads "I agree to pay 1000
  * DUSK" on screen while its bytes say 0001 shows its controls and its 0001.
+ * And text as a search compares it, without accents or case.
  *
  * Show `text` with the app's text binding, never as HTML. It's for display
  * only: sign and send the original.
  *
  * @example
  * ```js
- * import { displayText } from "@dusk/app-core/text";
+ * import { displayText, searchKey } from "@dusk/app-core/text";
  *
  * displayText("I agree to pay \u202E0001\u202C DUSK");
  * // { text: "I agree to pay \\u202e0001\\u202c DUSK", neutralized: true, flags: ["bidi_control"] }
  * displayText("Factura 33, abril"); // { text: "Factura 33, abril", neutralized: false, flags: [] }
+ *
+ * // A search: a field holds what's typed whatever its accents and case.
+ * searchKey("Factura Ilustración").includes(searchKey("ilustracion")); // true
  * ```
  *
  * @module
@@ -87,3 +91,15 @@ export declare function displayText(
   raw: unknown,
   options?: { maxChars?: number; lineBreaks?: boolean; isolate?: boolean }
 ): { text: string; neutralized: boolean; flags: TextFlag[] };
+
+/**
+ * Text as a search compares it, for both wallets: without accents and other
+ * marks, case or what can't be seen, with compatibility forms as their plain
+ * letters (ﬁ as fi), ß as ss, and spaces, line breaks and controls of any kind
+ * as one space, its ends trimmed. A field holds a query when its key holds
+ * the query's: `searchKey(memo).includes(searchKey(query))`, so "ilustracion"
+ * finds "Factura Ilustración" and "Ilustración" finds "ilustracion". For a
+ * search only: show and send the text as it is.
+ */
+export declare function searchKey(text: unknown): string;
+

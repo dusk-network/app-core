@@ -8,6 +8,8 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 - `/names`: `nameHides` and `NAME_HIDES`, a name holding what can't be seen, as a right-to-left override, to refuse
 - `/text`: `displayText` flags a number whose digits look like other Latin digits than they are (`lookalike_digits`), as Bengali's ৪ that looks like an 8
+- `/text`: `searchKey`, text as a search compares it, without accents, case or what can't be seen, so "ilustracion" finds "Ilustración"
+- `/amounts`: `amountsMeant`, the amounts of DUSK a search can mean, with either decimal mark
 
 ### Changed
 

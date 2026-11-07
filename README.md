@@ -27,8 +27,8 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 
 | Import | What it gives |
 |---|---|
-| `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits`; and the currency a wallet starts on, by the browser's region (`defaultCurrency`) |
-| `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) |
+| `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits`; the amounts a search can mean (`amountsMeant`); and the currency a wallet starts on, by the browser's region (`defaultCurrency`) |
+| `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`); and text as a search compares it, without accents or case (`searchKey`) |
 | `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), as Send reads them on the wallet's network (`readPaymentLink`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
 | `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; whether one holds what can't be seen, to refuse it (`nameHides`, `NAME_HIDES`); the name a contact's takes (`nameClash`); and which in a list to show with their address (`lookAlikes`) |
 | `@dusk-network/app-core/requests` | Payment requests: what came in for each request a wallet made (`matchRequests`), and the payment a send would make again (`sentAlready`) |
@@ -58,6 +58,7 @@ readAmount("1.234", "es-ES"); // { lux: null, problem: "Is that 1234 or 1,234? W
 - The one rule for an amount, of DUSK or an EVM token: a row and a balance line show `text`, its detail shows `exact`. `text` has at most 4 decimals, 2 significant digits under 0.01, and is never 0 for an amount that isn't. It rounds down for an amount or a balance, to the nearest for a fee paid, and up for the most a fee can be.
 - `defaultCurrency` is the fiat currency a wallet starts on: "EUR" where the browser's region pays in euros (the euro area, Bulgaria in it since 2026; Andorra, Monaco, San Marino, the Vatican, Montenegro, Kosovo; France's overseas regions and the collectivities that use it; Åland, the Canary Islands, Ceuta and Melilla), "USD" anywhere else. A language without a region takes the one it's most spoken in: "de" and "fr" are EUR, "en" and "pt" (Brazil) USD.
 - An amount reads back as itself or is refused, never as another. A language's own groups are read: `1 000` with any of its spaces in French, `1'000` in Swiss German, `12,34,567` in Hindi. A lone point or comma before three digits that could mean two things stays unclear (`unclearAmount`).
+- `amountsMeant` is what a search typed can mean as amounts of DUSK, as ranges of lux: what a row shows starts with what's typed, so `"120"` is from 120 up to 121 DUSK. It reads either decimal mark, so `"0.2"` finds 0,2 in German as `"0,2"` does, and looks for both amounts where a mark could mean either, as `"1.000"` in German.
 
 ## Text
 
@@ -67,9 +68,12 @@ import { displayText } from "@dusk-network/app-core/text";
 displayText(memo); // { text: "pay \\u202e0001\\u202c DUSK", neutralized: true, flags: ["bidi_control"] }
 displayText(message, { lineBreaks: true, maxChars: 500 }); // for text written in lines, and cut
 displayText(memo, { isolate: true }); // for a screen: right-to-left words set apart, the rest in the order of the bytes
+searchKey(memo).includes(searchKey(query)); // a search: "ilustracion" finds "Ilustración"
 ```
 
 Text-direction controls, characters that render as nothing, controls and line breaks show as their codes, never left out, so what's shown is what the bytes say; half a character shows as the replacement mark. `neutralized` says whether anything was, for the app to say so, and `flags` what. Some things are only flagged, the text as it was: a number whose digits read right to left (`rtl_digits`), as N'Ko's 0001 that shows as 1000, mix digit systems (`mixed_digits`), as 1٠5 with an Arabic-Indic zero that looks like a point, or look like other Latin digits than they are by Unicode's confusables (`lookalike_digits`), as Bengali's ৪, a 4 that looks like an 8. On a screen, right-to-left letters turn the numbers and words beside them around: `isolate` sets each run of them, and of their digits, apart, so "Pay א 10 א 1000" doesn't read as "Pay א 1000 א 10". It's for display: sign and send the original.
+
+`searchKey` is text as a search compares it, in both wallets: without accents and other marks, case or what can't be seen, compatibility forms as their plain letters and ß as ss, and spaces and line breaks of any kind as one space. A field holds a query where its key holds the query's.
 
 ## Payment links
 

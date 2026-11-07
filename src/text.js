@@ -234,3 +234,22 @@ export function displayText(raw, { isolate = false, lineBreaks = false, maxChars
 
   return { flags: [...flags], neutralized, text: isolate ? isolated(shown) : shown.join("") };
 }
+
+// What a search leaves out of what it compares: accents and other marks, and
+// what can't be seen. Controls and spaces of any kind are a space.
+const MARKS = /\p{M}/gu;
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
+const SPACES = /[\p{Cc}\p{Z}\s]+/gu;
+
+/**
+ * @param {unknown} text
+ * @returns {string}
+ */
+export function searchKey(text) {
+  /** @param {string} each */
+  const plain = (each) => each.normalize("NFKD").replace(MARKS, "").replace(INVISIBLE, "");
+
+  // Upper case first, so ß is ss and a final sigma a sigma.
+  return plain(plain(String(text ?? "")).toUpperCase().toLowerCase()).replace(SPACES, " ").trim();
+}
+

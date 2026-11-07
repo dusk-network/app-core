@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { nameSkeleton } from "../src/names.js";
-import { displayText } from "../src/text.js";
+import { displayText, searchKey } from "../src/text.js";
 
 describe("text a person must trust", () => {
   it("shows what a sign request's bytes say, not what its controls make them read as", () => {
@@ -186,5 +186,42 @@ describe("text a person must trust", () => {
     assert.deepEqual(displayText(null), { flags: [], neutralized: false, text: "" });
     assert.deepEqual(displayText(undefined), { flags: [], neutralized: false, text: "" });
     assert.deepEqual(displayText(12), { flags: [], neutralized: false, text: "12" });
+  });
+});
+
+describe("text a search reads", () => {
+  /**
+   * @param {string} text
+   * @param {string} query
+   */
+  const finds = (text, query) => searchKey(text).includes(searchKey(query));
+
+  it("finds what was typed without its accents, in any case, as it does with them", () => {
+    // Sofia's and Amelie's.
+    for (const [query, text] of [
+      ["ilustracion", "Factura 2026-074 Ilustración"],
+      ["diseno", "Diseño web"],
+      ["colaboracion", "Colaboración Estudio Sol"],
+      ["gouter", "Le goûter du mercredi"],
+      ["Ilustración", "ilustracion"],
+      ["AMELIE", "Amélie"],
+      ["strasse", "Hauptstraße 5"],
+      ["Isik", "Işık"],
+    ]) {
+      assert.ok(finds(text, query), `${query} in ${text}`);
+    }
+  });
+
+  it("reads spaces of any kind as one, and leaves out what can't be seen", () => {
+    for (const text of ["Factura\n2026", "Factura\u00a02026", "Factura  2026", "Fac\u200btura 2026", "\u2066Factura\u2069 2026"]) assert.ok(finds(text, "factura 2026"), JSON.stringify(text));
+    assert.ok(finds("ﬁle 3", "file"));
+    assert.equal(searchKey("  Ilustración  "), "ilustracion");
+  });
+
+  it("finds nothing that only looks close", () => {
+    assert.equal(finds("Illustration", "ilustracion"), false);
+    assert.equal(finds("Factura 2026", "factura 2027"), false);
+    assert.equal(searchKey(null), "");
+    assert.equal(searchKey(undefined), "");
   });
 });
