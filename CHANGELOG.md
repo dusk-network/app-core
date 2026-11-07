@@ -17,6 +17,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Fixed
 
 - `/payment-links`: a `dusk:` link's `network=` names its network, as an https link's does, so one for another network is refused
+- `/export`: `accountingCsv` writes a migration's gas only where it was sent from one of `evmAddresses`, the EVM addresses the app knows as the person's own
 
 ## [0.8.2]
 

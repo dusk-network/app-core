@@ -650,6 +650,8 @@ const exportFile: Promise<ExportResult> = accountingCsv({
   bom: true,
   contactName: () => "A contact",
   currency: "EUR",
+  evm: new Map(),
+  evmAddresses: new Set(["0x4e4b4d3404691af1cba34a9ad7a8ee8139f6ff46"]),
   facts: new Map<string, SozuFact>(),
   network: "testnet",
   period: quarter,

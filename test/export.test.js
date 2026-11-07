@@ -663,7 +663,7 @@ describe("the bridge", () => {
     const evm = await migrationFacts({ fetch: chain.fetch, migrations: migrationsOf(rows), network: 1 });
     // Both migrations and their approvals before it, both payouts after it.
     const boundary = 1_793_892_000_000;
-    const coinsOf = async (period) => recordsOf((await accountingCsv({ evm, period, profile: { account: receiver, name: "Lena" }, rows })).csv).map((record) => record["Sent Currency"] || record["Received Currency"]);
+    const coinsOf = async (period) => recordsOf((await accountingCsv({ evm, evmAddresses: [bsc.owner], period, profile: { account: receiver, name: "Lena" }, rows })).csv).map((record) => record["Sent Currency"] || record["Received Currency"]);
 
     assert.deepEqual(await coinsOf({ from: 0, label: "before", to: boundary }), ["BNB", "BNB", "BNB", "BNB"]);
     assert.deepEqual(await coinsOf({ from: boundary, label: "after", to: Number.MAX_SAFE_INTEGER }), ["DUSK", "DUSK"]);
@@ -682,7 +682,7 @@ describe("the bridge", () => {
       timeAt: (n) => Number(BigInt(bsc.blocks[hex(n)]?.timestamp ?? "0x0")),
     });
     const evm = await migrationFacts({ fetch: chain.fetch, migrations: migrationsOf(rows), network: 1 });
-    const { count, csv } = await accountingCsv({ evm, profile: { account: receiver, name: "Lena" }, rows });
+    const { count, csv } = await accountingCsv({ evm, evmAddresses: [bsc.owner], profile: { account: receiver, name: "Lena" }, rows });
     const [first, second, payout] = recordsOf(csv).filter((record) => [approval, migration].includes(record.TxHash) || record.Memo === migration);
     /** @param {string} hash */
     const dateOf = (hash) => new Date(Number(BigInt(bsc.blocks[bsc.receipts[hash].blockNumber].timestamp)) * 1000).toISOString().slice(0, 19).replace("T", " ");
@@ -704,7 +704,38 @@ describe("the bridge", () => {
     // A payout's memo of bytes names no migration, though the app's facts have one by that hash.
     const bytes = rows.map((row) => ({ ...row, entry: { ...row.entry, memoBinary: true } }));
 
-    assert.equal((await accountingCsv({ evm, profile: { account: receiver, name: "Lena" }, rows: bytes })).count, 2);
+    assert.equal((await accountingCsv({ evm, evmAddresses: [bsc.owner], profile: { account: receiver, name: "Lena" }, rows: bytes })).count, 2);
+    // An address the app knows as the person's in any case, as a wallet gives it with its checksum.
+    assert.equal((await accountingCsv({ evm, evmAddresses: [bsc.owner.toUpperCase().replace(/^0X/, "0x")], profile: { account: receiver, name: "Lena" }, rows })).count, 6);
+  });
+
+  it("writes the gas of a migration only where the app knows its EVM address as the person's own", async () => {
+    // Nandini's: a customer's migration to her shop's account would be her cost.
+    const bsc = readFixture("bridge-migration-bsc.json");
+    const receiver = bsc.payouts.entries[0].events[0].data.receiver;
+    const rows = activityRows({ account: receiver, network: 1, public: bsc.payouts.entries.map((/** @type {any} */ raw) => entryFrom(receiver, raw, bsc.payouts.details[raw.origin], {}, { network: 1 })) });
+    const chain = fakeChain({
+      head: BigInt(bsc.head),
+      logs: bsc.logs.map((/** @type {any} */ log) => ({ address: log.address, block: BigInt(log.blockNumber), data: log.data, hash: log.transactionHash, index: Number(BigInt(log.logIndex)), topics: log.topics })),
+      receipts: bsc.receipts,
+      timeAt: (n) => Number(BigInt(bsc.blocks[hex(n)]?.timestamp ?? "0x0")),
+    });
+    const evm = await migrationFacts({ fetch: chain.fetch, migrations: migrationsOf(rows), network: 1 });
+
+    for (const evmAddresses of [undefined, [], ["0x6d6a000000000000000000000000000000005b28"]]) {
+      const { count, csv } = await accountingCsv({ evm, evmAddresses, profile: { account: receiver, name: "Nandini" }, rows });
+      const records = recordsOf(csv);
+
+      // The payouts alone: what came in is hers, the gas paid for it isn't known to be.
+      assert.equal(count, 2, JSON.stringify(evmAddresses));
+      assert.deepEqual(records.map((record) => record["Received Currency"]), ["DUSK", "DUSK"], JSON.stringify(evmAddresses));
+      assert.equal(records.some((record) => record.Tag === "cost"), false, JSON.stringify(evmAddresses));
+    }
+
+    // A payout out of the period whose migration isn't hers leaves nothing in it.
+    const boundary = 1_793_892_000_000;
+
+    assert.equal((await accountingCsv({ evm, period: { from: 0, label: "before", to: boundary }, profile: { account: receiver, name: "Nandini" }, rows })).count, 0);
   });
 });
 
