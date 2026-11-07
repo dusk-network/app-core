@@ -5,7 +5,7 @@ import { nativeRateEstimate, sozuRateEstimate } from "@dusk-network/networks/rat
 import { sozuFee, sozuStake } from "@dusk-network/networks/sozu";
 
 import { activityRows } from "../src/activity.js";
-import { GROWTH_MAX_AGE_MS, sozuFacts, sozuGrowth, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
+import { GROWTH_MAX_AGE_MS, stDuskWorth, sozuFacts, sozuGrowth, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
 import { DUSK, POOL, entryFrom, entryOf, hash } from "./fixtures/activity.js";
 import { readFixture } from "./fixtures/helpers.js";
 
@@ -174,6 +174,24 @@ describe("what a stake with Sozu did", () => {
 
     await sozuFacts({ account: ACCOUNT, archive, rows: [...failed, ...plain] });
     assert.deepEqual(archive.asked, []);
+  });
+});
+
+describe("what one stDUSK was worth", () => {
+  it("is the pool's DUSK over its stDUSK as a stake's event gave them, in lux, rounded down", async () => {
+    assert.equal(stDuskWorth({ stake: 3n * DUSK, supply: DUSK }), 3n * DUSK);
+    assert.equal(stDuskWorth({ stake: DUSK, supply: 3n * DUSK }), 333_333_333n);
+
+    // Lena's first stake, as its line in the export says it: 1 stDUSK = 1.840349526 DUSK.
+    const facts = await sozuFacts({ account: ACCOUNT, archive: archiveOf(recording.stakes), rows: STAKES });
+
+    assert.equal(stDuskWorth(/** @type {any} */ (facts.get(recording.stakes[0].origin)).pool), 1_840_349_526n);
+  });
+
+  it("is nothing for a pool of no stDUSK, or none", () => {
+    assert.equal(stDuskWorth({ stake: 5n, supply: 0n }), null);
+    assert.equal(stDuskWorth(null), null);
+    assert.equal(stDuskWorth(undefined), null);
   });
 });
 

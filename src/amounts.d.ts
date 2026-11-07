@@ -114,3 +114,15 @@ export declare function parseDusk(plain: string): bigint | null;
  * words. Nothing typed is neither.
  */
 export declare function readAmount(text: string, language?: string): { lux: bigint | null; problem: string | null };
+
+/**
+ * The amounts of DUSK a search can mean, as what a row shows starts with
+ * what's typed: "120" is from 120 up to 121 DUSK, and "0.2" from 0.2 up to
+ * 0.3, in lux, `to` left out. It's read in the language's way (the
+ * browser's, unless given) and with either decimal mark, so "0.2" and "0,2"
+ * are the same in German; where a mark could mean either of two
+ * (`unclearAmount`), as "1.000" in German, both are looked for. Empty for
+ * what isn't an amount above 0.
+ */
+export declare function amountsMeant(query: unknown, language?: string): { from: bigint; to: bigint }[];
+

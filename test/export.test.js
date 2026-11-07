@@ -706,6 +706,43 @@ describe("the bridge", () => {
 
     assert.equal((await accountingCsv({ evm, profile: { account: receiver, name: "Lena" }, rows: bytes })).count, 2);
   });
+
+  it("writes the gas of a migration only from the EVM addresses an app gives as the person's own, where it gives them", async () => {
+    // Nandini's: a customer's migration to her shop's account would be her cost.
+    const bsc = readFixture("bridge-migration-bsc.json");
+    const receiver = bsc.payouts.entries[0].events[0].data.receiver;
+    const rows = activityRows({ account: receiver, network: 1, public: bsc.payouts.entries.map((/** @type {any} */ raw) => entryFrom(receiver, raw, bsc.payouts.details[raw.origin], {}, { network: 1 })) });
+    const chain = fakeChain({
+      head: BigInt(bsc.head),
+      logs: bsc.logs.map((/** @type {any} */ log) => ({ address: log.address, block: BigInt(log.blockNumber), data: log.data, hash: log.transactionHash, index: Number(BigInt(log.logIndex)), topics: log.topics })),
+      receipts: bsc.receipts,
+      timeAt: (n) => Number(BigInt(bsc.blocks[hex(n)]?.timestamp ?? "0x0")),
+    });
+    const evm = await migrationFacts({ fetch: chain.fetch, migrations: migrationsOf(rows), network: 1 });
+
+    const stranger = "0x6d6a000000000000000000000000000000005b28";
+
+    for (const evmAddresses of [[], [stranger], new Set([stranger])]) {
+      const { count, csv } = await accountingCsv({ evm, evmAddresses, profile: { account: receiver, name: "Nandini" }, rows });
+      const records = recordsOf(csv);
+
+      // The payouts alone: what came in is hers, the gas paid for it isn't known to be.
+      assert.equal(count, 2, JSON.stringify([...evmAddresses]));
+      assert.deepEqual(records.map((record) => record["Received Currency"]), ["DUSK", "DUSK"], JSON.stringify([...evmAddresses]));
+      assert.equal(records.some((record) => record.Tag === "cost"), false, JSON.stringify([...evmAddresses]));
+    }
+
+    // Hers, in any case, as a wallet gives an address with its checksum: each migration's and approval's gas.
+    const hers = await accountingCsv({ evm, evmAddresses: [stranger, bsc.owner.toUpperCase().replace(/^0X/, "0x")], profile: { account: receiver, name: "Nandini" }, rows });
+
+    assert.equal(hers.count, 6);
+    // Without a list, every migration's, as before.
+    assert.equal((await accountingCsv({ evm, profile: { account: receiver, name: "Nandini" }, rows })).csv, hers.csv);
+    // A payout out of the period whose migration isn't hers leaves nothing in it.
+    const boundary = 1_793_892_000_000;
+
+    assert.equal((await accountingCsv({ evm, evmAddresses: [stranger], period: { from: 0, label: "before", to: boundary }, profile: { account: receiver, name: "Nandini" }, rows })).count, 0);
+  });
 });
 
 describe("a period", () => {

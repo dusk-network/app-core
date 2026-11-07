@@ -6,6 +6,7 @@ import {
   amountForField,
   amountLocale,
   decimalSeparator,
+  amountsMeant,
   defaultCurrency,
   formatAmount,
   formatDusk,
@@ -383,5 +384,27 @@ describe("the currency a wallet starts on", () => {
 
     assert.equal(defaultCurrency("not a language!"), "USD");
     assert.equal(defaultCurrency(""), "USD");
+  });
+});
+
+describe("an amount searched for", () => {
+  it("is the amounts a query can mean, read with either decimal mark, from what's typed up to its next digit", () => {
+    // Lena's: in German, "0.2" finds 0,2 as "0,2" does, and "0.05" 0,05.
+    for (const typed of ["0.2", "0,2", " 0.2 "]) assert.deepEqual(amountsMeant(typed, "de-DE"), [{ from: 200_000_000n, to: 300_000_000n }], typed);
+    assert.deepEqual(amountsMeant("0.05", "de-DE"), [{ from: 50_000_000n, to: 60_000_000n }]);
+    assert.deepEqual(amountsMeant("0,05", "en-GB"), [{ from: 50_000_000n, to: 60_000_000n }]);
+    // "120" is from 120 up to 121, and to the lux it's that amount alone.
+    assert.deepEqual(amountsMeant("120", "en-GB"), [{ from: 120_000_000_000n, to: 121_000_000_000n }]);
+    assert.deepEqual(amountsMeant("0.000000001", "en-GB"), [{ from: 1n, to: 2n }]);
+    // In German "1.000" could be a thousand or one: both are looked for.
+    assert.deepEqual(amountsMeant("1.000", "de-DE"), [
+      { from: 1_000_000_000_000n, to: 1_001_000_000_000n },
+      { from: 1_000_000_000n, to: 1_001_000_000n },
+    ]);
+  });
+
+  it("is nothing for what isn't an amount above 0", () => {
+    for (const typed of ["", "  ", "abc", "Factura 33", "0", "0,0", "0x12ab", "1.2.3", "0.1234567891"]) assert.deepEqual(amountsMeant(typed, "en-GB"), [], typed);
+    assert.deepEqual(amountsMeant(null, "en-GB"), []);
   });
 });

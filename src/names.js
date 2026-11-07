@@ -9,6 +9,7 @@
  */
 
 import { CONFUSABLES } from "./confusables.js";
+import { displayText } from "./text.js";
 
 /** @typedef {{ same: string, written: string, lower: string }} NameKeys */
 
@@ -31,9 +32,20 @@ function table() {
 }
 
 const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
-// What a name is read by: its letters and digits, and what renders as nothing,
-// which makes it another name that looks like it rather than the same one.
-const NOT_LETTER_OR_DIGIT = /[^\p{L}\p{N}\p{Default_Ignorable_Code_Point}]/gu;
+// What can't be seen: what renders as nothing, and controls, which turn text
+// around or break it. A name is read without them.
+const UNSEEN = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}]/gu;
+// What a name is read by: its letters and digits.
+const NOT_LETTER_OR_DIGIT = /[^\p{L}\p{N}]/gu;
+
+/** What an app says of a name it refuses for what can't be seen in it. */
+export const NAME_HIDES = "This name has hidden characters. Type it again without them.";
+
+/**
+ * @param {unknown} name
+ * @returns {boolean}
+ */
+export const nameHides = (name) => displayText(name ?? "").neutralized;
 
 /**
  * @param {unknown} name
@@ -50,11 +62,11 @@ export function nameSkeleton(name) {
 
 /**
  * What's left to tell names apart once their case, accents, spaces and
- * punctuation are off: what renders as nothing stays, for the skeleton to take out.
+ * punctuation are off, and what can't be seen.
  *
  * @param {string} text
  */
-const folded = (text) => text.normalize("NFD").replace(NOT_LETTER_OR_DIGIT, "").toLowerCase();
+const folded = (text) => text.normalize("NFD").replace(UNSEEN, "").replace(NOT_LETTER_OR_DIGIT, "").toLowerCase();
 
 /**
  * A name's three keys: as a person reads it, and by what it looks like, as

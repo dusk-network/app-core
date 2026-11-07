@@ -9,10 +9,11 @@
  *
  * @example
  * ```js
- * import { matchRequests, sentAlready } from "@dusk/app-core/requests";
+ * import { matchRequests, refundOf, sentAlready } from "@dusk/app-core/requests";
  *
  * const matches = matchRequests(kept, rows); // the wallet's requests, `/activity`'s rows
  * matches.get(id); // { state: "paid", matched: "amount-memo", hash, at, lux, memo, more: [{ … }] }
+ * refundOf(request, matches.get(id).more[0], rows); // { to, lux, memo: "Refund: Factura 33" }: Send back
  *
  * // Before a send: the same payment, made already.
  * sentAlready(rows, { to, lux, memo }); // the row of the payment it would make again, or null
@@ -33,7 +34,8 @@ export declare const AGAIN_MS: 600000;
  * A request as a wallet keeps it: `lux` as a decimal string, null for any
  * amount; `at` when it was first asked, in milliseconds; `paid` the payment
  * that paid it, kept once it did, for it to stay paid once that payment is
- * too far back to be read again.
+ * too far back to be read again, with what it paid (`lux`, as a decimal
+ * string, its match's), for that to be said then too.
  */
 export type KeptRequest = {
   id: string;
@@ -44,7 +46,7 @@ export type KeptRequest = {
   /** The network it's for, as the wallet names it. */
   network?: string;
   at: number;
-  paid?: { at: number; hash: string };
+  paid?: { at: number; hash: string; lux?: string };
 };
 
 /**
@@ -70,9 +72,12 @@ export type RequestPayment = {
  *   request asking too little to tell, as an amount alone;
  * - "waiting": none yet.
  *
- * `more` holds the other payments that match it, oldest first, which no other
- * request took: one with all of it again (`matched` "amount-memo") is the
- * request paid twice.
+ * `lux` is what the payment paid, to show on every request it pays, as one of
+ * any amount can be paid with any: for a request kept paid, the chain's where
+ * its payment is among the rows, else what was kept with it, and none where
+ * neither says. `more` holds the other payments that match it, oldest first,
+ * which no other request took: one with all of it again (`matched`
+ * "amount-memo") is the request paid twice.
  */
 export type RequestMatch = {
   state: "check" | "paid" | "waiting";
@@ -96,6 +101,19 @@ export type RequestMatch = {
  * paid keeps its payment.
  */
 export declare function matchRequests(requests: ReadonlyArray<KeptRequest>, rows: ReadonlyArray<ActivityRow>): Map<string, RequestMatch>;
+
+/**
+ * What a payment that paid a request again (`more` of its match) is sent back
+ * with, for Send to be filled in: to whoever sent it, as `rows` say, what it
+ * brought, and the request's memo after "Refund: " where that fits in a
+ * memo's 512 bytes, else "Refund". Null where whoever sent it isn't known, as
+ * for a shielded payment or one not among `rows`.
+ */
+export declare function refundOf(
+  request: KeptRequest,
+  payment: RequestPayment,
+  rows: ReadonlyArray<ActivityRow>
+): { to: string; lux: bigint; memo: string } | null;
 
 /**
  * The latest payment a send would make again: out from this profile, not

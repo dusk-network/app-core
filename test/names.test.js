@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { CONFUSABLES, CONFUSABLES_VERSION } from "../src/confusables.js";
-import { lookAlikes, looksAlike, nameClash, nameSkeleton, sameName } from "../src/names.js";
+import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, sameName } from "../src/names.js";
 
 describe("names that look alike", () => {
   it("catches Marek's: Armenian, Cherokee and a small capital I, as Cyrillic before", () => {
@@ -35,10 +35,25 @@ describe("names that look alike", () => {
     assert.equal(looksAlike("Ian", "lan"), true);
     assert.equal(looksAlike("Profile 2", "ProfiIe 2"), true);
     assert.equal(looksAlike("Alice", "Ali\u200bce"), true);
-    // What renders as nothing is no name read the same: it looks alike, in other characters.
-    assert.equal(sameName("Alice", "Ali\u200bce"), false);
+    // What can't be seen is left out before names are compared: they read as the same name.
+    for (const hidden of ["Ali\u200bce", "\u2066Alice\u2069", "Ali\u00adce", "Alice\u0007", "Al\u3164ice"]) {
+      assert.equal(sameName("Alice", hidden), true, JSON.stringify(hidden));
+    }
     assert.equal(sameName("Amélie", "Amelie"), true);
     assert.equal(nameSkeleton("rn"), nameSkeleton("m"));
+  });
+
+  it("finds what a name holds that can't be seen, for it to be refused", () => {
+    // Marek's: an override at the start reads as "Profile 2" and "Alice".
+    for (const hidden of ["\u202e2 eliforP", "\u202eecilA", "Ali\u200bce", "Ali\u200dce", "Ali\u00adce", "Alice\u2069", "Ali\tce", "Ali\nce", "Ali\u2028ce", "Al\u3164ice", "\ufeffAlice", "Alice\u{e0041}", "Ali\ud800ce", "Mom \u{1f469}\u200d\u{1f467}"]) {
+      assert.equal(nameHides(hidden), true, JSON.stringify(hidden));
+    }
+    // An emoji's own selector, accents and any script hide nothing.
+    for (const plain of ["Alice", "Am\u00e9lie", "e\u0301", "Ilustraci\u00f3n Sol", "\u05e9\u05dc\u05d5\u05dd", "\u0639\u0644\u064a", "\u0939\u093f\u0928\u094d\u0926\u0940", "\u65e5\u672c", "Caf\u00e9 \u2764\ufe0f", "\u{1f600}", "Profile 2", "", "  "]) {
+      assert.equal(nameHides(plain), false, JSON.stringify(plain));
+    }
+    assert.equal(nameHides(null), false);
+    assert.match(NAME_HIDES, /hidden characters/);
   });
 
   it("tells names apart that read differently, and says nothing of names of no letters", () => {
@@ -75,6 +90,9 @@ describe("a contact's name", () => {
     assert.deepEqual(nameClash("Profile 2", { contacts, profiles }), { entry: profiles[1], kind: "profile", same: true });
     assert.deepEqual(nameClash("profile  2", { contacts, profiles }), { entry: profiles[1], kind: "profile", same: true });
     assert.deepEqual(nameClash("ProfiIe 2", { contacts, profiles }), { entry: profiles[1], kind: "profile", same: false });
+    // With what can't be seen in it, it reads as that name.
+    assert.deepEqual(nameClash("Pro​file 2", { contacts, profiles }), { entry: profiles[1], kind: "profile", same: true });
+    assert.deepEqual(nameClash("⁦Bob⁩", { contacts, profiles }), { entry: contacts[1], kind: "contact", same: true });
   });
 
   it("takes another contact's name, or looks like it, but not its own", () => {

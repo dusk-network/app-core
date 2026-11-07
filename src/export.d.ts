@@ -108,9 +108,17 @@ export type ExportOptions = {
   /**
    * Each migration's side on its own chain, by its hash (`migrationFacts` of
    * `/bridge`): a payout's migration has a line of what its own approval and
-   * it paid in gas there, each at its own time and hash, of its EVM address.
+   * it paid in gas there, each at its own time and hash, of its EVM address;
+   * with `evmAddresses`, only one sent from one of them.
    */
   evm?: ReadonlyMap<string, MigrationEvm>;
+  /**
+   * The EVM addresses the app knows as the person's own, as those it
+   * connected, in any case: given, a migration's gas is in the file only where
+   * one of them sent it, none for an empty list, as anyone can migrate to an
+   * account, as a customer to a shop's. Without it, every migration's is.
+   */
+  evmAddresses?: Iterable<string>;
   /** The person's own name for a counterparty, only when they asked for their contact names to be in the file. */
   contactName?: (counterparty: string) => string | null | undefined;
   /** The network's name: the file's name says it, unless it's "mainnet". */

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { displayText } from "../src/text.js";
+import { nameSkeleton } from "../src/names.js";
+import { displayText, searchKey } from "../src/text.js";
 
 describe("text a person must trust", () => {
   it("shows what a sign request's bytes say, not what its controls make them read as", () => {
@@ -142,6 +143,38 @@ describe("text a person must trust", () => {
     assert.deepEqual(displayText("pay \u202e1٠5\u202c", { isolate: true }), { flags: ["bidi_control", "mixed_digits"], neutralized: true, text: `⁦pay \\u202e1⁨٠⁩5\\u202c⁩` });
   });
 
+  it("flags a number whose digits look like other digits than they are, and changes nothing", () => {
+    // Marek's: Bengali's 4 looks like 8, Gurmukhi's 44 like 88, Oriya's 2 and Malayalam's 7 like 9.
+    for (const misread of ["Pay \u09ea DUSK to unlock", "Pay \u0a6a\u0a6a DUSK", "Pay \u0b68 DUSK", "Pay \u0d6d DUSK"]) {
+      assert.deepEqual(displayText(misread), { flags: ["lookalike_digits"], neutralized: false, text: misread }, misread);
+    }
+    assert.deepEqual(displayText("Pay 1\u09ea DUSK").flags, ["mixed_digits", "lookalike_digits"]);
+
+    // Every digit Unicode's table (UTS #39) gives the skeleton of another Latin digit, and no other.
+    const DIGIT = /^\p{Nd}$/u;
+    const latin = Array.from({ length: 10 }, (_, value) => nameSkeleton(String(value)));
+    let flagged = 0;
+
+    for (let code = 0x80; code <= 0x10ffff; code += 1) {
+      const digit = String.fromCodePoint(code);
+
+      if (code >= 0xd800 && code <= 0xdfff) continue;
+      if (!DIGIT.test(digit)) continue;
+
+      let zero = code;
+
+      while (DIGIT.test(String.fromCodePoint(zero - 1))) zero -= 1;
+
+      const value = (code - zero) % 10;
+      const misread = latin.some((look, other) => other !== value && look === nameSkeleton(digit));
+
+      assert.equal(displayText(`Pay ${digit} DUSK`).flags.includes("lookalike_digits"), misread, code.toString(16));
+      if (misread) flagged += 1;
+    }
+
+    assert.equal(flagged, 7);
+  });
+
   it("leaves numbers of one system alone, in any script, and numbers of two kept apart", () => {
     // Arabic-Indic and Persian digits read left to right; a math font's digits are one system across its code points.
     for (const one of ["Factura 33", "1 000,50 €", "١٠٠٠", "۱۲۳۴", "１０００", "𝟏𝟐𝟑", "𝟗𝟖", "१,२३४.५", "10 or ١٠", "Pay 10, ١٠", "3.5 DUSK", "Ⅻ", "\u{10e60}\u{10e69}"]) {
@@ -153,5 +186,47 @@ describe("text a person must trust", () => {
     assert.deepEqual(displayText(null), { flags: [], neutralized: false, text: "" });
     assert.deepEqual(displayText(undefined), { flags: [], neutralized: false, text: "" });
     assert.deepEqual(displayText(12), { flags: [], neutralized: false, text: "12" });
+  });
+});
+
+describe("text a search reads", () => {
+  /**
+   * @param {string} text
+   * @param {string} query
+   */
+  const finds = (text, query) => searchKey(text).includes(searchKey(query));
+
+  it("finds what was typed without its accents, in any case, as it does with them", () => {
+    // Sofia's and Amelie's.
+    for (const [query, text] of [
+      ["ilustracion", "Factura 2026-074 Ilustración"],
+      ["diseno", "Diseño web"],
+      ["colaboracion", "Colaboración Estudio Sol"],
+      ["gouter", "Le goûter du mercredi"],
+      ["Ilustración", "ilustracion"],
+      ["AMELIE", "Amélie"],
+      ["strasse", "Hauptstraße 5"],
+      ["Isik", "Işık"],
+    ]) {
+      assert.ok(finds(text, query), `${query} in ${text}`);
+    }
+  });
+
+  it("reads spaces of any kind as one, and leaves out what can't be seen", () => {
+    for (const text of ["Factura\n2026", "Factura\u00a02026", "Factura  2026", "Fac\u200btura 2026", "\u2066Factura\u2069 2026"]) assert.ok(finds(text, "factura 2026"), JSON.stringify(text));
+    assert.ok(finds("ﬁle 3", "file"));
+    assert.equal(searchKey("  Ilustración  "), "ilustracion");
+    // Case folded whatever the letter's place: a Greek prefix, and capital ẞ against ss.
+    assert.ok(finds("κόσμος", "κόσ"));
+    assert.ok(finds("ΚΌΣΜΟΣ", "κοσμος"));
+    assert.ok(finds("STRAẞE", "strasse"));
+    assert.ok(finds("Straße", "STRASSE"));
+  });
+
+  it("finds nothing that only looks close", () => {
+    assert.equal(finds("Illustration", "ilustracion"), false);
+    assert.equal(finds("Factura 2026", "factura 2027"), false);
+    assert.equal(searchKey(null), "");
+    assert.equal(searchKey(undefined), "");
   });
 });

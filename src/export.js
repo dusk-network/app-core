@@ -39,6 +39,7 @@
 
 import { formatDuskPlain } from "./amounts.js";
 import { memoTextOf } from "./moved.js";
+import { stDuskWorth } from "./sozu.js";
 import { displayText } from "./text.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
@@ -214,9 +215,9 @@ const sozuWord = (row) => (row.sozu === "stake" ? "Staked with Sozu" : row.sozu 
  * @param {SozuFact} fact
  */
 function rateWords(fact) {
-  const { stake, supply } = fact.pool;
+  const worth = stDuskWorth(fact.pool);
 
-  return supply > 0n ? `1 stDUSK = ${formatDuskPlain((1_000_000_000n * stake) / supply)} DUSK` : "";
+  return worth === null ? "" : `1 stDUSK = ${formatDuskPlain(worth)} DUSK`;
 }
 
 /**
@@ -539,8 +540,10 @@ function slugOf(name) {
  * @param {ExportOptions} options
  * @returns {Promise<ExportResult>}
  */
-export async function accountingCsv({ bom = false, contactName, currency = "EUR", evm, facts, network, period, price, profile, profiles = [], rows }) {
+export async function accountingCsv({ bom = false, contactName, currency = "EUR", evm, evmAddresses, facts, network, period, price, profile, profiles = [], rows }) {
   const account = String(profile?.account ?? "");
+  // The EVM addresses the app knows as the person's, where it gives them: anyone can migrate to an account.
+  const ownEvm = evmAddresses === undefined || evmAddresses === null ? null : new Set([...evmAddresses].map((address) => String(address ?? "").toLowerCase()));
   /** @type {ReadonlySet<string>} */
   const self = new Set([profile?.account, profile?.address].flatMap((id) => (typeof id === "string" && id !== "" ? [id] : [])));
   /** @type {Map<string, string>} */
@@ -586,8 +589,10 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
       continue;
     }
 
-    // A migration's side on its own chain, with the payout it was paid with: named by its memo, as text.
-    const migration = row.route?.kind === "migration" && row.direction === "in" ? evm?.get((memoTextOf(row) ?? "").toLowerCase()) : undefined;
+    // A migration's side on its own chain, with the payout it was paid with: named by its memo, as text,
+    // and, where the app gives the person's EVM addresses, sent from one of them. Another's gas is no cost of theirs.
+    const fact = row.route?.kind === "migration" && row.direction === "in" ? evm?.get((memoTextOf(row) ?? "").toLowerCase()) : undefined;
+    const migration = !ownEvm || (fact?.from && ownEvm.has(fact.from.toLowerCase())) ? fact : undefined;
     /** @param {number} at */
     const inPeriod = (at) => !period || (at >= period.from && at < period.to);
     const rowIn = inPeriod(row.time);

@@ -8,7 +8,7 @@
  */
 
 import { memoTextOf, movedBy } from "./moved.js";
-import { recipientKind } from "./payment-links.js";
+import { MAX_MEMO_BYTES, recipientKind } from "./payment-links.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
 /** @typedef {import("./requests.js").KeptRequest} KeptRequest */
@@ -94,7 +94,12 @@ export function matchRequests(list, rows) {
 
   for (const request of oldestFirst) {
     if (request.paid) {
-      matches.set(request.id, { at: request.paid.at, hash: request.paid.hash, matched: "amount-memo", state: "paid" });
+      // What its payment paid: the chain's, where it's read, else as it was kept with it.
+      const row = incoming.find(({ hash }) => hash === request.paid?.hash);
+      const kept = /** @type {unknown} */ (request.paid.lux);
+      const lux = row ? movedBy(row) : typeof kept === "string" && /^\d+$/.test(kept) ? BigInt(kept) : undefined;
+
+      matches.set(request.id, { at: request.paid.at, hash: request.paid.hash, ...(lux === undefined ? {} : { lux }), matched: "amount-memo", state: "paid" });
     } else {
       answer(request, "amount-memo");
     }
@@ -144,6 +149,23 @@ export function matchRequests(list, rows) {
   }
 
   return matches;
+}
+
+/**
+ * @param {KeptRequest} request
+ * @param {RequestPayment} payment
+ * @param {ReadonlyArray<ActivityRow>} rows
+ * @returns {{ to: string, lux: bigint, memo: string } | null}
+ */
+export function refundOf(request, payment, rows) {
+  const from = rows.find(({ category, hash }) => category === "received" && hash === payment?.hash)?.counterparty;
+  const asked = memoOf(request?.memo);
+  const said = asked ? `Refund: ${asked}` : "Refund";
+
+  if (!from) return null;
+
+  // Within a memo's bytes: a refund alone where the request's memo leaves no room to say which.
+  return { lux: payment.lux, memo: new TextEncoder().encode(said).length <= MAX_MEMO_BYTES ? said : "Refund", to: from };
 }
 
 /**

@@ -2,6 +2,28 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.9.0]
+
+### Added
+
+- `/names`: `nameHides` and `NAME_HIDES`, a name holding what can't be seen, as a right-to-left override, to refuse
+- `/text`: `displayText` flags a number whose digits look like other Latin digits than they are (`lookalike_digits`), as Bengali's ৪ that looks like an 8
+- `/text`: `searchKey`, text as a search compares it, without accents, case or what can't be seen, so "ilustracion" finds "Ilustración"
+- `/amounts`: `amountsMeant`, the amounts of DUSK a search can mean, with either decimal mark
+- `/requests`: a request's kept payment holds what it paid (`paid.lux`), which `matchRequests` gives for a request kept paid, as the chain's where its payment is read
+- `/sozu`: `stDuskWorth`, what one stDUSK was worth when a stake or an unstake went through, as the export says it
+- `/requests`: `refundOf`, a payment that paid a request again, sent back to its sender with the request's memo
+- `/export`: `accountingCsv` takes `evmAddresses`, the EVM addresses the app knows as the person's own, and then writes a migration's gas only where one of them sent it
+
+### Changed
+
+- `/names`: `sameName`, `nameClash` and `lookAlikes` compare names without what can't be seen in them
+- `/payment-links`: `readPaymentLink` says why it refuses a link: a field said twice, a user part before the host, two networks, a network that can't be read, or no recipient
+
+### Fixed
+
+- `/payment-links`: a `dusk:` link's `network=` names its network, as an https link's does, so one for another network is refused
+
 ## [0.8.2]
 
 ### Fixed

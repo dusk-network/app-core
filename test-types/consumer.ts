@@ -555,16 +555,19 @@ const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 
 const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
 void [weiShown, hint, readTyped, readFrench];
 
-import { defaultCurrency } from "@dusk-network/app-core/amounts";
+import { amountsMeant, defaultCurrency } from "@dusk-network/app-core/amounts";
 
 const startsOn: "EUR" | "USD" = defaultCurrency("de-DE");
-void [startsOn, defaultCurrency()];
+const meant: { from: bigint; to: bigint }[] = amountsMeant("0.2", "de-DE");
+void [startsOn, defaultCurrency(), meant];
 
 // /text
-import { displayText, type TextFlag } from "@dusk-network/app-core/text";
+import { displayText, searchKey, type TextFlag } from "@dusk-network/app-core/text";
 
 const safe: { text: string; neutralized: boolean; flags: TextFlag[] } = displayText("memo", { lineBreaks: true, maxChars: 10 });
-void safe;
+const lookalike: TextFlag = "lookalike_digits";
+const searched: string = searchKey("Ilustración");
+void [safe, lookalike, searched];
 
 // /payment-links
 import { MAX_MEMO_BYTES, chainLabel, makePaymentLink, networkMismatch, parsePaymentLink, recipientKind, type MadePaymentLink, type PaymentLink, type PaymentRequest } from "@dusk-network/app-core/payment-links";
@@ -591,7 +594,7 @@ const sendWords: string[] = [LINK_UNREADABLE, LINK_TWO_AMOUNTS, sendRead?.proble
 void [sendReason, sendFills, sendWords];
 
 // /names
-import { lookAlikes, looksAlike, nameClash, nameSkeleton, sameName } from "@dusk-network/app-core/names";
+import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, sameName } from "@dusk-network/app-core/names";
 
 const contactsHere = [{ address: "q", id: "c1", name: "Estudio Marta" }];
 const profilesHere = [{ account: "p", name: "Profile 2" }];
@@ -600,24 +603,32 @@ const clashKind: "profile" | "contact" | undefined = clash?.kind;
 const clashAccount: string | undefined = clash?.kind === "profile" ? clash.entry.account : clash?.entry.address;
 const alikeHere: Set<{ address: string; id: string; name: string }> = lookAlikes(contactsHere);
 const nameChecks: [boolean, boolean, string] = [looksAlike("Bob", "Bօb"), sameName("a", "A"), nameSkeleton("rn")];
-void [clashKind, clashAccount, alikeHere, nameChecks];
+const hiddenName: boolean = nameHides("\u202eecilA");
+const hiddenWords: "This name has hidden characters. Type it again without them." = NAME_HIDES;
+void [clashKind, clashAccount, alikeHere, nameChecks, hiddenName, hiddenWords];
 
 // /requests
-import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched } from "@dusk-network/app-core/requests";
+import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, refundOf, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched, type RequestPayment } from "@dusk-network/app-core/requests";
 
 declare const readRowsForRequests: import("@dusk-network/app-core/activity").ActivityRow[];
-const keptRequests: KeptRequest[] = [{ at: 1, id: "a", lux: null, memo: "Factura 33", network: "testnet", to: "account" }];
+const keptRequests: KeptRequest[] = [
+  { at: 1, id: "a", lux: null, memo: "Factura 33", network: "testnet", to: "account" },
+  { at: 1, id: "b", lux: null, memo: "Factura 34", network: "testnet", paid: { at: 2, hash: "h", lux: "1" }, to: "account" },
+];
 const requestMatches: Map<string, RequestMatch> = matchRequests(keptRequests, readRowsForRequests);
 const requestState: "check" | "paid" | "waiting" | undefined = requestMatches.get("a")?.state;
+const cameIn: bigint | undefined = requestMatches.get("b")?.lux;
+declare const paidAgainOnce: RequestPayment;
+const sendBack: { to: string; lux: bigint; memo: string } | null = refundOf(keptRequests[1], paidAgainOnce, readRowsForRequests);
 const paidAgain: RequestMatched[] | undefined = requestMatches.get("a")?.more?.map((each) => each.matched);
 const repeat: import("@dusk-network/app-core/activity").ActivityRow | null = sentAlready(readRowsForRequests, { lux: 1n, memo: "", to: "account" });
 const requestWindows: [300000, 600000] = [CLOCK_SKEW_MS, AGAIN_MS];
-void [requestState, paidAgain, repeat, requestWindows];
+void [requestState, cameIn, sendBack, paidAgain, repeat, requestWindows];
 // @ts-expect-error a request's amount is lux as text, or null
 void matchRequests([{ at: 1, id: "a", lux: 1n, memo: "", to: "account" }], []);
 
 // /sozu
-import { sozuFacts, sozuPosition, sozuRate, sozuRateLine, sozuYear, type SozuFact, type SozuPosition, type SozuStatusLike, type SozuYear } from "@dusk-network/app-core/sozu";
+import { stDuskWorth, sozuFacts, sozuPosition, sozuRate, sozuRateLine, sozuYear, type SozuFact, type SozuPosition, type SozuStatusLike, type SozuYear } from "@dusk-network/app-core/sozu";
 import type { ActivityRow as ReadRow } from "@dusk-network/app-core/activity";
 
 declare const readRows: ReadRow[];
@@ -629,7 +640,8 @@ const extensionStatus: SozuStatusLike = { fees: { deposit: { denominator: "400",
 const year: SozuYear = sozuYear({ amount: 1n, nativeRate: 0.2, status: extensionStatus });
 const yearRate: number | null = sozuRate(0.2, sozuStatus);
 const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2, provisioners: [{ amount: 1, eligibility: 1 }], status: sozuStatus, tipHeight: 1 });
-void [sozuRead, earnedSoFar, year, yearRate, rateLine];
+const worthThen: Promise<bigint | null> = sozuRead.then((facts) => stDuskWorth(facts.get("h")?.pool));
+void [sozuRead, earnedSoFar, year, yearRate, rateLine, worthThen];
 
 import { GROWTH_MAX_AGE_MS, sozuGrowth, type SozuGrowth, type SozuPoint } from "@dusk-network/app-core/sozu";
 
@@ -647,6 +659,8 @@ const exportFile: Promise<ExportResult> = accountingCsv({
   bom: true,
   contactName: () => "A contact",
   currency: "EUR",
+  evm: new Map(),
+  evmAddresses: new Set(["0x4e4b4d3404691af1cba34a9ad7a8ee8139f6ff46"]),
   facts: new Map<string, SozuFact>(),
   network: "testnet",
   period: quarter,

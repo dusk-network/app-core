@@ -397,6 +397,26 @@ export function parseDusk(plain) {
 }
 
 /**
+ * @param {unknown} query
+ * @param {string} [language] The browser's, unless given
+ * @returns {{ from: bigint, to: bigint }[]}
+ */
+export function amountsMeant(query, language) {
+  const decimal = decimalSeparator(language);
+  const typed = String(query ?? "").trim();
+  const either = unclearAmount(typed, decimal);
+
+  return (either ? [either.grouped, either.decimal] : [typed]).flatMap((text) => {
+    const plain = normalizeAmount(text, decimal, language);
+    const lux = parseDusk(plain);
+    const decimals = plain.split(".")[1]?.length ?? 0;
+
+    // What's typed is how a row's amount starts: up to its next digit.
+    return lux ? [{ from: lux, to: lux + 10n ** BigInt(LUX_DECIMALS - decimals) }] : [];
+  });
+}
+
+/**
  * An amount of DUSK as a person typed it, in the language's reading: the lux
  * it is, or what's wrong with it in plain words. Nothing typed is neither.
  *
