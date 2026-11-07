@@ -216,6 +216,11 @@ describe("text a search reads", () => {
     for (const text of ["Factura\n2026", "Factura\u00a02026", "Factura  2026", "Fac\u200btura 2026", "\u2066Factura\u2069 2026"]) assert.ok(finds(text, "factura 2026"), JSON.stringify(text));
     assert.ok(finds("ﬁle 3", "file"));
     assert.equal(searchKey("  Ilustración  "), "ilustracion");
+    // Case folded whatever the letter's place: a Greek prefix, and capital ẞ against ss.
+    assert.ok(finds("κόσμος", "κόσ"));
+    assert.ok(finds("ΚΌΣΜΟΣ", "κοσμος"));
+    assert.ok(finds("STRAẞE", "strasse"));
+    assert.ok(finds("Straße", "STRASSE"));
   });
 
   it("finds nothing that only looks close", () => {

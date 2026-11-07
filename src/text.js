@@ -249,7 +249,12 @@ export function searchKey(text) {
   /** @param {string} each */
   const plain = (each) => each.normalize("NFKD").replace(MARKS, "").replace(INVISIBLE, "");
 
-  // Upper case first, so ß is ss and a final sigma a sigma.
-  return plain(plain(String(text ?? "")).toUpperCase().toLowerCase()).replace(SPACES, " ").trim();
+  // Case folded the same way wherever a letter stands: ß and ẞ are ss, and a
+  // final sigma is a sigma, so a prefix finds the word it starts.
+  return plain(plain(String(text ?? "")).toUpperCase().toLowerCase())
+    .replace(/ß/gu, "ss")
+    .replace(/ς/gu, "σ")
+    .replace(SPACES, " ")
+    .trim();
 }
 
