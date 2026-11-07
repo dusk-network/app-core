@@ -11,6 +11,11 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Changed
 
 - `/names`: `sameName`, `nameClash` and `lookAlikes` compare names without what can't be seen in them
+- `/payment-links`: `readPaymentLink` says why it refuses a link: a field said twice, a user part before the host, two networks, a network that can't be read, or no recipient
+
+### Fixed
+
+- `/payment-links`: a `dusk:` link's `network=` names its network, as an https link's does, so one for another network is refused
 
 ## [0.8.2]
 

@@ -35,6 +35,12 @@ const SAID_ONCE = Object.freeze(["to", "amount", "amountLux", "memo", "label", "
 /** Why a link fills in nothing, in the words both wallets use. */
 export const LINK_UNREADABLE = "That link can't be read. Ask for a new one.";
 export const LINK_TWO_AMOUNTS = "This link asks for two different amounts. Ask for a new one.";
+const LINK_NO_RECIPIENT = "This link doesn't say who to pay. Ask for a new one.";
+const LINK_USER_PART = "This link has something before the site's address. Ask for a new one.";
+const LINK_NETWORK_UNREAD = "This link's network can't be read. Ask for a new one.";
+
+/** A field a link says twice, as a refusal names it. */
+const FIELD_WORDS = Object.freeze({ amount: "the amount", amountLux: "the amount", label: "the label", memo: "the memo", network: "the network", to: "the recipient" });
 
 /** What the apps say of a recipient they won't send to, by the network file's reason. */
 const BLOCKED = Object.freeze({
@@ -129,39 +135,58 @@ function amountsOf(params) {
 }
 
 /**
- * Whether a query says one of a link's fields more than once: the link could
- * be read two ways.
+ * Why a query can't be read: a field it says more than once, as the link
+ * could be read two ways. "" for none.
  *
  * @param {URLSearchParams} params
+ * @returns {string}
  */
-const saysTwice = (params) => SAID_ONCE.some((name) => params.getAll(name).length > 1);
+function saidTwice(params) {
+  const field = SAID_ONCE.find((name) => params.getAll(name).length > 1);
+
+  return field ? `This link says ${FIELD_WORDS[/** @type {keyof typeof FIELD_WORDS} */ (field)]} twice. Ask for a new one.` : "";
+}
 
 /**
- * A `dusk:` link: `dusk:public-<recipient>[@dusk:<chain>][?amount=…&memo=…]`,
- * or `shielded-`, with `//` after the scheme or not, and its query; null for
- * any other, and for one that says a field twice.
+ * @param {string} a A chain ID, "dusk:1"
+ * @param {string} b
+ */
+const twoNetworks = (a, b) => `This link names two networks, ${chainLabel(a)} and ${chainLabel(b)}. Ask for a new one.`;
+
+/**
+ * A `dusk:` link: `dusk:public-<recipient>[@dusk:<chain>][?amount=…&memo=…&network=…]`,
+ * or `shielded-`, with `//` after the scheme or not, and its query, its
+ * network after the `@` or in its query, as an https link's; why it's
+ * refused where it names two networks, one that can't be read, says a field
+ * twice or no recipient; and null for any other.
  *
  * @param {string} raw
- * @returns {{ link: PaymentLink, params: URLSearchParams } | null}
+ * @returns {{ link: PaymentLink, params: URLSearchParams } | { problem: string } | null}
  */
 function duskForm(raw) {
   const rest = raw.replace(/^dusk:/i, "").replace(/^\/+/, "");
   const q = rest.indexOf("?");
   const params = new URLSearchParams(q >= 0 ? rest.slice(q + 1) : "");
   let head = (q >= 0 ? rest.slice(0, q) : rest).trim();
-  let chainId = "";
+  let atChain = "";
   const at = head.lastIndexOf("@");
 
   if (at > 0) {
-    chainId = head.slice(at + 1).trim();
+    atChain = head.slice(at + 1).trim();
     head = head.slice(0, at).trim();
   }
-
-  if ((chainId && !referenceOf(chainId)) || saysTwice(params)) return null;
 
   const kind = /^public-/i.test(head) ? "public" : /^shielded-/i.test(head) ? "shielded" : null;
 
   if (!kind) return null;
+
+  const twice = saidTwice(params);
+  const named = textOf(params.get("network"));
+  const queryChain = chainIdOf(named);
+
+  if (twice) return { problem: twice };
+  if ((atChain && !referenceOf(atChain)) || (named && !queryChain)) return { problem: LINK_NETWORK_UNREAD };
+  if (atChain && queryChain && referenceOf(atChain) !== referenceOf(queryChain)) return { problem: twoNetworks(atChain, queryChain) };
 
   const encoded = head.slice(kind.length + 1);
   let to = encoded;
@@ -174,7 +199,9 @@ function duskForm(raw) {
 
   to = to.trim();
 
-  return to ? { link: { ...amountsOf(params), chainId, form: "dusk", kind, label: textOf(params.get("label")), memo: textOf(params.get("memo")), raw, to }, params } : null;
+  if (!to) return { problem: LINK_NO_RECIPIENT };
+
+  return { link: { ...amountsOf(params), chainId: atChain || queryChain, form: "dusk", kind, label: textOf(params.get("label")), memo: textOf(params.get("memo")), raw, to }, params };
 }
 
 /**
@@ -186,13 +213,14 @@ const trimmed = (url) => url.replace(/\/+$/, "");
 
 /**
  * An https link to the web wallet's Send, and its query: `undefined` when it's
- * no such link; null where it says two networks or no recipient, a field more
- * than once, or has a user part before its host, which makes it read as
- * another address than the one it goes to.
+ * no such link; why it's refused where it has a user part before its host,
+ * which makes it read as another address than the one it goes to, says a
+ * field more than once, names a network that can't be read or another than
+ * its wallet's, or no recipient.
  *
  * @param {string} raw
  * @param {string | undefined} walletUrl
- * @returns {{ link: PaymentLink, params: URLSearchParams } | null | undefined}
+ * @returns {{ link: PaymentLink, params: URLSearchParams } | { problem: string } | undefined}
  */
 function walletForm(raw, walletUrl) {
   /** @type {URL} */
@@ -213,10 +241,14 @@ function walletForm(raw, walletUrl) {
   const said = textOf(params.get("network"));
   const chainId = chainIdOf(said);
   const to = textOf(params.get("to"));
+  const twice = saidTwice(params);
 
-  if (url.username || url.password || saysTwice(params)) return null;
+  if (url.username || url.password) return { problem: LINK_USER_PART };
+  if (twice) return { problem: twice };
+  if (said && !chainId) return { problem: LINK_NETWORK_UNREAD };
   // A link that says one network, on another network's wallet.
-  if (!to || (said && !chainId) || (ours && chainId && referenceOf(chainId) !== String(ours.chainId))) return null;
+  if (ours && chainId && referenceOf(chainId) !== String(ours.chainId)) return { problem: twoNetworks(`dusk:${ours.chainId}`, chainId) };
+  if (!to) return { problem: LINK_NO_RECIPIENT };
 
   return {
     link: {
@@ -234,12 +266,13 @@ function walletForm(raw, walletUrl) {
 }
 
 /**
- * A link and its query, as given: null for nothing, and for what isn't one
- * that can be read; a recipient as it is with no query.
+ * A link and its query, as given, or why it's refused: null for nothing, and
+ * for a `dusk:` link of no form a payment's has; a recipient as it is with no
+ * query.
  *
  * @param {string} raw
  * @param {string | undefined} walletUrl
- * @returns {{ link: PaymentLink, params: URLSearchParams | null } | null}
+ * @returns {{ link: PaymentLink, params: URLSearchParams | null } | { problem: string } | null}
  */
 function readLink(raw, walletUrl) {
   if (!raw) return null;
@@ -257,7 +290,9 @@ function readLink(raw, walletUrl) {
  * @returns {PaymentLink | null}
  */
 export function parsePaymentLink(input, { walletUrl } = {}) {
-  return readLink(textOf(input), walletUrl)?.link ?? null;
+  const read = readLink(textOf(input), walletUrl);
+
+  return read && "link" in read ? read.link : null;
 }
 
 /**
@@ -311,17 +346,18 @@ const said = (read) => ({ ...read, network: chainLabel(read.chainId) });
 export function readPaymentLink(input, { network, walletUrl } = {}) {
   const raw = textOf(input);
   const read = readLink(raw, walletUrl);
+  const link = read && "link" in read ? read.link : null;
 
-  if (!raw || read?.link.form === "raw") return null;
+  if (!raw || link?.form === "raw") return null;
 
-  const chainId = read?.link.chainId ?? "";
+  const chainId = link?.chainId ?? "";
 
   if (amountsDiffer(queryOf(raw))) return said({ chainId, link: null, problem: LINK_TWO_AMOUNTS, reason: "two-amounts" });
-  if (!read) return said({ chainId, link: null, problem: LINK_UNREADABLE, reason: "unreadable" });
+  if (!link) return said({ chainId, link: null, problem: (read && "problem" in read && read.problem) || LINK_UNREADABLE, reason: "unreadable" });
 
   const otherNetwork = networkMismatch(chainId, network);
 
-  return said(otherNetwork ? { chainId, link: null, problem: otherNetwork, reason: "other-network" } : { chainId, link: read.link, problem: "", reason: "" });
+  return said(otherNetwork ? { chainId, link: null, problem: otherNetwork, reason: "other-network" } : { chainId, link, problem: "", reason: "" });
 }
 
 /**
