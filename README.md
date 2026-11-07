@@ -127,7 +127,8 @@ const matches = matchRequests(kept, rows); // the wallet's requests, as it keeps
 sentAlready(rows, { to, lux, memo }); // before a send: the row of the payment it would make again, or null
 ```
 
-- A request is kept as `{ id, to, lux, memo, network, at, paid? }`: `lux` as text, null for any amount, and `paid` the payment that paid it, for it to stay paid once that payment is too far back to read.
+- A request is kept as `{ id, to, lux, memo, network, at, paid? }`: `lux` as text, null for any amount, and `paid` the payment that paid it, `{ at, hash, lux }`, for it to stay paid once that payment is too far back to read, and to say what it paid then too.
+- A match says what came in (`lux`), for the app to show on every request paid: one of any amount is paid by any payment with its memo, one lux too.
 - "paid" takes the amount and the memo asked, both, in one payment, or the memo of a request of no amount; anything less is "check", with what `matched`, never paid. "waiting" is none yet. Only a payment that went through (`executed`) counts, by what its transfer paid, without a gas refund its transaction paid with it. A payment answers one request, to the address it asked on, from 5 minutes before it was asked: the oldest it pays in full, before any it matches less. `more` holds what else came in for it, oldest first: one with all of it again (`matched` "amount-memo") paid it twice.
 - `sentAlready` is a payment out to the same recipient, of the same amount and memo, that didn't fail and wasn't dropped, on its way too: in the last 10 minutes, or at any time with a memo. Its amount is what its transfer paid, without a gas refund to another account.
 

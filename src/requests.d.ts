@@ -33,7 +33,8 @@ export declare const AGAIN_MS: 600000;
  * A request as a wallet keeps it: `lux` as a decimal string, null for any
  * amount; `at` when it was first asked, in milliseconds; `paid` the payment
  * that paid it, kept once it did, for it to stay paid once that payment is
- * too far back to be read again.
+ * too far back to be read again, with what it paid (`lux`, as a decimal
+ * string, its match's), for that to be said then too.
  */
 export type KeptRequest = {
   id: string;
@@ -44,7 +45,7 @@ export type KeptRequest = {
   /** The network it's for, as the wallet names it. */
   network?: string;
   at: number;
-  paid?: { at: number; hash: string };
+  paid?: { at: number; hash: string; lux?: string };
 };
 
 /**
@@ -70,9 +71,12 @@ export type RequestPayment = {
  *   request asking too little to tell, as an amount alone;
  * - "waiting": none yet.
  *
- * `more` holds the other payments that match it, oldest first, which no other
- * request took: one with all of it again (`matched` "amount-memo") is the
- * request paid twice.
+ * `lux` is what the payment paid, to show on every request it pays, as one of
+ * any amount can be paid with any: for a request kept paid, the chain's where
+ * its payment is among the rows, else what was kept with it, and none where
+ * neither says. `more` holds the other payments that match it, oldest first,
+ * which no other request took: one with all of it again (`matched`
+ * "amount-memo") is the request paid twice.
  */
 export type RequestMatch = {
   state: "check" | "paid" | "waiting";

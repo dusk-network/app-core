@@ -174,11 +174,24 @@ describe("what came in for each request", () => {
     like(matchRequests([asked()], [payment({ hash: "h2", memo: "Other", time: NOW + 1 }), payment({ hash: "h3", time: NOW + 2 })]).get("a"), { hash: "h3", state: "paid" });
   });
 
-  it("keeps a request paid by the payment it kept, which no other request takes", () => {
+  it("keeps a request paid by the payment it kept, which no other request takes, and says what that payment paid", () => {
     const matches = matchRequests([asked({ paid: { at: NOW + HOUR, hash: "h1" } }), asked({ at: NOW + 1, id: "b" })], [payment()]);
 
-    assert.deepEqual(matches.get("a"), { at: NOW + HOUR, hash: "h1", matched: "amount-memo", state: "paid" });
+    assert.deepEqual(matches.get("a"), { at: NOW + HOUR, hash: "h1", lux: LUX, matched: "amount-memo", state: "paid" });
     assert.deepEqual(matches.get("b"), { state: "waiting" });
+  });
+
+  it("says what a kept payment paid once it's too far back to read, as it was kept with it", () => {
+    // Marek's: a request of any amount, paid with its memo and one lux.
+    const kept = (/** @type {unknown} */ lux) => asked({ lux: null, paid: { at: NOW + HOUR, hash: "h1", lux } });
+
+    assert.deepEqual(matchRequests([kept("1")], []).get("a"), { at: NOW + HOUR, hash: "h1", lux: 1n, matched: "amount-memo", state: "paid" });
+    // The chain's, where its payment is read.
+    like(matchRequests([kept("1")], [payment({ value: 9n })]).get("a"), { lux: 9n, state: "paid" });
+    // Kept without it, or not as lux: not known.
+    for (const lux of [undefined, "abc", "-1", 5]) {
+      assert.deepEqual(matchRequests([kept(lux)], []).get("a"), { at: NOW + HOUR, hash: "h1", matched: "amount-memo", state: "paid" }, String(lux));
+    }
   });
 });
 

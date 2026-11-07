@@ -94,7 +94,12 @@ export function matchRequests(list, rows) {
 
   for (const request of oldestFirst) {
     if (request.paid) {
-      matches.set(request.id, { at: request.paid.at, hash: request.paid.hash, matched: "amount-memo", state: "paid" });
+      // What its payment paid: the chain's, where it's read, else as it was kept with it.
+      const row = incoming.find(({ hash }) => hash === request.paid?.hash);
+      const kept = /** @type {unknown} */ (request.paid.lux);
+      const lux = row ? movedBy(row) : typeof kept === "string" && /^\d+$/.test(kept) ? BigInt(kept) : undefined;
+
+      matches.set(request.id, { at: request.paid.at, hash: request.paid.hash, ...(lux === undefined ? {} : { lux }), matched: "amount-memo", state: "paid" });
     } else {
       answer(request, "amount-memo");
     }
