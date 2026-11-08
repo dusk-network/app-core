@@ -403,8 +403,14 @@ describe("an amount searched for", () => {
     ]);
   });
 
-  it("is nothing for what isn't an amount above 0", () => {
-    for (const typed of ["", "  ", "abc", "Factura 33", "0", "0,0", "0x12ab", "1.2.3", "0.1234567891"]) assert.deepEqual(amountsMeant(typed, "en-GB"), [], typed);
+  it("starts at 0 for an amount typed with its leading zeros, so 0.05 is found on the way to typing it", () => {
+    assert.deepEqual(amountsMeant("0", "en-GB"), [{ from: 0n, to: 1_000_000_000n }]);
+    assert.deepEqual(amountsMeant("0.0", "en-GB"), [{ from: 0n, to: 100_000_000n }]);
+    assert.deepEqual(amountsMeant("0,00", "de-DE"), [{ from: 0n, to: 10_000_000n }]);
+  });
+
+  it("is nothing for what isn't an amount", () => {
+    for (const typed of ["", "  ", "abc", "Factura 33", "0x12ab", "1.2.3", "0.1234567891"]) assert.deepEqual(amountsMeant(typed, "en-GB"), [], typed);
     assert.deepEqual(amountsMeant(null, "en-GB"), []);
   });
 });

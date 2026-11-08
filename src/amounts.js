@@ -412,7 +412,7 @@ export function amountsMeant(query, language) {
     const decimals = plain.split(".")[1]?.length ?? 0;
 
     // What's typed is how a row's amount starts: up to its next digit.
-    return lux ? [{ from: lux, to: lux + 10n ** BigInt(LUX_DECIMALS - decimals) }] : [];
+    return lux === null ? [] : [{ from: lux, to: lux + 10n ** BigInt(LUX_DECIMALS - decimals) }];
   });
 }
 

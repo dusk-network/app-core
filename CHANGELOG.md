@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.9.1]
+
+### Fixed
+
+- `/amounts`: `amountsMeant` reads an amount typed with its leading zeros, so `0.0` finds 0.05
+
 ## [0.9.0]
 
 ### Added
