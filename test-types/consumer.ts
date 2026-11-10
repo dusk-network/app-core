@@ -555,11 +555,15 @@ const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 
 const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
 void [weiShown, hint, readTyped, readFrench];
 
-import { amountsMeant, defaultCurrency } from "@dusk-network/app-core/amounts";
+import { PRICE_CURRENCIES, amountsMeant, defaultCurrency, type PriceCurrency } from "@dusk-network/app-core/amounts";
 
-const startsOn: "EUR" | "USD" = defaultCurrency("de-DE");
+const startsOn: PriceCurrency = defaultCurrency("en-SG");
+const offered: ReadonlyArray<PriceCurrency> = PRICE_CURRENCIES;
 const meant: { from: bigint; to: bigint }[] = amountsMeant("0.2", "de-DE");
-void [startsOn, defaultCurrency(), meant];
+void [startsOn, offered, defaultCurrency(), meant];
+// @ts-expect-error a currency the price source doesn't give
+const notOffered: PriceCurrency = "VEF";
+void notOffered;
 
 // /text
 import { displayText, numbersNote, searchKey, type TextFlag } from "@dusk-network/app-core/text";
