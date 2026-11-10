@@ -8,6 +8,7 @@
  * @module
  */
 
+import { networks } from "@dusk-network/networks";
 import { nativeRateEstimate, sozuRateEstimate } from "@dusk-network/networks/rates";
 import { feePercent, sozuFee, stDuskFor } from "@dusk-network/networks/sozu";
 
@@ -23,6 +24,8 @@ import { amountLocale } from "./amounts.js";
 /** @typedef {import("./sozu.js").SozuGrowth} SozuGrowth */
 /** @typedef {import("./sozu.js").SozuPoint} SozuPoint */
 /** @typedef {{ numerator: bigint, denominator: bigint }} Rate */
+/** @typedef {import("./sozu.js").NativeRewards} NativeRewards */
+/** @typedef {Pick<NativeRewards, "days" | "from" | "to" | "perBlock" | "blocks">} NativeMeasure */
 
 const LUX_PER_DUSK = 1_000_000_000n;
 const MAX_U64 = (1n << 64n) - 1n;
@@ -66,6 +69,18 @@ const REWARD_STAKE_FROM_END = 24;
 const GROWTH_SCALE = 1_000_000_000_000n;
 /** @type {WeakMap<object, Map<string, Promise<SozuGrowth | null>>>} */
 const growthsUnderWay = new WeakMap();
+/** @type {WeakMap<object, Map<string, Promise<NativeMeasure | null>>>} */
+const nativeUnderWay = new WeakMap();
+/** The stake contract, whose event in each block says what that block paid. */
+const STAKE_CONTRACT = networks.mainnet.contracts.stake;
+/** Blocks read across the period, each the middle of its share of it. */
+const NATIVE_SAMPLES = 6;
+/** A reward in the stake contract's event, as rkyv writes it: a key's 193 bytes, to 8, its u64 value and its reason. */
+const REWARD_BYTES = 216;
+const REWARD_VALUE_AT = 200;
+const REWARD_REASON_AT = 208;
+/** A reward's reasons: a generator's fixed share and its extra, a voter's, and another, which is Dusk's own: not a staker's. */
+const REWARD_OTHER = 3;
 
 /**
  * Lux from a bigint, a whole number or its text: null for anything else.
@@ -486,6 +501,123 @@ async function readGrowth(archive, id, days, tipHeight) {
 }
 
 /**
+ * What a block paid stakers, from its stake contract's reward event: every
+ * reward in it but Dusk's own. Null where it has none, or one that doesn't
+ * read as rewards.
+ *
+ * @param {unknown} list The block's events, as the archive gives them
+ * @returns {bigint | null}
+ */
+function paidToStakers(list) {
+  const event = (Array.isArray(list) ? list : []).find((each) => each && each.reverted !== true && each.topic === "reward" && String(each.source ?? each.target ?? "").toLowerCase() === STAKE_CONTRACT);
+  const hex = hexOf(event?.data);
+  const end = hex.length / 2 - 8;
+
+  if (end < 0) return null;
+
+  // rkyv's vector, last: where its rewards start, from itself, and how many.
+  const root = u64At(hex, end);
+  const count = Number(root >> 32n);
+  const start = end + Number(BigInt.asIntN(32, root));
+
+  if (start < 0 || start + count * REWARD_BYTES !== end) return null;
+
+  let paid = 0n;
+
+  for (let i = 0; i < count; i += 1) {
+    const at = start + i * REWARD_BYTES;
+    const reason = Number.parseInt(hex.slice((at + REWARD_REASON_AT) * 2, (at + REWARD_REASON_AT) * 2 + 2), 16);
+
+    if (reason > REWARD_OTHER) return null;
+    if (reason !== REWARD_OTHER) paid += u64At(hex, at + REWARD_VALUE_AT);
+  }
+
+  return paid;
+}
+
+/**
+ * What native staking paid over `days`, as the chain says: null where it
+ * can't be read. Nothing here knows what's staked.
+ *
+ * @param {Pick<Archive, "query">} archive
+ * @param {number} days
+ * @param {number | bigint | null | undefined} tipHeight
+ * @returns {Promise<NativeMeasure | null>}
+ */
+async function readNative(archive, days, tipHeight) {
+  try {
+    const tip = tipHeight === undefined || tipHeight === null ? Number((await archive.query("query { tip: block(height: -1) { header { height } } }"))?.tip?.header?.height) : Number(tipHeight);
+    const start = tip - days * BLOCKS_PER_DAY;
+
+    if (!Number.isSafeInteger(tip) || start < 1) return null;
+
+    const heights = Array.from({ length: NATIVE_SAMPLES }, (_, i) => Math.round(start + ((i + 0.5) * (tip - start)) / NATIVE_SAMPLES));
+    const read = await archive.query(
+      `query { a: block(height: ${start}) { header { height timestamp } } b: block(height: ${tip}) { header { height timestamp } } ${heights.map((height, i) => `e${i}: contractEvents(height: ${height}) { json }`).join(" ")} }`
+    );
+    const paid = heights.map((_, i) => paidToStakers(read?.[`e${i}`]?.json)).filter((each) => each !== null);
+    const from = { at: Number(read?.a?.header?.timestamp) * 1000, height: start };
+    const to = { at: Number(read?.b?.header?.timestamp) * 1000, height: tip };
+    const span = to.at - from.at;
+
+    // Most blocks read, or it says too little.
+    if (paid.length * 2 < NATIVE_SAMPLES || !(span > 0)) return null;
+
+    return { blocks: paid.length, days: Math.round(span / DAY_MS), from, perBlock: paid.reduce((sum, each) => sum + each, 0n) / BigInt(paid.length), to };
+  } catch {
+    // What can't be read says nothing: the rate is estimated as before.
+    return null;
+  }
+}
+
+/**
+ * @param {{ archive: Pick<Archive, "query">, provisioners: ReadonlyArray<{ amount?: unknown, eligibility?: unknown }>, tipHeight?: number | bigint | null, days?: number, network?: unknown, cache?: FactCache, maxAgeMs?: number, now?: number }} options
+ * @returns {Promise<NativeRewards | null>}
+ */
+export async function nativeRewards({ archive, cache, days = GROWTH_DAYS, maxAgeMs = GROWTH_MAX_AGE_MS, network = "", now = Date.now(), provisioners, tipHeight }) {
+  if (!Number.isSafeInteger(days) || days < 1) throw new RangeError("A period is a whole number of days");
+
+  const key = `native-rewards:${String(network)}:${days}`;
+  /** @param {string | null | undefined} text */
+  const kept = (text) => {
+    try {
+      const { measure, readAt } = JSON.parse(String(text));
+
+      return now - readAt >= 0 && now - readAt < maxAgeMs ? { ...measure, perBlock: BigInt(measure.perBlock) } : null;
+    } catch {
+      return null;
+    }
+  };
+  let measure = kept(cache?.get(key));
+
+  if (!measure) {
+    const reads = cache ? (nativeUnderWay.get(cache) ?? new Map()) : null;
+    const under = reads?.get(key) ?? readNative(archive, days, tipHeight);
+
+    if (cache && reads) {
+      nativeUnderWay.set(cache, reads);
+      reads.set(key, under);
+    }
+
+    try {
+      measure = await under;
+    } finally {
+      reads?.delete(key);
+    }
+
+    if (measure) cache?.set(key, JSON.stringify({ measure: { ...measure, perBlock: `${measure.perBlock}` }, readAt: now }));
+  }
+
+  if (!measure || !Array.isArray(provisioners)) return null;
+
+  // What's staked now, as consensus counts it at the tip: what a staker shares a block's pay with.
+  const { staked } = working(provisioners, measure.to.height, 0);
+  const blocksAYear = ((measure.to.height - measure.from.height) * YEAR_MS) / (measure.to.at - measure.from.at);
+
+  return staked > 0n ? { ...measure, rate: (Number(measure.perBlock) * blocksAYear) / Number(staked), staked } : null;
+}
+
+/**
  * @param {{ rows?: Iterable<ActivityRow> | null, status?: SozuStatusLike | null, facts?: ReadonlyMap<string, SozuFact> | null, complete?: boolean }} [input]
  * @returns {SozuPosition}
  */
@@ -601,32 +733,37 @@ const valueOf = ({ stake, supply }, decimals) => {
 };
 
 /**
- * @param {{ nativeRate?: number | null, status?: SozuStatusLike | null, provisioners?: ReadonlyArray<{ amount?: unknown, eligibility?: unknown }> | null, tipHeight?: number | bigint | null, locale?: string, growth?: SozuGrowth | null }} input
+ * @param {{ nativeRate?: number | null, native?: NativeRewards | null, status?: SozuStatusLike | null, provisioners?: ReadonlyArray<{ amount?: unknown, eligibility?: unknown }> | null, tipHeight?: number | bigint | null, locale?: string, growth?: SozuGrowth | null }} input
  * @returns {string | null}
  */
-export function sozuRateLine({ growth, locale = amountLocale(), nativeRate, provisioners, status, tipHeight }) {
+export function sozuRateLine({ growth, locale = amountLocale(), native: measured, nativeRate, provisioners, status, tipHeight }) {
+  /** @param {number} days */
+  const period = (days) => (days === 1 ? "the last day" : `the last ${new Intl.NumberFormat(locale).format(days)} days`);
+
   if (growth) {
     const decimals = valueOf(growth.from, 4) === valueOf(growth.to, 4) ? 6 : 4;
     const value = new Intl.NumberFormat(locale, { maximumFractionDigits: decimals, minimumFractionDigits: decimals });
-    const period = growth.days === 1 ? "the last day" : `the last ${new Intl.NumberFormat(locale).format(growth.days)} days`;
 
-    return `stDUSK went from ${value.format(valueOf(growth.from, decimals))} to ${value.format(valueOf(growth.to, decimals))} DUSK over ${period}, after Sozu's share.`;
+    return `stDUSK went from ${value.format(valueOf(growth.from, decimals))} to ${value.format(valueOf(growth.to, decimals))} DUSK over ${period(growth.days)}, after Sozu's share.`;
   }
 
   const read = provisioners && tipHeight !== null && tipHeight !== undefined;
-  const native = nativeRate ?? (read ? nativeRateEstimate({ provisioners: /** @type {any} */ (provisioners), tipHeight }) : null);
+  const native = measured?.rate ?? nativeRate ?? (read ? nativeRateEstimate({ provisioners: /** @type {any} */ (provisioners), tipHeight }) : null);
 
   if (typeof native !== "number" || !Number.isFinite(native)) return null;
 
   const percent = new Intl.NumberFormat(locale, { maximumFractionDigits: 0, style: "percent" });
   const shown = percent.format(Math.round(native * 100) / 100);
+  const one = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 });
+  const compact = new Intl.NumberFormat(locale, { maximumFractionDigits: 1, notation: "compact" });
   /** @type {string} */
   let start = `About ${shown} a year across the network`;
 
-  if (read) {
+  if (measured) {
+    // What the chain paid, over the period it was measured.
+    start = `${one.format(Number(measured.perBlock) / Number(LUX_PER_DUSK))} DUSK a block to stakers over ${period(measured.days)}, ${compact.format(Number(measured.staked / LUX_PER_DUSK))} DUSK staked now: about ${shown} a year`;
+  } else if (read) {
     const { perBlock, staked } = working(/** @type {any} */ (provisioners), tipHeight, native);
-    const one = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 });
-    const compact = new Intl.NumberFormat(locale, { maximumFractionDigits: 1, notation: "compact" });
 
     start = `${one.format(perBlock)} DUSK a block to stakers, ${compact.format(Number(staked / LUX_PER_DUSK))} DUSK staked now: about ${shown} a year`;
   }

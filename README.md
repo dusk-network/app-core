@@ -36,7 +36,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
 | `@dusk-network/app-core/export` | An account's activity as the file an accountant or a tax tool reads, for a quarter or any dates: Koinly's universal CSV (`accountingCsv`, `quarterPeriod`, `datesPeriod`); and staking's rewards by calendar year (`rewardsByYear`) |
-| `@dusk-network/app-core/sozu` | A stake with Sozu: put in, taken out, worth now and earned (`sozuPosition`), what an amount earns in a year (`sozuYear`, `sozuRate`), how stDUSK grew, from the chain (`sozuGrowth`), what the rate is made of (`sozuRateLine`), what each stake and unstake did (`sozuFacts`), and what one stDUSK was worth then (`stDuskWorth`) |
+| `@dusk-network/app-core/sozu` | A stake with Sozu: put in, taken out, worth now and earned (`sozuPosition`), what an amount earns in a year (`sozuYear`, `sozuRate`), how stDUSK grew, from the chain (`sozuGrowth`), what native staking paid, from the chain (`nativeRewards`), what the rate is made of (`sozuRateLine`), what each stake and unstake did (`sozuFacts`), and what one stDUSK was worth then (`stDuskWorth`) |
 | `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); the arrivals as `/activity` takes them (`arrivalsOf`); a migration's side on its own chain, its gas and the approval it spent (`migrationFacts`, `migrationsOf`); a transfer's exact amounts (`transferLedger`); and how a route is doing (`bridgeStatus`) |
 | `@dusk-network/app-core/bridge-explorer` | Where a deposit to DuskEVM arrived, on DuskEVM's explorer alone (`depositArrivalsFromExplorer`): `/bridge`'s explorer path, for an app that reads nothing else, without the RPC path and `/history` |
 | `@dusk-network/app-core/duskevm-withdrawals` | A DuskEVM withdrawal's life, signing aside: its start on DuskEVM (`withdrawalCall`), finding an address's withdrawals (`syncWithdrawals`, `explorerWithdrawals`, `withdrawalsByNonce`), and on Dusk where each is, its proof and its claim, ready for the app's wallet to sign (`createWithdrawals`) |
@@ -334,7 +334,7 @@ await rewardsByYear({ rows, facts, price, timeZone, complete });
 ## Sozu
 
 ```js
-import { sozuFacts, sozuPosition, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
+import { nativeRewards, sozuFacts, sozuGrowth, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
 
 const facts = await sozuFacts({ archive, account, rows, cache }); // optional: each one's own deposit fee and stDUSK
 sozuPosition({ rows, status, facts, complete });
@@ -346,11 +346,16 @@ sozuRateLine({ provisioners, tipHeight, status });
 const growth = await sozuGrowth({ archive, pool: status.contracts.pool, status, cache }); // what stDUSK did, from the chain
 sozuRate(nativeRate, status, growth); // 0.204: the rate, once it's read
 sozuRateLine({ growth }); // "stDUSK went from 1.2740 to 1.2953 DUSK over the last 30 days, after Sozu's share."
+
+const native = await nativeRewards({ archive, provisioners, tipHeight, network: "mainnet", cache }); // what native staking paid, from the chain
+// { days: 30, perBlock: 15276211075n, staked: 207258170780379280n, rate: 0.232, from, to, blocks: 6 }
+sozuRateLine({ native, status }); // "15.3 DUSK a block to stakers over the last 30 days, 207.3M DUSK staked now: about 23% a year. Less Sozu's 15%: …"
 ```
 
 - `status` is what `readSozuStatus` of `@dusk-network/networks/sozu` gives, or the same figures as the extension's engine names them, and `rows` are `/activity`'s, all of them; `complete` is `read()`'s, without which `earned` is null. Earned is what's left of worth now and what was taken out, once what was put in, its deposit fees aside, is off: the five add up to the lux. Deposit fees are worked out at today's rate where `facts` doesn't have them (`feesExact`).
 - `sozuFacts` reads the pool's own event in each transaction, and the stDUSK an unstake burned from the token's transfer in it, a request for each 25, without a data driver. With `cache`, a `Map` of text does, each is read once. `stDuskWorth(fact.pool)` is what one stDUSK was worth then, in lux, for a stake's or an unstake's details to say as the export does: "1 stDUSK = 1.840349526 DUSK".
 - `sozuRate` is Sozu's rate as both wallets work it out: from native staking's as it's shown, to the percent. `sozuRateLine` takes the node's provisioners for what a block pays and what's staked, or `nativeRate` alone for the rate.
+- `nativeRewards` measures what native staking paid over the last 30 days (`days`), from the chain: what a block paid stakers, every reward in the stake contract's event but Dusk's own tenth, over six blocks across the period, at the period's own pace, shared with what's staked now as consensus counts it. Its `rate` goes where `nativeRateEstimate`'s did, and `days` says the period it's of; `sozuRateLine` takes it (`native`) to say the same. One or two requests, about 110 kB on mainnet, kept in `cache` for an hour (`network` keeps networks apart in one cache); null where it can't be read: then the rate is estimated as before. The provisioners' own `reward` grows by Dusk's tenth too: what a block pays stakers is the rest.
 - `sozuGrowth` reads how stDUSK grew over the last 30 days (`days`), from the chain: the pool's hourly restake near the tip and near the period's start, among the transactions calling it, and what one stDUSK was worth after each, as the pool's reward event says. That growth is what a holder earned, Sozu's share off. Given it, `sozuRate`, `sozuYear` and `sozuRateLine` go by it, so the rate shown, what an amount earns and the line agree. Two or three requests, about 120 kB on mainnet, kept in `cache` for an hour; null where it can't be read, or where the latest restake isn't the pool's rate `status` read: then the rate is worked out as before.
 
 ## Bridge

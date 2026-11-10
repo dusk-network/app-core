@@ -651,7 +651,11 @@ const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2,
 const worthThen: Promise<bigint | null> = sozuRead.then((facts) => stDuskWorth(facts.get("h")?.pool));
 void [sozuRead, earnedSoFar, year, yearRate, rateLine, worthThen];
 
-import { GROWTH_MAX_AGE_MS, sozuGrowth, type SozuGrowth, type SozuPoint } from "@dusk-network/app-core/sozu";
+import { GROWTH_MAX_AGE_MS, nativeRewards, sozuGrowth, type NativeRewards, type SozuGrowth, type SozuPoint } from "@dusk-network/app-core/sozu";
+
+const nativeRead: Promise<NativeRewards | null> = nativeRewards({ archive, cache: new Map(), days: 30, maxAgeMs: GROWTH_MAX_AGE_MS, network: "testnet", now: 1, provisioners: [{ amount: 1, eligibility: 1 }], tipHeight: 1n });
+const nativeShown = nativeRead.then((native): [number | undefined, number | undefined, bigint | undefined, string | null] => [native?.rate, native?.days, native?.perBlock, sozuRateLine({ native, status: sozuStatus })]);
+void nativeShown;
 
 const growthRead: Promise<SozuGrowth | null> = sozuGrowth({ archive, cache: new Map(), days: 30, maxAgeMs: GROWTH_MAX_AGE_MS, now: 1, pool: "a", status: sozuStatus, tipHeight: 1n });
 const growthLine = growthRead.then((growth) => [sozuRateLine({ growth, locale: "en" }), sozuRate(0.2, extensionStatus, growth), sozuYear({ amount: 1n, growth, status: sozuStatus }).rewards]);

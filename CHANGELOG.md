@@ -9,6 +9,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/text`: `numbersNote`, what a text's numbers ask a person to check, in the words both wallets show: "A number here uses digits that look like other digits. Check it digit by digit."
 - `/names`: `profileNameClash`, the name a profile's new name takes of the other profiles and the contacts, look-alikes too, to refuse
 - `/export`: `rewardsByYear`, staking's rewards by calendar year as they reached the account, native ones claimed and what Sozu's unstakes took out, in DUSK and at each one's price
+- `/sozu`: `nativeRewards`, what native staking paid over the last 30 days, measured from the stake contract's rewards on chain, and the yearly rate that comes to; `sozuRateLine` says it with its period (`native`)
 - `/requests`: a match of a request of no amount says so (`anyAmount`), for its badge to say what came in rather than "Paid"
 - `/payment-links`: `parsePaymentLink` reads a plain `dusk:<address>` link, an account or a shielded address as written, with its query and network
 

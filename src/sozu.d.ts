@@ -169,6 +169,52 @@ export declare function sozuGrowth(options: {
 }): Promise<SozuGrowth | null>;
 
 /**
+ * What native staking paid over a period, from the chain: what a block paid
+ * stakers, every reward of the stake contract's event in it but Dusk's own
+ * tenth, on average over blocks read across the period, and what that comes
+ * to in a year at the period's pace, shared with what's staked now.
+ */
+export type NativeRewards = {
+  /** The period's first block and the tip read, with their times in milliseconds. */
+  from: { height: number; at: number };
+  to: { height: number; at: number };
+  /** The days between the two, rounded: the period the figure is of. */
+  days: number;
+  /** What a block paid stakers, in lux, on average over the blocks read. */
+  perBlock: bigint;
+  /** The blocks read across the period: one in the middle of each sixth of it. */
+  blocks: number;
+  /** The stake consensus counts now, in lux, as `nativeRateEstimate` counts it. */
+  staked: bigint;
+  /** What a year of such blocks pays, at the period's pace, over `staked`, simply, as a fraction: 0.87 is 87%. */
+  rate: number;
+};
+
+/**
+ * What native staking paid over the last `days` (30 unless asked), measured
+ * from the chain: the stake contract's reward event in six blocks across the
+ * period, Dusk's own tenth left out, and the period's two ends for its pace;
+ * shared with what's staked now, from the node's provisioners. Two requests
+ * of the archive, or one with the app's `tipHeight`: about 110 kB on
+ * mainnet. With `cache`, a `Map` of text does, what it read is kept for
+ * `maxAgeMs`, an hour unless asked, under `network`'s name for an app that
+ * keeps one cache for more than one network, and two reads at once make one.
+ * Null where it can't be read, or nothing is staked: then the rate is
+ * estimated as before (`nativeRateEstimate` of `@dusk-network/networks/rates`).
+ * Its `rate` goes where that one did, as `nativeRate`; `days` says over what.
+ */
+export declare function nativeRewards(options: {
+  archive: Pick<Archive, "query">;
+  provisioners: ReadonlyArray<{ amount?: unknown; eligibility?: unknown }>;
+  tipHeight?: number | bigint | null;
+  days?: number;
+  network?: unknown;
+  cache?: FactCache;
+  maxAgeMs?: number;
+  now?: number;
+}): Promise<NativeRewards | null>;
+
+/**
  * About what Sozu pays a year, as a fraction: with `growth`, how its stDUSK
  * grew, as a year; else native staking's rate as the wallets show it, to the
  * percent, less Sozu's share of rewards, as both wallets work it out. Null
@@ -198,13 +244,17 @@ export declare function sozuYear(input: { amount: bigint | number | string; nati
  * at each end and over how many days, after Sozu's share: "stDUSK went from
  * 1.2740 to 1.2953 DUSK over the last 30 days, after Sozu's share.", to four
  * decimals, or six where four would read the same. Else whether it compounds,
- * and over what: it's now's, from one read of the provisioners. With
+ * and over what. With `native` (`nativeRewards`), what a block paid stakers
+ * over its period and what's staked now: "15.3 DUSK a block to stakers over
+ * the last 30 days, 207.3M DUSK staked now: about 23% a year." With
  * `provisioners` and `tipHeight`, the node's own figures, what a block pays
- * stakers and what's staked; with `nativeRate` alone, the rate across the
- * network. Without Sozu's fee it stops before Sozu's share; null without a rate.
+ * stakers as estimated and what's staked; with `nativeRate` alone, the rate
+ * across the network. Without Sozu's fee it stops before Sozu's share; null
+ * without a rate.
  */
 export declare function sozuRateLine(input: {
   growth?: SozuGrowth | null;
+  native?: NativeRewards | null;
   nativeRate?: number | null;
   status?: SozuStatusLike | null;
   provisioners?: ReadonlyArray<{ amount?: unknown; eligibility?: unknown }> | null;
