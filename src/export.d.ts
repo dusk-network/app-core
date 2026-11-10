@@ -190,8 +190,10 @@ export type YearRewards = {
  * still staked has earned more, which isn't the account's yet: `sozuPosition`
  * of `/sozu` says Sozu's so far. `rows` are `/activity`'s, all of them, with
  * `facts` (`sozuFacts` of `/sozu`); `complete` is `read()`'s, without which
- * Sozu's are null. A year is there where a reward was claimed, or a stake or
- * an unstake with Sozu went through, oldest first.
+ * Sozu's are null. The rows don't say the order within a block: a stake there
+ * counts before an unstake, so an unstake never comes before the stake that
+ * minted what it gives back. A year is there where a reward was claimed, or a
+ * stake or an unstake with Sozu went through, oldest first.
  */
 export declare function rewardsByYear(options: {
   rows: Iterable<ActivityRow>;

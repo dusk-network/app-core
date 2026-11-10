@@ -999,6 +999,18 @@ describe("staking rewards by calendar year", () => {
       [2026, { lux: 51_250_000_000n + 61_250_000_000n, unpriced: 0, worth: "6.75000000" }],
     ]);
 
+    // A first stake and its unstake in one block: the stake counts first, whichever hash sorts first.
+    const sameBlock = [
+      entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x02), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "1000000000000" }),
+      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x01), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "997000000000" }),
+    ];
+    const sameBlockFacts = new Map([
+      [hash(0x02), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool, stDusk: 500_000_000_000n }],
+      [hash(0x01), { amount: 997_000_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 500_000_000_000n }],
+    ]);
+
+    assert.deepEqual((await rewardsByYear({ facts: sameBlockFacts, rows: activityRows({ account: B, network: 2, public: sameBlock }), timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: -500_000_000n, unpriced: 0, worth: null }]);
+
     // Without what a stake or an unstake did, or the whole history, what it earned isn't known.
     const unknown = new Map([...facts].filter(([key]) => key !== hash(0x02)));
 

@@ -750,8 +750,17 @@ export async function rewardsByYear({ complete = true, facts, price, rows, timeZ
   let known = complete;
 
   const went = [...(rows ?? [])].filter((row) => row.status === "executed" && !row.dropped && typeof row.time === "number" && (row.kind === "withdraw_reward" || row.sozu));
+  // In the chain's order, as far as the rows say it: by block, and within one a stake before an unstake, as the rows don't say which
+  // went first and an unstake can't give back stDUSK its own block's stake hadn't minted yet.
+  /** @param {ActivityRow} row */
+  const blockOf = (row) => [/** @type {number} */ (row.time), row.blockHeight ?? 0, row.sozu === "unstake" ? 1 : 0];
+  const inOrder = went.sort((a, b) => {
+    const [x, y] = [blockOf(a), blockOf(b)];
 
-  for (const row of went.sort((a, b) => /** @type {number} */ (a.time) - /** @type {number} */ (b.time) || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))) {
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0);
+  });
+
+  for (const row of inOrder) {
     const at = /** @type {number} */ (row.time);
     const year = Number(yearOf.format(at));
     const rewards = years.get(year) ?? { claimed: [], sozu: [] };
