@@ -8,12 +8,14 @@
  *
  * @example
  * ```js
- * import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides } from "@dusk/app-core/names";
+ * import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, profileNameClash } from "@dusk/app-core/names";
  *
  * nameHides("\u202eecilA"); // true: it reads as "Alice". Refuse it, saying NAME_HIDES
  * looksAlike("Bob", "Bօb"); // true: an Armenian օ
  * nameClash("Profile 2", { profiles, contacts, except: editedId });
  * // { kind: "profile", same: true, entry: { name: "Profile 2", … } }: refuse it
+ * profileNameClash("Alice", { profiles, contacts, self: account });
+ * // { kind: "contact", same: true, entry: { name: "Alice", … } }: refuse it too
  * lookAlikes([...profiles, ...contacts]); // the ones to show with their address
  * ```
  *
@@ -73,6 +75,19 @@ export declare function looksAlike(a: unknown, b: unknown): boolean;
 export declare function nameClash<P extends { name?: unknown }, C extends { name?: unknown; id?: unknown }>(
   name: unknown,
   among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; except?: unknown }
+): { kind: "profile"; same: boolean; entry: P } | { kind: "contact"; same: boolean; entry: C } | null;
+
+/**
+ * The name a profile's new name takes, or looks like, as `nameClash` says it
+ * for a contact's: of the person's other profiles first, then of their
+ * contacts. `self` is the account or address of the profile named: it and a
+ * contact saved with its address take nothing from it. Refuse both kinds: a
+ * profile named like another, or like a contact, reads as that one in
+ * History and on Review. Null for none.
+ */
+export declare function profileNameClash<P extends { name?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; address?: unknown }>(
+  name: unknown,
+  among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; self?: unknown }
 ): { kind: "profile"; same: boolean; entry: P } | { kind: "contact"; same: boolean; entry: C } | null;
 
 /**

@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/text`: `numbersNote`, what a text's numbers ask a person to check, in the words both wallets show: "A number here uses digits that look like other digits. Check it digit by digit."
+- `/names`: `profileNameClash`, the name a profile's new name takes of the other profiles and the contacts, look-alikes too, to refuse
 - `/payment-links`: `parsePaymentLink` reads a plain `dusk:<address>` link, an account or a shielded address as written, with its query and network
 
 ### Changed

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { CONFUSABLES, CONFUSABLES_VERSION } from "../src/confusables.js";
-import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, sameName } from "../src/names.js";
+import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, profileNameClash, sameName } from "../src/names.js";
 
 describe("names that look alike", () => {
   it("catches Marek's: Armenian, Cherokee and a small capital I, as Cyrillic before", () => {
@@ -118,5 +118,29 @@ describe("a contact's name", () => {
 
     assert.deepEqual(lookAlikes([marta, cyrillic, dotted, own, savedOwn, other]), new Set([marta, cyrillic, dotted]));
     assert.deepEqual(lookAlikes([]), new Set());
+  });
+});
+
+describe("a profile's name", () => {
+  const profiles = [{ account: "p1", address: "s1", name: "Profile 1" }, { account: "p2", address: "s2", name: "Profile 2" }];
+  const contacts = [
+    { address: "q", id: "c1", name: "Alice" },
+    { address: "p2", id: "c2", name: "Lena Sparen" },
+  ];
+
+  it("takes the other profile's name, or a contact's, as written or in other letters: refused, as History would read one as the other", () => {
+    // Marek's: Profile 2 named "Profile 1", then "Alice" beside his contact Alice.
+    assert.deepEqual(profileNameClash("Profile 1", { contacts, profiles, self: "p2" }), { entry: profiles[0], kind: "profile", same: true });
+    assert.deepEqual(profileNameClash("ProfiIe 1", { contacts, profiles, self: "p2" }), { entry: profiles[0], kind: "profile", same: false });
+    assert.deepEqual(profileNameClash("alice", { contacts, profiles, self: "p2" }), { entry: contacts[0], kind: "contact", same: true });
+    assert.deepEqual(profileNameClash("\u0410lice", { contacts, profiles, self: "p2" }), { entry: contacts[0], kind: "contact", same: false });
+  });
+
+  it("takes nothing from itself, or from a contact saved with its own address", () => {
+    assert.equal(profileNameClash("Profile 2", { contacts, profiles, self: "p2" }), null);
+    assert.equal(profileNameClash("Lena Sparen", { contacts, profiles, self: "p2" }), null);
+    assert.equal(profileNameClash("Lena Sparen", { contacts, profiles, self: "s2" }), null);
+    assert.deepEqual(profileNameClash("Lena Sparen", { contacts, profiles, self: "p1" }), { entry: contacts[1], kind: "contact", same: true });
+    assert.equal(profileNameClash("Carla", { contacts, profiles, self: "p2" }), null);
   });
 });
