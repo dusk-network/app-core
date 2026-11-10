@@ -659,7 +659,7 @@ const growthEnd = growthRead.then((growth): SozuPoint | undefined => growth?.to)
 void [growthLine, growthEnd];
 
 // /export
-import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, type ExportOptions, type ExportPeriod, type ExportResult } from "@dusk-network/app-core/export";
+import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear, type ExportOptions, type ExportPeriod, type ExportResult, type RewardsSum, type YearRewards } from "@dusk-network/app-core/export";
 
 const quarter: ExportPeriod = quarterPeriod(2026, 4, { timeZone: "Europe/Madrid" });
 const dates: ExportPeriod = datesPeriod("2026-10-01", "2026-12-31");
@@ -679,6 +679,10 @@ const exportFile: Promise<ExportResult> = accountingCsv({
 } satisfies ExportOptions);
 const exportText = exportFile.then(({ csv, fileName, left, unpriced }) => [csv, fileName, left.pending, left.notRead, left.outOfPeriod, unpriced]);
 void [dates, exportText, CSV_COLUMNS];
+
+const yearly: Promise<YearRewards[]> = rewardsByYear({ complete: true, facts: new Map<string, SozuFact>(), price: () => "0.06", rows: readRows, timeZone: "Europe/Berlin" });
+const taxYear = yearly.then(([first]): [number | undefined, RewardsSum | undefined, bigint | undefined, string | null | undefined] => [first?.year, first?.claimed, first?.sozu?.lux, first?.sozu?.worth]);
+void taxYear;
 
 // /bridge's ledger
 import { transferLedger, type LedgerInput, type LedgerLine, type TransferLedger } from "@dusk-network/app-core/bridge";

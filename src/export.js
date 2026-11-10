@@ -524,13 +524,43 @@ const worthUnits = (lux, { digits, places }) => {
  *
  * @param {bigint} units
  */
-const worthText = (units) => `${units / 10n ** BigInt(WORTH_DECIMALS)}.${(units % 10n ** BigInt(WORTH_DECIMALS)).toString().padStart(WORTH_DECIMALS, "0")}`;
+function worthText(units) {
+  const size = units < 0n ? -units : units;
+  const step = 10n ** BigInt(WORTH_DECIMALS);
+
+  return `${units < 0n ? "-" : ""}${size / step}.${(size % step).toString().padStart(WORTH_DECIMALS, "0")}`;
+}
 
 /**
  * @param {bigint} lux
  * @param {{ digits: bigint, places: number }} price
  */
 const worthOf = (lux, price) => worthText(worthUnits(lux, price));
+
+/**
+ * A price lookup that asks once for each time: what one DUSK was worth then,
+ * as digits, or null where `price` doesn't say or its lookup fails.
+ *
+ * @param {ExportOptions["price"]} price
+ * @returns {(at: number) => Promise<{ digits: bigint, places: number } | null>}
+ */
+function pricesOf(price) {
+  /** @type {Map<number, Promise<{ digits: bigint, places: number } | null>>} */
+  const asked = new Map();
+
+  return (at) => {
+    let known = asked.get(at);
+
+    if (!known) {
+      known = Promise.resolve()
+        .then(() => /** @type {NonNullable<ExportOptions["price"]>} */ (price)({ at, coin: DUSK }))
+        .then(priceOf, () => null);
+      asked.set(at, known);
+    }
+
+    return known;
+  };
+}
 
 /**
  * A profile's name in a file's name: its letters and digits, without accents.
@@ -561,22 +591,8 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
   }
 
   const left = { notRead: 0, outOfPeriod: 0, pending: 0 };
-  /** @type {Map<number, Promise<{ digits: bigint, places: number } | null>>} */
-  const prices = new Map();
+  const priceAt = pricesOf(price);
   let unpriced = 0;
-  /** @param {number} at */
-  const priceAt = (at) => {
-    let known = prices.get(at);
-
-    if (!known) {
-      known = Promise.resolve()
-        .then(() => /** @type {NonNullable<ExportOptions["price"]>} */ (price)({ at, coin: DUSK }))
-        .then(priceOf, () => null);
-      prices.set(at, known);
-    }
-
-    return known;
-  };
   const chronological = [...(rows ?? [])].sort((a, b) => (a.time ?? 0) - (b.time ?? 0) || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
   /** @type {{ at: number, text: string }[]} */
   const written = [];
@@ -665,4 +681,83 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
     left,
     unpriced,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Rewards by year
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {{ rows: Iterable<ActivityRow>, facts?: ReadonlyMap<string, SozuFact>, price?: ExportOptions["price"], timeZone?: string, complete?: boolean }} options
+ * @returns {Promise<import("./export.js").YearRewards[]>}
+ */
+export async function rewardsByYear({ complete = true, facts, price, rows, timeZone }) {
+  const yearOf = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" });
+  const priceAt = pricesOf(price);
+  /** @typedef {{ at: number, lux: bigint }} Reward */
+  /** @type {Map<number, { claimed: Reward[], sozu: Reward[] | null }>} */
+  const years = new Map();
+  // Sozu's stDUSK held and what it cost, deposit fees aside, while every stake and unstake before is known.
+  let held = 0n;
+  let cost = 0n;
+  let known = complete;
+
+  const went = [...(rows ?? [])].filter((row) => row.status === "executed" && !row.dropped && typeof row.time === "number" && (row.kind === "withdraw_reward" || row.sozu));
+
+  for (const row of went.sort((a, b) => /** @type {number} */ (a.time) - /** @type {number} */ (b.time) || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))) {
+    const at = /** @type {number} */ (row.time);
+    const year = Number(yearOf.format(at));
+    const rewards = years.get(year) ?? { claimed: [], sozu: [] };
+
+    years.set(year, rewards);
+
+    if (!row.sozu) {
+      rewards.claimed.push({ at, lux: row.value });
+      continue;
+    }
+
+    const fact = facts?.get(row.hash);
+
+    if (row.sozu === "stake") {
+      known &&= fact !== undefined;
+      held += fact?.stDusk ?? 0n;
+      cost += row.value - (fact?.fee ?? 0n);
+      continue;
+    }
+
+    // An unstake: what it gave back beyond what its stDUSK cost, at what stDUSK cost on average.
+    if (!known || !fact || fact.stDusk > held || held === 0n) {
+      known = false;
+      rewards.sozu = null;
+      continue;
+    }
+
+    const spent = (cost * fact.stDusk) / held;
+
+    rewards.sozu?.push({ at, lux: row.value - spent });
+    held -= fact.stDusk;
+    cost -= spent;
+  }
+
+  /**
+   * @param {Reward[]} list
+   * @returns {Promise<import("./export.js").RewardsSum>}
+   */
+  const sumOf = async (list) => {
+    let units = 0n;
+    let unpriced = 0;
+
+    for (const { at, lux } of list) {
+      const unit = price ? await priceAt(at) : null;
+
+      if (unit) units += lux < 0n ? -worthUnits(-lux, unit) : worthUnits(lux, unit);
+      else if (price) unpriced += 1;
+    }
+
+    return { lux: list.reduce((sum, each) => sum + each.lux, 0n), unpriced, worth: price ? worthText(units) : null };
+  };
+
+  return Promise.all(
+    [...years.entries()].sort(([a], [b]) => a - b).map(async ([year, { claimed, sozu }]) => ({ claimed: await sumOf(claimed), sozu: sozu && (await sumOf(sozu)), year }))
+  );
 }

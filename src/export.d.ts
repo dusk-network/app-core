@@ -150,3 +150,45 @@ export type ExportResult = {
 
 /** The profile's activity in the period, as a file. */
 export declare function accountingCsv(options: ExportOptions): Promise<ExportResult>;
+
+/**
+ * Rewards that reached the account, in lux, and what they were worth in the
+ * currency `price` answers in, each at its own time, to 8 decimals: the sum
+ * of those whose price is known (null without a `price`), and how many
+ * aren't (`unpriced`).
+ */
+export type RewardsSum = { lux: bigint; worth: string | null; unpriced: number };
+
+/** A calendar year's staking rewards, as they reached the account. */
+export type YearRewards = {
+  year: number;
+  /** Native staking's rewards claimed that year, as the file's `reward` lines. */
+  claimed: RewardsSum;
+  /**
+   * What Sozu's unstakes that year gave back beyond what their stDUSK cost,
+   * deposit fees aside, at what the stDUSK held had cost on average: what
+   * Sozu earned that was taken out. Null where a stake or an unstake before
+   * one of them isn't known (`facts` lacks it, or the history isn't
+   * `complete`).
+   */
+  sozu: RewardsSum | null;
+};
+
+/**
+ * Staking rewards by calendar year, on the clock of `timeZone` (the
+ * device's, unless given), from what the file has: the rewards native
+ * staking claimed, and what Sozu earned that its unstakes took out, as they
+ * reached the account, each worth what `price` says at its own time. What's
+ * still staked has earned more, which isn't the account's yet: `sozuPosition`
+ * of `/sozu` says Sozu's so far. `rows` are `/activity`'s, all of them, with
+ * `facts` (`sozuFacts` of `/sozu`); `complete` is `read()`'s, without which
+ * Sozu's are null. A year is there where a reward was claimed, or a stake or
+ * an unstake with Sozu went through, oldest first.
+ */
+export declare function rewardsByYear(options: {
+  rows: Iterable<ActivityRow>;
+  facts?: ReadonlyMap<string, SozuFact>;
+  price?: ExportOptions["price"];
+  timeZone?: string;
+  complete?: boolean;
+}): Promise<YearRewards[]>;

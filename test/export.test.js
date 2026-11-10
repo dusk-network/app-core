@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import { activityRows } from "../src/activity.js";
 import { migrationFacts, migrationsOf } from "../src/bridge.js";
-import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod } from "../src/export.js";
+import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear } from "../src/export.js";
 import { sozuFacts } from "../src/sozu.js";
 import { A, B, C, POOL, entryFrom, entryOf, hash, recorded } from "./fixtures/activity.js";
 import { fakeChain, hex } from "./fixtures/bridge.js";
@@ -955,5 +955,61 @@ describe("who the other side is", () => {
     const { records } = await fileOf(B, { names: new Map([[A, "faucet.dusk"]]), public: [recorded(B, BETWEEN)] }, { contactName: () => "A contact" });
 
     assert.equal(records[0]["Counterparty Name"], PERSONAL);
+  });
+});
+
+describe("staking rewards by calendar year", () => {
+  // B's three claims of native rewards, the first moved to the year before.
+  const claims = [recorded(B, 3412754, { timestamp: Date.UTC(2025, 11, 31, 23, 30) }), recorded(B, 4364676), recorded(B, 4643701)];
+  const [claimedFirst, claimedSecond, claimedThird] = [1_609_142_758_405_397n, 239_121_453_457_671n, 62_166_587_991_666n];
+  const price = (/** @type {{ at: number }} */ { at }) => (at < Date.UTC(2026, 0, 1) ? "0.05" : "0.06");
+
+  it("sums the native rewards claimed in each year, in DUSK and at each one's own price", async () => {
+    // Lena's: what staking earned her in 2026, for her tax return.
+    const rows = activityRows({ account: B, network: 2, public: claims });
+    const years = await rewardsByYear({ price, rows, timeZone: "UTC" });
+
+    assert.deepEqual(years.map(({ claimed, year }) => [year, claimed]), [
+      [2025, { lux: claimedFirst, unpriced: 0, worth: "80457.13792027" }],
+      [2026, { lux: claimedSecond + claimedThird, unpriced: 0, worth: "18077.28248696" }],
+    ]);
+    // A year on the person's own clock: half past midnight on 1 January in Berlin.
+    assert.deepEqual((await rewardsByYear({ rows, timeZone: "Europe/Berlin" })).map(({ claimed, year }) => [year, claimed]), [[2026, { lux: claimedFirst + claimedSecond + claimedThird, unpriced: 0, worth: null }]]);
+  });
+
+  it("counts what Sozu earned when an unstake takes it out, beyond what its stDUSK cost, deposit fees aside", async () => {
+    const pool = { stake: 2n, supply: 1n };
+    const entries = [
+      entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x01), kind: "contract_call", timestamp: Date.UTC(2025, 5, 1), value: "1000000000000" }),
+      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x02), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "550000000000" }),
+      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x03), kind: "contract_call", timestamp: Date.UTC(2026, 8, 1), value: "560000000000" }),
+    ];
+    // 997.5 DUSK, the deposit fee of 2.5 off, bought 500 stDUSK; each half came back for more.
+    const facts = new Map([
+      [hash(0x01), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool, stDusk: 500_000_000_000n }],
+      [hash(0x02), { amount: 550_000_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 250_000_000_000n }],
+      [hash(0x03), { amount: 560_000_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 250_000_000_000n }],
+    ]);
+    const rows = activityRows({ account: B, network: 2, public: entries });
+    const years = await rewardsByYear({ facts, price, rows, timeZone: "UTC" });
+
+    assert.deepEqual(years.map(({ sozu, year }) => [year, sozu]), [
+      [2025, { lux: 0n, unpriced: 0, worth: "0.00000000" }],
+      [2026, { lux: 51_250_000_000n + 61_250_000_000n, unpriced: 0, worth: "6.75000000" }],
+    ]);
+
+    // Without what a stake or an unstake did, or the whole history, what it earned isn't known.
+    const unknown = new Map([...facts].filter(([key]) => key !== hash(0x02)));
+
+    assert.deepEqual((await rewardsByYear({ facts: unknown, rows, timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: 0n, unpriced: 0, worth: null }, null]);
+    assert.deepEqual((await rewardsByYear({ complete: false, facts, rows, timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: 0n, unpriced: 0, worth: null }, null]);
+  });
+
+  it("says how many rewards have no price, and leaves out what didn't go through", async () => {
+    const failed = recorded(B, 4364676, { success: false });
+    const rows = activityRows({ account: B, network: 2, public: [claims[2], failed] });
+    const [year] = await rewardsByYear({ price: () => null, rows, timeZone: "UTC" });
+
+    assert.deepEqual(year, { claimed: { lux: claimedThird, unpriced: 1, worth: "0.00000000" }, sozu: { lux: 0n, unpriced: 0, worth: "0.00000000" }, year: 2026 });
   });
 });
