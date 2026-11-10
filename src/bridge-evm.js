@@ -421,7 +421,8 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
               continue;
             }
 
-            const receipt = await read.rpc(url, "eth_getTransactionReceipt", [tx]);
+            // A lookup the RPC refuses, or doesn't answer in time, says nothing of it: only what it came after is unsure.
+            const receipt = await read.rpc(url, "eth_getTransactionReceipt", [tx]).catch(() => null);
             /** @type {any[]} */
             const emitted = Array.isArray(receipt?.logs) ? receipt.logs : [];
             const made = receipt ? addressOf(receipt.to) === contract || emitted.some((each) => addressOf(each?.address) === contract) : null;

@@ -515,6 +515,22 @@ describe("an owner's approvals and revokes on a migration's chain", () => {
     assert.deepEqual(await states({ logs: [...logs, direct], receipts: { ...receipts, [direct.transactionHash]: directReceipt } }), told);
     // One whose transaction can't be read leaves it unsure, never "never used".
     assert.deepEqual((await states({ logs: [...logs, direct] }))[3], [unused, "uncertain"]);
+
+    // Codex's: one the RPC refuses or doesn't answer in time leaves only the approval it came after unsure, and the rest of the history as it is.
+    const [lastMigration] = [...migrated].filter((tx) => testchain.receipts[tx].blockNumber === hex(353));
+    const quietChain = chainOf({ logs, receipts });
+    /** @param {string} input @param {any} init */
+    const refusing = async (input, init) => {
+      const { id, method, params } = JSON.parse(init.body);
+
+      return method === "eth_getTransactionReceipt" && params[0] === lastMigration
+        ? new Response(JSON.stringify({ error: { code: -32000, message: "request timed out" }, id, jsonrpc: "2.0" }), { headers: { "content-type": "application/json" } })
+        : quietChain.fetch(input, init);
+    };
+    const refused = await migrationApprovals({ fetch: refusing, network, owners: [OWNER] });
+
+    assert.deepEqual(refused.approvals.map(({ hash: tx, state }) => [tx, state]), [[approved, "spent"], [reapproved, "uncertain"], [revoked, "revoke"], [unused, "unused"], [revokedAgain, "revoke"]]);
+    assert.equal(refused.reads[0].state, "read");
   });
 
   it("puts the approvals of two chains in the order of their times, not their chains' block heights", async () => {
