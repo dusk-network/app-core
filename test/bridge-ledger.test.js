@@ -6,7 +6,7 @@ import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 
 import { activityRows } from "../src/activity.js";
 import { formatAmount } from "../src/amounts.js";
-import { APPROVAL_TOPIC, migrationFacts, migrationsOf, serviceArrivals, transferLedger } from "../src/bridge.js";
+import { APPROVAL_TOPIC, migrationApprovals, migrationFacts, migrationsOf, serviceArrivals, transferLedger } from "../src/bridge.js";
 import { createArchive } from "../src/history.js";
 import { entryFrom, entryOf, hash } from "./fixtures/activity.js";
 import { fakeChain, hex, tokenTransfer, transferTx } from "./fixtures/bridge.js";
@@ -454,5 +454,60 @@ describe("a migration's side on its own chain", () => {
     const unread = (await migrationFacts({ fetch: chainOf({ logs: false }).fetch, migrations: [{ hash: firstMigration, route }], network: 1 })).get(firstMigration);
 
     assert.deepEqual(/** @type {any} */ (transferLedger({ evm: unread, row: payout })).gas.parts, ["migration"]);
+  });
+});
+
+describe("an owner's approvals and revokes on a migration's chain", () => {
+  // Recorded on the BSC test chain: Nandini's three ways back from 0xB472, two
+  // approvals they spent, a revoke of what one left, and an approval she
+  // never used, revoked.
+  const testchain = readFixture("bridge-approvals-testchain.json");
+  const network = { chainId: 2, routes: testchain.routes };
+  const OWNER = "0xB472D149Cd771f0807eDECE2cEdcCc612E103685";
+  /** @param {any} log */
+  const asLog = (log) => ({ address: log.address, block: BigInt(log.blockNumber), data: log.data, hash: log.transactionHash, index: Number(BigInt(log.logIndex)), topics: log.topics });
+  /** @param {{ logsGone?: { before: bigint, message: string }, head?: bigint, receipts?: Record<string, any> }} [options] */
+  const chainOf = ({ head = BigInt(testchain.head), logsGone, receipts = {} } = {}) =>
+    fakeChain({
+      head,
+      logs: testchain.logs.map(asLog),
+      logsGone,
+      receipts: { ...testchain.receipts, ...receipts },
+      timeAt: (n) => Number(BigInt(testchain.blocks[hex(n)]?.timestamp ?? "0x0")),
+    });
+  const at = (/** @type {string} */ hash) => Number(BigInt(testchain.blocks[testchain.receipts[hash].blockNumber].timestamp)) * 1000;
+  const [approved, , , reapproved, , revoked, unused, revokedAgain] = Object.keys(testchain.receipts);
+
+  it("finds each, what it paid there to the wei, and whether a migration spent it, as Nandini's chain says", async () => {
+    const { approvals, reads } = await migrationApprovals({ fetch: chainOf().fetch, network, owners: [OWNER] });
+
+    assert.deepEqual(
+      approvals.map(({ allowance, block, gasWei, hash: tx, state }) => [tx, block, state, allowance, gasWei]),
+      [
+        [approved, 349, "spent", 4_000_000_000_000_000n, 46_182_000_738_912n],
+        [reapproved, 352, "spent", 3_000_000_000_000_000n, 46_194_000_739_104n],
+        [revoked, 354, "revoke", 0n, 24_222_000_387_552n],
+        [unused, 355, "unused", 1_000_000_000_000_000n, 46_194_000_739_104n],
+        [revokedAgain, 356, "revoke", 0n, 24_222_000_387_552n],
+      ]
+    );
+    like(approvals[3], { at: at(unused), chain: "BSC test chain", coin: "ETH", contract: "0x93d6e214d07e6a548005ded9a3da589c29f830fe", decimals: 18, owner: OWNER.toLowerCase(), route: "bsc-to-dusk" });
+    assert.deepEqual(reads, [{ from: 0, owner: OWNER.toLowerCase(), route: "bsc-to-dusk", state: "read", to: Number(testchain.head) }]);
+  });
+
+  it("says an approval nothing came after is open, leaves out one another address sent, and says how far back it read", async () => {
+    const early = await migrationApprovals({ fetch: chainOf({ head: 355n }).fetch, network, owners: [OWNER] });
+
+    like(early.approvals.at(-1), { hash: unused, state: "open" });
+
+    // A permit another address sent for the owner: its gas isn't theirs.
+    const permitted = await migrationApprovals({ fetch: chainOf({ receipts: { [revoked]: { ...testchain.receipts[revoked], from: "0x00000000000000000000000000000000000000aa" } } }).fetch, network, owners: [OWNER] });
+
+    assert.equal(permitted.approvals.some((each) => each.hash === revoked), false);
+
+    const gone = await migrationApprovals({ fetch: chainOf({ logsGone: { before: 300n, message: "pruned history unavailable" } }).fetch, network, owners: [OWNER] });
+
+    like(gone.reads[0], { state: "unread" });
+    assert.deepEqual(await migrationApprovals({ fetch: chainOf().fetch, network, owners: [] }), { approvals: [], reads: [] });
   });
 });

@@ -56,7 +56,7 @@
  */
 
 import type { ActivityRow } from "./activity.js";
-import type { MigrationEvm } from "./bridge.js";
+import type { MigrationApproval, MigrationEvm } from "./bridge.js";
 import type { SozuFact } from "./sozu.js";
 
 /** The file's columns: Koinly's universal twelve, then what it ignores. */
@@ -120,6 +120,14 @@ export type ExportOptions = {
    * account, as a customer to a shop's. Without it, every migration's is.
    */
   evmAddresses?: Iterable<string>;
+  /**
+   * The approvals and revokes the person sent on a migration's own chain
+   * (`migrationApprovals` of `/bridge`): each that no migration's lines here
+   * have, as one spent before the period or never used, or a revoke, is a
+   * line of its own, a cost of its gas there, at its own time; with
+   * `evmAddresses`, only one sent from one of them.
+   */
+  approvals?: Iterable<MigrationApproval>;
   /**
    * The person's own name for a counterparty, only when they asked for their
    * contact names to be in the file: it goes before a verified `.dusk` name

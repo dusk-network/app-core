@@ -16,6 +16,8 @@ import { EVM_HASH, RANGE_REFUSED, TIMEOUT_MS, TRANSFER_TOPIC, WEI_PER_LUX, addre
 /** @typedef {import("./bridge.js").FactCache} FactCache */
 /** @typedef {import("./bridge.js").FetchLike} FetchLike */
 /** @typedef {import("./bridge.js").MigrationEvm} MigrationEvm */
+/** @typedef {import("./bridge.js").MigrationApproval} MigrationApproval */
+/** @typedef {import("./bridge.js").ApprovalsRead} ApprovalsRead */
 /** @typedef {import("./bridge-common.js").Reader} Reader */
 /** @typedef {import("@dusk-network/networks").Route} Route */
 
@@ -34,6 +36,8 @@ const MIN_WINDOW = 100;
 const FINAL_BLOCKS = 1_000;
 /** An RPC's refusal of logs it no longer keeps: Ethereum's and Sepolia's publicnode a day on. */
 const LOGS_GONE = /pruned|archive requests/i;
+/** Windows an owner's approvals are read in, back from the head, each twice the last the RPC answers whole. */
+const OWNER_WINDOWS = 8;
 
 /** @param {string} address */
 const topicOf = (address) => `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
@@ -322,4 +326,130 @@ export async function migrationFacts({ cache, fetch: fetchFn, migrations, networ
   );
 
   return out;
+}
+
+/**
+ * An owner's Approval and Transfer logs between it and a migration contract
+ * on its token, read back from the head a window at a time: what was read,
+ * from which block, and why not further.
+ *
+ * @param {Reader} read
+ * @param {string} rpcUrl
+ * @param {{ token: string, contract: string, owner: string, head: number }} sought
+ * @returns {Promise<{ logs: any[], from: number, state: ApprovalsRead["state"] }>}
+ */
+async function ownerLogs(read, rpcUrl, { contract, head, owner, token }) {
+  /** @type {any[]} */
+  const logs = [];
+  let to = head;
+  let width = APPROVAL_WINDOW;
+
+  for (let windows = 0; windows < OWNER_WINDOWS; ) {
+    if (to < 0) return { from: 0, logs, state: "read" };
+
+    const from = Math.max(0, to - width + 1);
+    /** @type {any[]} */
+    let answer;
+
+    try {
+      answer = await read.rpc(rpcUrl, "eth_getLogs", [{ address: token, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}`, topics: [[APPROVAL_TOPIC, TRANSFER_TOPIC], topicOf(owner), topicOf(contract)] }]);
+    } catch (error) {
+      if (LOGS_GONE.test(messageOf(error))) return { from: to + 1, logs, state: "unread" };
+      if (!RANGE_REFUSED.test(messageOf(error)) || width <= MIN_WINDOW) throw error;
+
+      width = Math.max(MIN_WINDOW, Math.floor(width / 2));
+      continue;
+    }
+
+    logs.push(...(Array.isArray(answer) ? answer : []));
+    windows += 1;
+    to = from - 1;
+    width = Math.min(MAX_WINDOW, width * 2);
+  }
+
+  return to < 0 ? { from: 0, logs, state: "read" } : { from: to + 1, logs, state: "beyond" };
+}
+
+/**
+ * @param {{ network: BridgeNetwork, owners: Iterable<string>, fetch?: FetchLike, rpcUrl?: string, cache?: FactCache, timeoutMs?: number }} options
+ * @returns {Promise<{ approvals: MigrationApproval[], reads: ApprovalsRead[] }>}
+ */
+export async function migrationApprovals({ cache, fetch: fetchFn, network, owners, rpcUrl, timeoutMs = TIMEOUT_MS }) {
+  const net = networkOf(network);
+  const read = reader(fetchFn, timeoutMs);
+  const addresses = [...new Set([...(owners ?? [])].map(addressOf).filter(Boolean))];
+  /** @type {MigrationApproval[]} */
+  const approvals = [];
+  /** @type {ApprovalsRead[]} */
+  const reads = [];
+
+  for (const route of routes(net).filter((each) => each.kind === "migration")) {
+    const chain = /** @type {any} */ (route.chain);
+    const token = addressOf(chain?.token);
+    const contract = addressOf(/** @type {any} */ (route).contract);
+
+    if (!token || !contract || !addresses.length) continue;
+
+    const url = urlOf(rpcUrl, chain?.rpcUrl, `${route.id}'s RPC`);
+    const coin = String(chain?.currency?.symbol ?? "ETH");
+
+    await Promise.all(
+      addresses.map(async (owner) => {
+        try {
+          const head = Number(bigOf(await read.rpc(url, "eth_blockNumber", [])) ?? -1n);
+          const { from, logs, state } = await ownerLogs(read, url, { contract, head, owner, token });
+          /** @param {any} log */
+          const txOf = (log) => String(log?.transactionHash ?? "").toLowerCase();
+          const ordered = logs.sort((a, b) => (before(placeOf(a), placeOf(b)) ? -1 : 1));
+          // What a migration drew on: a Transfer to the contract. An Approval in a transaction of its own is the owner's approve.
+          const spends = new Set(ordered.filter((log) => log?.topics?.[0] === TRANSFER_TOPIC).map(txOf));
+          const own = ordered.filter((log) => log?.topics?.[0] === APPROVAL_TOPIC && !spends.has(txOf(log)));
+
+          reads.push({ from, owner, route: route.id, state, to: head });
+
+          for (const [i, log] of own.entries()) {
+            const hash = txOf(log);
+            const key = `approval-evm:${net.chainId}:${route.id}:${hash}`;
+            const kept = readKept(cache?.get(key));
+            /** @type {{ at: number | null, block: number, gasWei: bigint | null, from: string } | null} */
+            let paid = kept ? /** @type {any} */ (kept) : null;
+
+            if (!paid) {
+              const receipt = await read.rpc(url, "eth_getTransactionReceipt", [hash]);
+
+              paid = receipt ? { at: await timeOf(read, url, receipt), block: Number(bigOf(receipt.blockNumber) ?? -1n), from: addressOf(receipt.from), gasWei: paidOf(receipt) } : null;
+              // Kept once final, and all of it read.
+              if (paid && paid.at !== null && paid.gasWei !== null && head - paid.block >= FINAL_BLOCKS) cache?.set(key, keptOf(/** @type {any} */ (paid)));
+            }
+
+            // Another's transaction that set it, as a permit sent for the owner: its gas is that one's.
+            if (!paid || paid.from !== owner) continue;
+
+            const allowance = bigOf(log.data) ?? 0n;
+            const next = own[i + 1];
+            const spent = ordered.some((each) => each?.topics?.[0] === TRANSFER_TOPIC && before(placeOf(log), placeOf(each)) && (!next || before(placeOf(each), placeOf(next))));
+
+            approvals.push({
+              allowance,
+              at: paid.at,
+              block: paid.block,
+              chain: String(chain?.name ?? route.id),
+              coin,
+              contract,
+              decimals: Number(chain?.currency?.decimals ?? 18),
+              gasWei: paid.gasWei,
+              hash,
+              owner,
+              route: route.id,
+              state: allowance === 0n ? "revoke" : spent ? "spent" : next ? "unused" : "open",
+            });
+          }
+        } catch (error) {
+          reads.push({ error: messageOf(error), from: null, owner, route: route.id, state: "error", to: null });
+        }
+      })
+    );
+  }
+
+  return { approvals: approvals.sort((a, b) => a.block - b.block || (a.hash < b.hash ? -1 : 1)), reads: reads.sort((a, b) => (a.route + a.owner < b.route + b.owner ? -1 : 1)) };
 }

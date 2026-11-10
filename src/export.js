@@ -48,6 +48,7 @@ import { displayText } from "./text.js";
 /** @typedef {import("./export.js").ExportResult} ExportResult */
 /** @typedef {import("./sozu.js").SozuFact} SozuFact */
 /** @typedef {import("./bridge.js").MigrationEvm} MigrationEvm */
+/** @typedef {import("./bridge.js").MigrationApproval} MigrationApproval */
 
 /** The format's twelve, then what it ignores. */
 export const CSV_COLUMNS = Object.freeze([
@@ -310,6 +311,33 @@ function evmLines(row, fact) {
 
   return lines;
 }
+
+/** What an approval that's no migration's own did, after "approval for a migration to Dusk". */
+const APPROVAL_WORDS = Object.freeze({ open: ", not used yet", revoke: ", revoked", spent: "", unused: ", never used" });
+
+/**
+ * The line of an approval or a revoke of a migration's contract on its own
+ * chain: the gas it paid there, at its own time and hash, of the address that
+ * sent it, as a cost.
+ *
+ * @param {MigrationApproval} approval
+ * @returns {Line}
+ */
+const approvalLine = ({ at, chain, coin, contract, decimals, gasWei, hash, owner, state }) => ({
+  account: owner,
+  accountName: chain,
+  at: /** @type {number} */ (at),
+  counterparty: contract,
+  hash,
+  memo: "",
+  partyName: "",
+  sent: /** @type {bigint} */ (gasWei),
+  sentCoin: coin,
+  sentDecimals: decimals,
+  tag: "cost",
+  valued: null,
+  words: `Network fee on ${chain}: ${state === "revoke" ? "approval for migrations to Dusk revoked" : `approval for a migration to Dusk${APPROVAL_WORDS[state]}`}`,
+});
 
 /**
  * What a contract call is, in words.
@@ -577,7 +605,7 @@ function slugOf(name) {
  * @param {ExportOptions} options
  * @returns {Promise<ExportResult>}
  */
-export async function accountingCsv({ bom = false, contactName, currency = "EUR", evm, evmAddresses, facts, network, period, price, profile, profiles = [], rows }) {
+export async function accountingCsv({ approvals, bom = false, contactName, currency = "EUR", evm, evmAddresses, facts, network, period, price, profile, profiles = [], rows }) {
   const account = String(profile?.account ?? "");
   // The EVM addresses the app knows as the person's, where it gives them: anyone can migrate to an account.
   const ownEvm = evmAddresses === undefined || evmAddresses === null ? null : new Set([...evmAddresses].map((address) => String(address ?? "").toLowerCase()));
@@ -597,6 +625,59 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
   /** @type {{ at: number, text: string }[]} */
   const written = [];
   let count = 0;
+  // The transactions on another chain a migration's own lines have: an approval among them is booked once.
+  /** @type {Set<string>} */
+  const booked = new Set();
+  /** @param {number} at */
+  const inPeriod = (at) => !period || (at >= period.from && at < period.to);
+
+  /**
+   * Writes a line, of a row where it's one's, in the period of its own time.
+   *
+   * @param {Line} line
+   * @param {ActivityRow | null} row
+   */
+  const write = async (line, row) => {
+    const at = /** @type {number} */ (line.at ?? row?.time);
+
+    if (!inPeriod(at)) return;
+
+    // A token's own line says who it went to, or that it isn't known: never the contract called.
+    const ownParty = "counterparty" in line;
+    const party = ownParty ? line.counterparty : row?.counterparty;
+    const internal = party && !self.has(party) ? own.get(party) : undefined;
+    // The person's own names first, where they asked for them: their contact's over a verified .dusk name.
+    const name = line.partyName ?? internal ?? ((party && contactName?.(party)) || null) ?? (ownParty ? null : row?.counterpartyName) ?? (ownParty && !party ? null : row?.toName) ?? "";
+    const memo = line.memo ?? row?.memo ?? "";
+    const unit = price && line.valued !== null ? await priceAt(at) : null;
+
+    if (price && !unit) unpriced += 1;
+
+    written.push({
+      at,
+      text: [
+        field(dateOf(at)),
+        field(amountOf(line.sent, line.sentDecimals)),
+        line.sent === undefined ? "" : textField(line.sentCoin),
+        field(amountOf(line.received)),
+        field(line.received === undefined ? "" : line.receivedCoin),
+        field(amountOf(line.fee)),
+        field(line.fee ? DUSK : ""),
+        field(unit && line.valued !== null ? worthOf(line.valued, unit) : ""),
+        field(unit ? currency : ""),
+        field(line.tag ?? ""),
+        textField([line.words, memo].filter(Boolean).join(" · ")),
+        field(line.hash ?? row?.hash),
+        textField(line.accountName ?? profile?.name ?? ""),
+        field(line.account ?? account),
+        textField(name),
+        textField(party ?? ""),
+        field(internal ? "yes" : ""),
+        textField(memo),
+      ].join(","),
+    });
+    count += 1;
+  };
 
   for (const row of chronological) {
     // Never on the chain, so it never happened.
@@ -616,9 +697,10 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
     // and, where the app gives the person's EVM addresses, sent from one of them. Another's gas is no cost of theirs.
     const fact = row.route?.kind === "migration" && row.direction === "in" ? evm?.get((memoTextOf(row) ?? "").toLowerCase()) : undefined;
     const migration = !ownEvm || (fact?.from && ownEvm.has(fact.from.toLowerCase())) ? fact : undefined;
-    /** @param {number} at */
-    const inPeriod = (at) => !period || (at >= period.from && at < period.to);
     const rowIn = inPeriod(row.time);
+    const evmOwn = evmLines(row, migration);
+
+    for (const line of evmOwn) booked.add(String(line.hash));
 
     // Each line goes in the period of its own time: a migration's fees on its
     // own chain may be in one before its payout's, the rest of a row in its.
@@ -627,47 +709,12 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
       if (!migration) continue;
     }
 
-    for (const line of [...evmLines(row, migration), ...(rowIn ? linesOf(row, { address: Boolean(profile?.address), facts, own, self }) : [])]) {
-      const at = line.at ?? row.time;
+    for (const line of [...evmOwn, ...(rowIn ? linesOf(row, { address: Boolean(profile?.address), facts, own, self }) : [])]) await write(line, row);
+  }
 
-      if (!inPeriod(at)) continue;
-
-      // A token's own line says who it went to, or that it isn't known: never the contract called.
-      const ownParty = "counterparty" in line;
-      const party = ownParty ? line.counterparty : row.counterparty;
-      const internal = party && !self.has(party) ? own.get(party) : undefined;
-      // The person's own names first, where they asked for them: their contact's over a verified .dusk name.
-      const name = line.partyName ?? internal ?? ((party && contactName?.(party)) || null) ?? (ownParty ? null : row.counterpartyName) ?? (ownParty && !party ? null : row.toName) ?? "";
-      const memo = line.memo ?? row.memo ?? "";
-      const unit = price && line.valued !== null ? await priceAt(at) : null;
-
-      if (price && !unit) unpriced += 1;
-
-      written.push({
-        at,
-        text: [
-          field(dateOf(at)),
-          field(amountOf(line.sent, line.sentDecimals)),
-          line.sent === undefined ? "" : textField(line.sentCoin),
-          field(amountOf(line.received)),
-          field(line.received === undefined ? "" : line.receivedCoin),
-          field(amountOf(line.fee)),
-          field(line.fee ? DUSK : ""),
-          field(unit && line.valued !== null ? worthOf(line.valued, unit) : ""),
-          field(unit ? currency : ""),
-          field(line.tag ?? ""),
-          textField([line.words, memo].filter(Boolean).join(" · ")),
-          field(line.hash ?? row.hash),
-          textField(line.accountName ?? profile?.name ?? ""),
-          field(line.account ?? account),
-          textField(name),
-          textField(party ?? ""),
-          field(internal ? "yes" : ""),
-          textField(memo),
-        ].join(","),
-      });
-      count += 1;
-    }
+  // The approvals and revokes on a migration's own chain that no migration's lines have, each once.
+  for (const approval of approvals ?? []) {
+    if (!booked.has(approval.hash) && approval.at !== null && approval.gasWei !== null && (!ownEvm || ownEvm.has(approval.owner))) await write(approvalLine(approval), null);
   }
 
   const slug = slugOf(profile?.name) || "profile";

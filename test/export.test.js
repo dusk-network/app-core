@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { activityRows } from "../src/activity.js";
-import { migrationFacts, migrationsOf } from "../src/bridge.js";
+import { migrationApprovals, migrationFacts, migrationsOf } from "../src/bridge.js";
 import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear } from "../src/export.js";
 import { sozuFacts } from "../src/sozu.js";
 import { A, B, C, POOL, entryFrom, entryOf, hash, recorded } from "./fixtures/activity.js";
 import { fakeChain, hex } from "./fixtures/bridge.js";
+import { networks } from "@dusk-network/networks";
 import { readFixture } from "./fixtures/helpers.js";
 
 /** @typedef {import("../src/export.js").ExportOptions} ExportOptions */
@@ -1011,5 +1012,49 @@ describe("staking rewards by calendar year", () => {
     const [year] = await rewardsByYear({ price: () => null, rows, timeZone: "UTC" });
 
     assert.deepEqual(year, { claimed: { lux: claimedThird, unpriced: 1, worth: "0.00000000" }, sozu: { lux: 0n, unpriced: 0, worth: "0.00000000" }, year: 2026 });
+  });
+});
+
+describe("the gas of approvals and revokes on a migration's chain", () => {
+  // Nandini's 0xB472 on the BSC test chain: three ways back, and an approval and two revokes no migration had.
+  const testchain = readFixture("bridge-approvals-testchain.json");
+  const network = { ...networks.testnet, routes: testchain.routes };
+  const OWNER = "0xb472d149cd771f0807edece2cedccc612e103685";
+  const ACCOUNT = testchain.routes.migrations[0].payoutAccount;
+  /** @param {any} log */
+  const asLog = (log) => ({ address: log.address, block: BigInt(log.blockNumber), data: log.data, hash: log.transactionHash, index: Number(BigInt(log.logIndex)), topics: log.topics });
+  const chain = () => fakeChain({ head: BigInt(testchain.head), logs: testchain.logs.map(asLog), receipts: testchain.receipts, timeAt: (n) => Number(BigInt(testchain.blocks[hex(n)]?.timestamp ?? "0x0")) });
+  const migrations = [["0x0123503ac447d700c3df26b154774777deed5980cf047e52d82a0bab954a680e", "3000000"], ["0x627627c46ae0b46f3a36a2f8089ed1847c4262e369a0c235b48ed09e79bc1a15", "1000000"], ["0x45fe85ca7a191015c6439c15e13ecb8c01f596d76b682142173bca005adbdc68", "2000000"]];
+
+  it("books each once, at its own time, so the file's gas is all that left the address", async () => {
+    // Each way back's payout on Dusk, a minute after its migration.
+    const payouts = migrations.map(([migration, value], i) => {
+      const time = Number(BigInt(testchain.blocks[testchain.receipts[migration].blockNumber].timestamp)) * 1000 + 60_000;
+
+      return entryOf({ counterparty: ACCOUNT, direction: "in", hash: hash(0x60 + i), memo: migration, timestamp: time, value }, { network });
+    });
+    const rows = activityRows({ account: B, network, public: payouts });
+    const evm = await migrationFacts({ fetch: chain().fetch, migrations: migrationsOf(rows), network });
+    const { approvals } = await migrationApprovals({ fetch: chain().fetch, network, owners: [OWNER] });
+    const { records } = await fileOf(B, { network, public: payouts }, { approvals, evm, evmAddresses: [OWNER] });
+    const gas = records.filter((record) => record["Sent Currency"] === "ETH");
+
+    // The chain: 337,617,005,401,872 wei of gas over eight transactions, 94,638,001,514,208 of it on no screen and in no file before.
+    assert.equal(gas.length, 8);
+    assert.equal(new Set(gas.map((record) => record.TxHash)).size, 8);
+    const weiOf = (/** @type {string} */ text) => BigInt(text.split(".")[0]) * 10n ** 18n + BigInt((text.split(".")[1] ?? "").padEnd(18, "0"));
+
+    assert.equal(gas.reduce((sum, record) => sum + weiOf(record["Sent Amount"]), 0n), 337_617_005_401_872n);
+    assert.deepEqual(
+      gas.slice(-3).map((record) => [record.Date, record["Sent Amount"], record.Tag, record.Description, record.Account]),
+      [
+        ["2026-11-10 06:29:41", "0.000024222000387552", "cost", "Network fee on BSC test chain: approval for migrations to Dusk revoked", OWNER],
+        ["2026-11-10 06:30:33", "0.000046194000739104", "cost", "Network fee on BSC test chain: approval for a migration to Dusk, never used", OWNER],
+        ["2026-11-10 06:30:52", "0.000024222000387552", "cost", "Network fee on BSC test chain: approval for migrations to Dusk revoked", OWNER],
+      ]
+    );
+
+    // Another's approvals aren't the person's costs.
+    assert.equal((await fileOf(B, { network, public: payouts }, { approvals, evm, evmAddresses: [] })).records.filter((record) => record["Sent Currency"] === "ETH").length, 0);
   });
 });

@@ -711,6 +711,13 @@ const wayBackGas = wayBack.then((facts) => {
 const wayBackFile: Promise<ExportResult> = wayBack.then((evm) => accountingCsv({ evm, profile: { account: "a", name: "Lena" }, rows: readRows }));
 void [wayBackGas, wayBackFile];
 
+import { migrationApprovals, type ApprovalsRead, type MigrationApproval } from "@dusk-network/app-core/bridge";
+
+const approvalsRead: Promise<{ approvals: MigrationApproval[]; reads: ApprovalsRead[] }> = migrationApprovals({ cache: new Map(), fetch, network: 2, owners: ["0x"], rpcUrl: "https://rpc", timeoutMs: 1 });
+const approvalsFile: Promise<ExportResult> = approvalsRead.then(({ approvals }) => accountingCsv({ approvals, evmAddresses: ["0x"], profile: { name: "Nandini" }, rows: readRows }));
+const approvalStates = approvalsRead.then(({ approvals, reads }): [MigrationApproval["state"] | undefined, bigint | null | undefined, ApprovalsRead["state"] | undefined] => [approvals[0]?.state, approvals[0]?.gasWei, reads[0]?.state]);
+void [approvalsFile, approvalStates];
+
 // /bridge's status
 import { STATUS_MAX_AGE_MS, bridgeStatus, type BridgeStatus } from "@dusk-network/app-core/bridge";
 
