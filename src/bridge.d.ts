@@ -703,9 +703,14 @@ export type MigrationApproval = {
    * "spent": a migration drew on it before the owner's next approval, and its
    * gas is that migration's (`migrationFacts`'s approval); "unused": the
    * owner's next approval or revoke came first; "open": none of those since;
-   * "revoke": it took the approval away.
+   * "uncertain": a transfer to the contract came between whose transaction
+   * can't be read, so whether a migration drew on it isn't known; "revoke":
+   * it took the approval away. A migration's draw is a transfer to the
+   * contract the token writes an Approval beside, or, for a token that
+   * writes none, one in a transaction sent to the contract or with an event
+   * of its own: the owner's own transfer to the contract draws on nothing.
    */
-  state: "spent" | "unused" | "open" | "revoke";
+  state: "spent" | "unused" | "open" | "uncertain" | "revoke";
 };
 
 /**

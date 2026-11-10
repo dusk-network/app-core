@@ -401,10 +401,34 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
           /** @param {any} log */
           const txOf = (log) => String(log?.transactionHash ?? "").toLowerCase();
           const ordered = logs.sort((a, b) => (before(placeOf(a), placeOf(b)) ? -1 : 1));
-          const transfers = new Set(ordered.filter((log) => log?.topics?.[0] === TRANSFER_TOPIC).map(txOf));
+          const sent = ordered.filter((log) => log?.topics?.[0] === TRANSFER_TOPIC);
+          const transfers = new Set(sent.map(txOf));
           // An Approval in a transaction of its own is the owner's approve; one beside a Transfer to the contract is the token's, as a migration draws on it.
           const own = ordered.filter((log) => log?.topics?.[0] === APPROVAL_TOPIC && !transfers.has(txOf(log)));
-          const draws = ordered.filter((log) => log?.topics?.[0] === APPROVAL_TOPIC && transfers.has(txOf(log)));
+          const announced = new Set(ordered.filter((log) => log?.topics?.[0] === APPROVAL_TOPIC && transfers.has(txOf(log))).map(txOf));
+          // Whether each Transfer to the contract was a migration drawing on an approval: as the token's Approval beside it says, or,
+          // where the token writes none, as its transaction does, sent to the contract or with an event of the contract's own.
+          // The owner's own transfer to the contract is neither. Null where the transaction can't be read.
+          /** @type {Map<string, boolean | null>} */
+          const drawn = new Map();
+
+          for (const tx of transfers) {
+            const key = `approval-draw:${net.chainId}:${route.id}:${tx}`;
+            const kept = cache?.get(key);
+
+            if (announced.has(tx) || kept === "1" || kept === "0") {
+              drawn.set(tx, announced.has(tx) || kept === "1");
+              continue;
+            }
+
+            const receipt = await read.rpc(url, "eth_getTransactionReceipt", [tx]);
+            /** @type {any[]} */
+            const emitted = Array.isArray(receipt?.logs) ? receipt.logs : [];
+            const made = receipt ? addressOf(receipt.to) === contract || emitted.some((each) => addressOf(each?.address) === contract) : null;
+
+            drawn.set(tx, made);
+            if (made !== null && head - Number(bigOf(receipt.blockNumber) ?? BigInt(head)) >= FINAL_BLOCKS) cache?.set(key, made ? "1" : "0");
+          }
 
           reads.push({ from, owner, route: route.id, state, to: head });
 
@@ -428,7 +452,9 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
 
             const allowance = bigOf(log.data) ?? 0n;
             const next = own[i + 1];
-            const spent = draws.some((each) => before(placeOf(log), placeOf(each)) && (!next || before(placeOf(each), placeOf(next))));
+            // What was drawn between it and the owner's next approval or revoke.
+            const between = sent.filter((each) => before(placeOf(log), placeOf(each)) && (!next || before(placeOf(each), placeOf(next)))).map((each) => drawn.get(txOf(each)));
+            const spent = between.includes(true);
 
             approvals.push({
               allowance,
@@ -442,7 +468,7 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
               hash,
               owner,
               route: route.id,
-              state: allowance === 0n ? "revoke" : spent ? "spent" : next ? "unused" : "open",
+              state: allowance === 0n ? "revoke" : spent ? "spent" : between.includes(null) ? "uncertain" : next ? "unused" : "open",
             });
           }
         } catch (error) {

@@ -313,7 +313,7 @@ function evmLines(row, fact) {
 }
 
 /** What an approval that's no migration's own did, after "approval for a migration to Dusk". */
-const APPROVAL_WORDS = Object.freeze({ open: ", not used yet", revoke: ", revoked", spent: "", unused: ", never used" });
+const APPROVAL_WORDS = Object.freeze({ open: ", not used yet", revoke: ", revoked", spent: "", uncertain: "", unused: ", never used" });
 
 /**
  * The line of an approval or a revoke of a migration's contract on its own

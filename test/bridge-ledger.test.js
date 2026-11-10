@@ -466,11 +466,11 @@ describe("an owner's approvals and revokes on a migration's chain", () => {
   const OWNER = "0xB472D149Cd771f0807eDECE2cEdcCc612E103685";
   /** @param {any} log */
   const asLog = (log) => ({ address: log.address, block: BigInt(log.blockNumber), data: log.data, hash: log.transactionHash, index: Number(BigInt(log.logIndex)), topics: log.topics });
-  /** @param {{ logsGone?: { before: bigint, message: string }, head?: bigint, receipts?: Record<string, any> }} [options] */
-  const chainOf = ({ head = BigInt(testchain.head), logsGone, receipts = {} } = {}) =>
+  /** @param {{ logsGone?: { before: bigint, message: string }, head?: bigint, logs?: any[], receipts?: Record<string, any> }} [options] */
+  const chainOf = ({ head = BigInt(testchain.head), logs = testchain.logs, logsGone, receipts = {} } = {}) =>
     fakeChain({
       head,
-      logs: testchain.logs.map(asLog),
+      logs: logs.map(asLog),
       logsGone,
       receipts: { ...testchain.receipts, ...receipts },
       timeAt: (n) => Number(BigInt(testchain.blocks[hex(n)]?.timestamp ?? "0x0")),
@@ -493,6 +493,28 @@ describe("an owner's approvals and revokes on a migration's chain", () => {
     );
     like(approvals[3], { at: at(unused), chain: "BSC test chain", coin: "ETH", contract: "0x93d6e214d07e6a548005ded9a3da589c29f830fe", decimals: 18, owner: OWNER.toLowerCase(), route: "bsc-to-dusk" });
     assert.deepEqual(reads, [{ from: 0, owner: OWNER.toLowerCase(), route: "bsc-to-dusk", state: "read", to: Number(testchain.head) }]);
+  });
+
+  it("tells a migration's draw by its transaction where the token writes no Approval as it's drawn on, and the owner's own transfer from one", async () => {
+    const migrated = new Set(Object.entries(testchain.receipts).filter(([, receipt]) => receipt.to === "0x93d6e214d07e6a548005ded9a3da589c29f830fe").map(([tx]) => tx));
+    /** @param {any} log */
+    const quiet = (log) => !(log.topics[0] === APPROVAL_TOPIC && migrated.has(log.transactionHash));
+    const logs = testchain.logs.filter(quiet);
+    const receipts = Object.fromEntries([...migrated].map((tx) => [tx, { ...testchain.receipts[tx], logs: testchain.receipts[tx].logs.filter(quiet) }]));
+    const states = async (/** @type {any} */ options) => (await migrationApprovals({ fetch: chainOf({ logs, receipts, ...options }).fetch, network, owners: [OWNER] })).approvals.map(({ hash: tx, state }) => [tx, state]);
+    const told = [[approved, "spent"], [reapproved, "spent"], [revoked, "revoke"], [unused, "unused"], [revokedAgain, "revoke"]];
+
+    // Codex's: without the token's Approval, the two approvals the migrations spent read as never used.
+    assert.deepEqual(await states({}), told);
+
+    // The owner's own transfer to the contract, between the approval never used and its revoke, draws on nothing.
+    const [drawLog] = testchain.logs.filter((/** @type {any} */ log) => log.topics[0] !== APPROVAL_TOPIC);
+    const direct = { ...drawLog, blockNumber: hex(355), logIndex: "0x5", transactionHash: `0x${"d1".repeat(32)}` };
+    const directReceipt = { blockNumber: hex(355), effectiveGasPrice: "0x1", from: OWNER.toLowerCase(), gasUsed: "0x1", logs: [direct], status: "0x1", to: "0xbcee5c06eda885a6471a0e87f513e7492d411b61", transactionHash: direct.transactionHash };
+
+    assert.deepEqual(await states({ logs: [...logs, direct], receipts: { ...receipts, [direct.transactionHash]: directReceipt } }), told);
+    // One whose transaction can't be read leaves it unsure, never "never used".
+    assert.deepEqual((await states({ logs: [...logs, direct] }))[3], [unused, "uncertain"]);
   });
 
   it("says an approval nothing came after is open, leaves out one another address sent, and says how far back it read", async () => {
