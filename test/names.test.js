@@ -48,8 +48,12 @@ describe("names that look alike", () => {
     for (const hidden of ["\u202e2 eliforP", "\u202eecilA", "Ali\u200bce", "Ali\u200dce", "Ali\u00adce", "Alice\u2069", "Ali\tce", "Ali\nce", "Ali\u2028ce", "Al\u3164ice", "\ufeffAlice", "Alice\u{e0041}", "Ali\ud800ce", "Mom \u{1f469}\u200d\u{1f467}"]) {
       assert.equal(nameHides(hidden), true, JSON.stringify(hidden));
     }
-    // An emoji's own selector, accents and any script hide nothing.
-    for (const plain of ["Alice", "Am\u00e9lie", "e\u0301", "Ilustraci\u00f3n Sol", "\u05e9\u05dc\u05d5\u05dd", "\u0639\u0644\u064a", "\u0939\u093f\u0928\u094d\u0926\u0940", "\u65e5\u672c", "Caf\u00e9 \u2764\ufe0f", "\u{1f600}", "Profile 2", "", "  "]) {
+    // Marek's: a selector on what it can't make an emoji of does nothing to be seen, wherever it is.
+    for (const hidden of ["Alice\ufe0f", "Ali\ufe0fce", "\ufe0eAlice", "Bob 1\ufe0f", "Kim\ufe00", "\u2764\ufe0f\ufe0f"]) {
+      assert.equal(nameHides(hidden), true, JSON.stringify(hidden));
+    }
+    // An emoji's own selector, a keycap's, accents and any script hide nothing.
+    for (const plain of ["Alice", "Am\u00e9lie", "e\u0301", "Ilustraci\u00f3n Sol", "\u05e9\u05dc\u05d5\u05dd", "\u0639\u0644\u064a", "\u0939\u093f\u0928\u094d\u0926\u0940", "\u65e5\u672c", "Caf\u00e9 \u2764\ufe0f", "Team \u0031\ufe0f\u20e3", "\u2122\ufe0e", "\u{1f600}", "Profile 2", "", "  "]) {
       assert.equal(nameHides(plain), false, JSON.stringify(plain));
     }
     assert.equal(nameHides(null), false);

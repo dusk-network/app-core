@@ -41,9 +41,10 @@ export declare function sameName(a: unknown, b: unknown): boolean;
  * read as another: a control that turns text around (U+202E makes
  * "\u202e2 eliforP" read as "Profile 2"), a character that renders as
  * nothing (a zero-width space or joiner, a soft hyphen, a Hangul filler, a
- * joiner between emoji), a line break, another control, or half a character.
- * What `displayText` of `/text` shows as codes; an emoji's own selector and
- * accents aren't. Refuse a new or changed contact's or profile's name that
+ * joiner between emoji, a variation selector on what it can't change the
+ * look of, as U+FE0F after "Alice"), a line break, another control, or half a
+ * character. What `displayText` of `/text` shows as codes; an emoji's own
+ * selector, a keycap's and accents aren't. Refuse a new or changed contact's or profile's name that
  * does (`NAME_HIDES`), and show one kept from before with
  * `displayText(name).text`, which shows them as codes.
  */

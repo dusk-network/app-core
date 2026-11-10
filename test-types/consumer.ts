@@ -562,12 +562,13 @@ const meant: { from: bigint; to: bigint }[] = amountsMeant("0.2", "de-DE");
 void [startsOn, defaultCurrency(), meant];
 
 // /text
-import { displayText, searchKey, type TextFlag } from "@dusk-network/app-core/text";
+import { displayText, numbersNote, searchKey, type TextFlag } from "@dusk-network/app-core/text";
 
 const safe: { text: string; neutralized: boolean; flags: TextFlag[] } = displayText("memo", { lineBreaks: true, maxChars: 10 });
 const lookalike: TextFlag = "lookalike_digits";
 const searched: string = searchKey("Ilustración");
-void [safe, lookalike, searched];
+const digitsNote: string = numbersNote(safe.flags);
+void [safe, lookalike, searched, digitsNote, numbersNote(["mixed_digits"]), numbersNote(null)];
 
 // /payment-links
 import { MAX_MEMO_BYTES, chainLabel, makePaymentLink, networkMismatch, parsePaymentLink, recipientKind, type MadePaymentLink, type PaymentLink, type PaymentRequest } from "@dusk-network/app-core/payment-links";

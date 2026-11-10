@@ -10,11 +10,12 @@
  *
  * @example
  * ```js
- * import { displayText, searchKey } from "@dusk/app-core/text";
+ * import { displayText, numbersNote, searchKey } from "@dusk/app-core/text";
  *
  * displayText("I agree to pay \u202E0001\u202C DUSK");
  * // { text: "I agree to pay \\u202e0001\\u202c DUSK", neutralized: true, flags: ["bidi_control"] }
  * displayText("Factura 33, abril"); // { text: "Factura 33, abril", neutralized: false, flags: [] }
+ * numbersNote(displayText("Pay ৪ DUSK").flags); // "A number here uses digits that look like other digits. Check it digit by digit."
  *
  * // A search: a field holds what's typed whatever its accents and case.
  * searchKey("Factura Ilustración").includes(searchKey("ilustracion")); // true
@@ -27,7 +28,8 @@
  * What a text held:
  * - "bidi_control": a control that reorders what follows it;
  * - "invisible_format": a character that renders as nothing: a zero-width
- *   space or joiner, a soft hyphen, a tag, a Hangul filler;
+ *   space or joiner, a soft hyphen, a tag, a Hangul filler, a variation
+ *   selector on what it can't change the look of;
  * - "line_separator": a line break, where line breaks aren't kept;
  * - "control_chars": another control character, a tab among them;
  * - "invalid_surrogate": half a character, shown as the replacement mark;
@@ -71,8 +73,10 @@ export type TextFlag =
  * Each hidden character shows as its code (a backslash, u and four hex
  * digits), and half a character as the replacement mark. Line breaks show as
  * codes too, unless `lineBreaks` keeps them for text that's written in lines,
- * as a message to sign. An emoji's own selector stays; a joiner between emoji
- * shows, as it can hide anything an emoji can't. `maxChars` cuts it at that
+ * as a message to sign. An emoji's own selector stays, and a keycap's; one on
+ * anything else does nothing to be seen, and shows as its code, as "Alice"
+ * with U+FE0F after it does. A joiner between emoji shows, as it can hide
+ * anything an emoji can't. `maxChars` cuts it at that
  * many characters of the text given, never through one. Anything that isn't
  * text reads as its text.
  *
@@ -91,6 +95,16 @@ export declare function displayText(
   raw: unknown,
   options?: { maxChars?: number; lineBreaks?: boolean; isolate?: boolean }
 ): { text: string; neutralized: boolean; flags: TextFlag[] };
+
+/**
+ * What a text's numbers ask a person to check, in the words both wallets
+ * show under a memo or a message to sign, from `displayText`'s `flags`; ""
+ * where they ask nothing: "A number here uses digits that look like other
+ * digits. Check it digit by digit." for Bengali's ৪, a 4 that looks like an
+ * 8; "… uses digits that read right to left …" for N'Ko's; "… mixes digits of
+ * different scripts …" for 1٠5; and all a number does, where it does more.
+ */
+export declare function numbersNote(flags: Iterable<TextFlag | string> | null | undefined): string;
 
 /**
  * Text as a search compares it, for both wallets: without accents and other

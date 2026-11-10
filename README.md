@@ -28,7 +28,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | Import | What it gives |
 |---|---|
 | `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits`; the amounts a search can mean (`amountsMeant`); and the currency a wallet starts on, by the browser's region (`defaultCurrency`) |
-| `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`); and text as a search compares it, without accents or case (`searchKey`) |
+| `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) and what its numbers ask a person to check (`numbersNote`); and text as a search compares it, without accents or case (`searchKey`) |
 | `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), as Send reads them on the wallet's network (`readPaymentLink`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
 | `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; whether one holds what can't be seen, to refuse it (`nameHides`, `NAME_HIDES`); the name a contact's takes (`nameClash`); and which in a list to show with their address (`lookAlikes`) |
 | `@dusk-network/app-core/requests` | Payment requests: what came in for each request a wallet made (`matchRequests`), a payment that paid one again, sent back (`refundOf`), and the payment a send would make again (`sentAlready`) |
@@ -63,15 +63,16 @@ readAmount("1.234", "es-ES"); // { lux: null, problem: "Is that 1234 or 1,234? W
 ## Text
 
 ```js
-import { displayText } from "@dusk-network/app-core/text";
+import { displayText, numbersNote, searchKey } from "@dusk-network/app-core/text";
 
 displayText(memo); // { text: "pay \\u202e0001\\u202c DUSK", neutralized: true, flags: ["bidi_control"] }
 displayText(message, { lineBreaks: true, maxChars: 500 }); // for text written in lines, and cut
 displayText(memo, { isolate: true }); // for a screen: right-to-left words set apart, the rest in the order of the bytes
+numbersNote(displayText(memo).flags); // "A number here uses digits that look like other digits. Check it digit by digit."
 searchKey(memo).includes(searchKey(query)); // a search: "ilustracion" finds "Ilustración"
 ```
 
-Text-direction controls, characters that render as nothing, controls and line breaks show as their codes, never left out, so what's shown is what the bytes say; half a character shows as the replacement mark. `neutralized` says whether anything was, for the app to say so, and `flags` what. Some things are only flagged, the text as it was: a number whose digits read right to left (`rtl_digits`), as N'Ko's 0001 that shows as 1000, mix digit systems (`mixed_digits`), as 1٠5 with an Arabic-Indic zero that looks like a point, or look like other Latin digits than they are by Unicode's confusables (`lookalike_digits`), as Bengali's ৪, a 4 that looks like an 8. On a screen, right-to-left letters turn the numbers and words beside them around: `isolate` sets each run of them, and of their digits, apart, so "Pay א 10 א 1000" doesn't read as "Pay א 1000 א 10". It's for display: sign and send the original.
+Text-direction controls, characters that render as nothing, controls and line breaks show as their codes, never left out, so what's shown is what the bytes say; half a character shows as the replacement mark. A variation selector is an emoji's own only on an emoji, or on a keycap's digit with the keycap's mark after it: on anything else it renders as nothing and shows as its code. `neutralized` says whether anything was, for the app to say so, and `flags` what. Some things are only flagged, the text as it was: a number whose digits read right to left (`rtl_digits`), as N'Ko's 0001 that shows as 1000, mix digit systems (`mixed_digits`), as 1٠5 with an Arabic-Indic zero that looks like a point, or look like other Latin digits than they are by Unicode's confusables (`lookalike_digits`), as Bengali's ৪, a 4 that looks like an 8. `numbersNote` says what those ask a person to check, in the words both wallets show under the text. On a screen, right-to-left letters turn the numbers and words beside them around: `isolate` sets each run of them, and of their digits, apart, so "Pay א 10 א 1000" doesn't read as "Pay א 1000 א 10". It's for display: sign and send the original.
 
 `searchKey` is text as a search compares it, in both wallets: without accents and other marks, case or what can't be seen, compatibility forms as their plain letters and ß as ss, and spaces and line breaks of any kind as one space. A field holds a query where its key holds the query's.
 
@@ -111,7 +112,7 @@ nameClash("Estudio Mаrta", { profiles, contacts }); // { kind: "contact", same:
 lookAlikes([...profiles, ...contacts]); // the entries to show with their address
 ```
 
-- `nameHides` says a name holds what can't be seen as it's shown, which can make it read as another: a control that turns text around (U+202E makes "\u202eecilA" read as "Alice"), a character that renders as nothing, as a zero-width space or a joiner between emoji, a line break or another control. A wallet refuses such a name for a contact or a profile, saying `NAME_HIDES`, and shows one kept from before with `displayText` of `/text`, its hidden characters as codes.
+- `nameHides` says a name holds what can't be seen as it's shown, which can make it read as another: a control that turns text around (U+202E makes "\u202eecilA" read as "Alice"), a character that renders as nothing, as a zero-width space, a joiner between emoji or a variation selector on what isn't an emoji (U+FE0F after "Alice"), a line break or another control. A wallet refuses such a name for a contact or a profile, saying `NAME_HIDES`, and shows one kept from before with `displayText` of `/text`, its hidden characters as codes.
 - Names look alike when they read as the same name, whatever their case, accents, spaces and punctuation, and without what can't be seen (`sameName`), or have the same skeleton by Unicode's confusables (UTS #39), as written or in lower case: Cyrillic, Greek, Armenian and Cherokee letters that look like Latin ones, a capital I that looks like a small l, rn that looks like m. The table is Unicode's, version 18.0.0, kept in the package as data: `npm run generate:confusables` makes `src/confusables.js` again from the pinned file, once its hash is checked.
 - `nameClash` says whose name a new or changed contact's takes: one of the person's profiles first, as a contact named like a profile would read as that profile on Review; then another contact's. `same` says it reads as that name, rather than looking like it.
 - `lookAlikes` gives the entries whose name looks like another's of another address, for a list or a picker to show each with its address.
