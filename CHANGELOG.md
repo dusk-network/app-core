@@ -8,6 +8,10 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 - `/payment-links`: `parsePaymentLink` reads a plain `dusk:<address>` link, an account or a shielded address as written, with its query and network
 
+### Changed
+
+- `/amounts`: `readAmount` says a space the language doesn't group with is what's wrong: "Leave out the space: 1234,5."
+
 ### Fixed
 
 - `/payment-links`: a `dusk:` link that also names a recipient in its query (`to=`) is refused as saying the recipient twice

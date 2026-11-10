@@ -111,7 +111,9 @@ export declare function parseDusk(plain: string): bigint | null;
 /**
  * An amount of DUSK as a person typed it, in the language's reading (the
  * browser's, unless given): the lux it is, or what's wrong with it in plain
- * words. Nothing typed is neither.
+ * words: that it could be two amounts, that a space the language doesn't
+ * group with is in it ("Leave out the space: 1234,5."), that it has too many
+ * decimals, or what an amount looks like. Nothing typed is neither.
  */
 export declare function readAmount(text: string, language?: string): { lux: bigint | null; problem: string | null };
 

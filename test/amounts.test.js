@@ -334,6 +334,13 @@ describe("reading amounts", () => {
     assert.deepEqual(readAmount("1,1234567891", "fr-FR"), { lux: null, problem: "DUSK has 9 decimals at most." });
     assert.deepEqual(readAmount("18446744074", "en-GB"), { lux: null, problem: "That amount is too large." });
     assert.deepEqual(readAmount("18446744073.709551615", "en-GB"), { lux: (1n << 64n) - 1n, problem: null });
+    // Sofia's and Lena's: a space where the language doesn't group with one is what's wrong, and it says so.
+    assert.deepEqual(readAmount("1 234,5", "es-ES"), { lux: null, problem: "Leave out the space: 1234,5." });
+    assert.deepEqual(readAmount("1 234,5", "de-DE"), { lux: null, problem: "Leave out the space: 1234,5." });
+    assert.deepEqual(readAmount("1 234 567.5", "en-US"), { lux: null, problem: "Leave out the spaces: 1234567.5." });
+    // Where the language groups with a space, it's read; where that isn't all that's wrong, nothing is said of it.
+    assert.deepEqual(readAmount("1 234,5", "fr-FR"), { lux: 1_234_500_000_000n, problem: null });
+    assert.deepEqual(readAmount("1 .000", "de-DE"), { lux: null, problem: "Enter an amount such as 10 or 10,5." });
   });
 
   it("writes and reads in the same language, unless told otherwise", () => {

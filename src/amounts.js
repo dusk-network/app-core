@@ -436,6 +436,11 @@ export function readAmount(text, language) {
 
   const plain = normalizeAmount(typed, decimal, language);
   const lux = parseDusk(plain);
+  const spaces = typed.match(SPACES)?.length ?? 0;
+  const unspaced = typed.replace(SPACES, "");
+
+  // Spaces between groups the language doesn't write with them, as "1 234,5" in Spanish: say so.
+  if (lux === null && spaces && readAmount(unspaced, language).lux !== null) return { lux: null, problem: `Leave out the space${spaces > 1 ? "s" : ""}: ${unspaced}.` };
 
   if (lux === null) {
     return {
