@@ -184,7 +184,7 @@ export type NativeRewards = {
   perBlock: bigint;
   /** The blocks read across the period: one in the middle of each sixth of it. */
   blocks: number;
-  /** The stake consensus counts now, in lux, as `nativeRateEstimate` counts it. */
+  /** The stake consensus counts now, in lux, as `nativeRateEstimate` counts it: at the app's `tipHeight`, or else at the tip read. */
   staked: bigint;
   /** What a year of such blocks pays, at the period's pace, over `staked`, simply, as a fraction: 0.87 is 87%. */
   rate: number;

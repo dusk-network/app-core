@@ -611,8 +611,8 @@ export async function nativeRewards({ archive, cache, days = GROWTH_DAYS, maxAge
 
   if (!measure || !Array.isArray(provisioners)) return null;
 
-  // What's staked now, as consensus counts it at the tip: what a staker shares a block's pay with.
-  const { staked } = working(provisioners, measure.to.height, 0);
+  // What's staked now, as consensus counts it at the tip the app has, else the one read: what a staker shares a block's pay with.
+  const { staked } = working(provisioners, tipHeight === undefined || tipHeight === null ? measure.to.height : tipHeight, 0);
   const blocksAYear = ((measure.to.height - measure.from.height) * YEAR_MS) / (measure.to.at - measure.from.at);
 
   return staked > 0n ? { ...measure, rate: (Number(measure.perBlock) * blocksAYear) / Number(staked), staked } : null;

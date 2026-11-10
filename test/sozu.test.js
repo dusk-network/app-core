@@ -546,6 +546,20 @@ describe("what native staking paid", () => {
     assert.equal(told.queries.length, 1);
   });
 
+  it("counts what's staked at the app's tip, also where what was paid is kept from an earlier one", async () => {
+    const archive = archiveOf();
+    const cache = new Map();
+    const now = Date.UTC(2026, 10, 10, 12);
+    const first = /** @type {any} */ (await nativeRewards({ archive, cache, now, provisioners: recorded.provisioners }));
+    // A stake that's eligible 100 blocks after the tip read, asked about 200 blocks after it.
+    const newcomer = { amount: 1_000_000 * Number(DUSK), eligibility: recorded.tip + 100 };
+    const later = /** @type {any} */ (await nativeRewards({ archive, cache, now: now + 1, provisioners: [...recorded.provisioners, newcomer], tipHeight: recorded.tip + 200 }));
+
+    assert.equal(archive.queries.length, 2);
+    assert.equal(later.staked, first.staked + 1_000_000n * DUSK);
+    assert.ok(later.rate < first.rate);
+  });
+
   it("is nothing where the blocks' rewards can't be read, or nothing is staked: the rate is estimated as before", async () => {
     const thinned = archiveOf((answer) => ({ ...answer, e0: { json: [] }, e1: { json: [{ ...answer.e1.json[0], data: "00" }] }, e2: { json: null }, e3: { json: [{ ...answer.e3.json[0], source: POOL }] } }));
 
