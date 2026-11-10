@@ -54,21 +54,23 @@ export type PaymentLink = {
 };
 
 /**
- * Reads a `dusk:` link (`dusk:public-…`, `dusk:shielded-…`, with `//` or not,
+ * Reads a `dusk:` link (`dusk:public-…`, `dusk:shielded-…`, or `dusk:<address>`
+ * with an account or a shielded address as it's written, with `//` or not,
  * and its network as `@dusk:2` or, as an https link says it, `network=` in
  * its query), an https link to the web wallet's Send on any network there's a
  * file for (or at `walletUrl`, the app's own address), or a recipient as it
  * is, as a QR code may hold. Null for nothing, for a `dusk:` link that isn't
  * one of those, for a link that says one of its fields (`to`, `amount`,
- * `amountLux`, `memo`, `label`, `network`) more than once, for one without a
- * recipient, for one that names a network that can't be read, for one that
- * names two (a `dusk:` link's `@` and query, or a network on another
- * network's wallet), and for one with a user part before its host
- * (`https://apps.testnet.dusk.network@apps.dusk.network/…`, which goes to the
- * host after the `@`). An https link to anywhere else is no payment link: it
- * reads as a recipient, which Send refuses. Nothing is checked here but its
- * form: Send checks what it fills in. `readPaymentLink` says why a link is
- * refused.
+ * `amountLux`, `memo`, `label`, `network`) more than once, or a `dusk:` link
+ * that names a recipient in its query too, for one without a recipient, for
+ * one that names a network that can't be read (as "dusk:02", a number with a
+ * zero before it), for one that names two (a `dusk:` link's `@` and query, or
+ * a network on another network's wallet), and for one with a user part before
+ * its host (`https://apps.testnet.dusk.network@apps.dusk.network/…`, which
+ * goes to the host after the `@`). An https link to anywhere else is no
+ * payment link: it reads as a recipient, which Send refuses. Nothing is
+ * checked here but its form: Send checks what it fills in. `readPaymentLink`
+ * says why a link is refused.
  */
 export declare function parsePaymentLink(input: unknown, options?: { walletUrl?: string }): PaymentLink | null;
 
@@ -87,7 +89,8 @@ export type LinkRead = {
   link: PaymentLink | null;
   /**
    * Why it fills in nothing, in plain words, for whoever sent it to fix: "This
-   * link says the memo twice. Ask for a new one.", "This link has something
+   * link says the memo twice. Ask for a new one." (or the recipient, as a
+   * `dusk:` link with `to=` says it), "This link has something
    * before the site's address. Ask for a new one.", "This link names two
    * networks, Testnet and Mainnet. Ask for a new one.", "This link's network
    * can't be read. Ask for a new one.", "This link doesn't say who to pay. Ask

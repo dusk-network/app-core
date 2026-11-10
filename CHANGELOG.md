@@ -2,6 +2,17 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `/payment-links`: `parsePaymentLink` reads a plain `dusk:<address>` link, an account or a shielded address as written, with its query and network
+
+### Fixed
+
+- `/payment-links`: a `dusk:` link that also names a recipient in its query (`to=`) is refused as saying the recipient twice
+- `/payment-links`: a network whose number has a zero before it (`dusk:02`) is one that can't be read, not the one it looks like
+
 ## [0.9.1]
 
 ### Fixed

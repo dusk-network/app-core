@@ -81,6 +81,20 @@ describe("a dusk: link, as wallets have read them", () => {
     like(parsePaymentLink("dusk:public-abc%2Fdef"), { to: "abc/def" });
     like(parsePaymentLink("dusk:public-%E0%A4"), { kind: "public", to: "%E0%A4" });
   });
+
+  it("reads a plain dusk:<address> link, Sofia's, by its address alone: an account or a shielded address, as written", () => {
+    like(parsePaymentLink(`dusk:${A}?amount=0.03&memo=Invoice%202026-114`), { amountDusk: "0.03", chainId: "", form: "dusk", kind: "public", lux: 30_000_000n, memo: "Invoice 2026-114", to: A });
+    like(parsePaymentLink(`dusk://${A}?amount=0,01`), { amountDusk: "0,01", kind: "public", to: A });
+    like(parsePaymentLink(`dusk:${SHIELDED}`), { kind: "shielded", to: SHIELDED });
+    // Its network as the other shape's.
+    like(parsePaymentLink(`dusk:${A}?amount=0.03&network=testnet`), { chainId: "dusk:2", to: A });
+    like(parsePaymentLink(`dusk:${A}@dusk:1`), { chainId: "dusk:1", to: A });
+    assert.equal(parsePaymentLink(`dusk:${A}@dusk:1?network=testnet`), null);
+    // Nothing else is read as an address: no guessing at what a link means.
+    for (const other of [`dusk:send?to=${A}`, `dusk:public:${A}`, `dusk:pay?to=${A}&amount=1`, "dusk:test", `dusk:${A}x`, `dusk:${encodeURIComponent(` ${A}`)}`]) {
+      assert.equal(parsePaymentLink(other), null, other);
+    }
+  });
 });
 
 describe("a link to the web wallet's Send", () => {
@@ -209,6 +223,14 @@ describe("a link as Send reads it, pasted, scanned or opened", () => {
     like(readPaymentLink(`dusk:public-${A}?memo=One&memo=Two`, { network: 2 }), { problem: "This link says the memo twice. Ask for a new one.", reason: "unreadable" });
   });
 
+  it("refuses a dusk: link that names a recipient in its query too, as an https link naming two", () => {
+    // Marek's: it filled in the first and dropped the other without a word.
+    for (const link of [`dusk:public-${A}?to=${B}&amount=0.001`, `dusk:${A}?to=${B}&amount=0.001`, `dusk:public-${A}?to=${A}`, `dusk:public-${A}@dusk:2?amount=0.001&to=`]) {
+      assert.equal(parsePaymentLink(link), null, link);
+      like(readPaymentLink(link, { network: 2 }), { link: null, problem: "This link says the recipient twice. Ask for a new one.", reason: "unreadable" }, link);
+    }
+  });
+
   it("refuses a dusk: link for another network than the wallet's by its query too, as an https link", () => {
     // Marek's: a link that says testnet filled in a mainnet send, and one that says mainnet a testnet send.
     like(readPaymentLink(`dusk:public-${A}?amount=0.001&network=testnet`, { network: 1 }), {
@@ -233,6 +255,10 @@ describe("a link as Send reads it, pasted, scanned or opened", () => {
     like(readPaymentLink(`${testnetSend}?to=${A}&network=nowhere`, { network: 2 }), unknown);
     like(readPaymentLink(`dusk:public-${A}?network=nowhere`, { network: 2 }), unknown);
     like(readPaymentLink(`dusk:public-${A}@dusk:abc`, { network: 2 }), unknown);
+    // Marek's: a chain's number with a zero before it is no network's, not "Testnet and Testnet".
+    for (const link of [`${testnetSend}?to=${A}&amount=0.001&network=dusk:02`, `dusk:public-${A}?network=dusk:02`, `dusk:${A}?network=02`, `dusk:public-${A}@dusk:02`]) {
+      like(readPaymentLink(link, { network: 2 }), unknown, link);
+    }
     like(readPaymentLink(`${testnetSend}?amount=1`, { network: 2 }), { link: null, problem: "This link doesn't say who to pay. Ask for a new one.", reason: "unreadable" });
   });
 
