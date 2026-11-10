@@ -46,9 +46,9 @@ export declare function sameName(a: unknown, b: unknown): boolean;
  * joiner between emoji, a variation selector on what it can't change the
  * look of, as U+FE0F after "Alice"), a line break, another control, or half a
  * character. What `displayText` of `/text` shows as codes; an emoji's own
- * selector, a keycap's and accents aren't. Refuse a new or changed contact's or profile's name that
- * does (`NAME_HIDES`), and show one kept from before with
- * `displayText(name).text`, which shows them as codes.
+ * selector, a keycap's and accents aren't. Refuse a new or changed contact's
+ * or profile's name that does (`NAME_HIDES`), and show one kept from before
+ * with `displayText(name).text`, which shows them as codes.
  */
 export declare function nameHides(name: unknown): boolean;
 

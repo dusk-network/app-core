@@ -123,9 +123,9 @@ export type ExportOptions = {
   /**
    * The approvals and revokes the person sent on a migration's own chain
    * (`migrationApprovals` of `/bridge`): each that no migration's lines here
-   * have, as one spent before the period or never used, or a revoke, is a
-   * line of its own, a cost of its gas there, at its own time; with
-   * `evmAddresses`, only one sent from one of them.
+   * have (one never used, a revoke, or one whose migration's lines aren't in
+   * the file) is a line of its own, a cost of its gas there, at its own time;
+   * with `evmAddresses`, only one sent from one of them.
    */
   approvals?: Iterable<MigrationApproval>;
   /**
