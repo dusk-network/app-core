@@ -731,7 +731,8 @@ export type ApprovalsRead = {
 /**
  * The approvals and revokes the `owners` (the EVM addresses the app knows as
  * the person's own) sent for each migration route's contract on its token,
- * oldest first, with what each paid in gas there: found among the token's
+ * oldest first by time, across the routes' chains (one whose time can't be
+ * read after the rest), with what each paid in gas there: found among the token's
  * Approval logs between them, read back from the head, 5,000 blocks first and
  * twice as many each window after, 8 windows at most, an Approval in a
  * migration's transaction aside. One another address sent for an owner, as a

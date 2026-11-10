@@ -517,6 +517,29 @@ describe("an owner's approvals and revokes on a migration's chain", () => {
     assert.deepEqual((await states({ logs: [...logs, direct] }))[3], [unused, "uncertain"]);
   });
 
+  it("puts the approvals of two chains in the order of their times, not their chains' block heights", async () => {
+    // Codex's: an approval on a second route's chain, of a far higher block, a day before Nandini's.
+    const sepolia = { chainId: 11155111, currency: { decimals: 18, name: "Sepolia Ether", symbol: "ETH" }, explorerUrl: "https://sepolia.etherscan.io", name: "Sepolia", rpcUrl: "https://sepolia.example", token: "0xAced3474eA24f5d77464A0F625dEEB6EaDeE25b8", tokenLabel: "ERC20 DUSK" };
+    const contract = "0x7b1ff96d7edc07d8d83ec2a4da99ef8215a7366b";
+    const twoChains = {
+      chainId: 2,
+      routes: { ...testchain.routes, chains: { ...testchain.routes.chains, ethereum: sepolia }, migrations: [...testchain.routes.migrations, { chain: "ethereum", contract, id: "ethereum-to-dusk", payoutAccount: null, running: true, typicalSeconds: null }] },
+    };
+    const earlier = `0x${"e1".repeat(32)}`;
+    const approval = { address: sepolia.token, block: 7_000_000n, data: hex(10n ** 15n), hash: earlier, index: 0, topics: [APPROVAL_TOPIC, `0x${OWNER.slice(2).toLowerCase().padStart(64, "0")}`, `0x${contract.slice(2).padStart(64, "0")}`] };
+    const ethereum = fakeChain({
+      head: 7_000_100n,
+      logs: [approval],
+      receipts: { [earlier]: { blockNumber: hex(7_000_000n), effectiveGasPrice: "0x1", from: OWNER.toLowerCase(), gasUsed: "0x5208", logs: [], status: "0x1", to: sepolia.token.toLowerCase(), transactionHash: earlier } },
+      timeAt: () => Math.floor(at(approved) / 1000) - 86_400,
+    });
+    const bsc = chainOf();
+    const fetch = (/** @type {string} */ input, /** @type {any} */ init) => (String(input).startsWith(sepolia.rpcUrl) ? ethereum.fetch(input, init) : bsc.fetch(input, init));
+    const { approvals } = await migrationApprovals({ fetch, network: twoChains, owners: [OWNER] });
+
+    assert.deepEqual(approvals.map(({ hash: tx, route }) => [tx, route]), [[earlier, "ethereum-to-dusk"], ...[approved, reapproved, revoked, unused, revokedAgain].map((tx) => [tx, "bsc-to-dusk"])]);
+  });
+
   it("says an approval nothing came after is open, leaves out one another address sent, and says how far back it read", async () => {
     const early = await migrationApprovals({ fetch: chainOf({ head: 355n }).fetch, network, owners: [OWNER] });
 

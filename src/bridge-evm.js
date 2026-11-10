@@ -478,5 +478,9 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
     );
   }
 
-  return { approvals: approvals.sort((a, b) => a.block - b.block || (a.hash < b.hash ? -1 : 1)), reads: reads.sort((a, b) => (a.route + a.owner < b.route + b.owner ? -1 : 1)) };
+  // Oldest first by time, as the routes' chains count blocks apart; one whose time isn't known after them, by its own chain's blocks.
+  /** @param {MigrationApproval} a @param {MigrationApproval} b */
+  const byTime = (a, b) => (a.at === null || b.at === null ? Number(a.at === null) - Number(b.at === null) : a.at - b.at) || (a.route < b.route ? -1 : a.route > b.route ? 1 : 0) || a.block - b.block || (a.hash < b.hash ? -1 : 1);
+
+  return { approvals: approvals.sort(byTime), reads: reads.sort((a, b) => (a.route + a.owner < b.route + b.owner ? -1 : 1)) };
 }
