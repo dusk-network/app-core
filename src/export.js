@@ -74,6 +74,8 @@ export const CSV_COLUMNS = Object.freeze([
 const DUSK = "DUSK";
 const ST_DUSK = "stDUSK";
 const LUX_DECIMALS = 9;
+/** The decimals of every value in fiat: one precision, from a fraction of a cent up. */
+const WORTH_DECIMALS = 8;
 // The most a token's decimals can be, as a contract's `u8` has them.
 const MAX_TOKEN_DECIMALS = 255;
 const BOM = "\ufeff";
@@ -504,26 +506,31 @@ function priceOf(price) {
 }
 
 /**
- * What an amount of DUSK comes to at a price: to the cent, or where that
- * would read 0, to 8 decimals.
+ * What an amount of DUSK comes to at a price, in units of `WORTH_DECIMALS`,
+ * rounded half up.
  *
  * @param {bigint} lux
  * @param {{ digits: bigint, places: number }} price
  */
-function worthOf(lux, { digits, places }) {
+const worthUnits = (lux, { digits, places }) => {
   const scale = 10n ** BigInt(LUX_DECIMALS + places);
-  const units = lux * digits;
-  /** @param {number} decimals */
-  const at = (decimals) => {
-    const step = 10n ** BigInt(decimals);
-    const rounded = (units * step + scale / 2n) / scale;
 
-    return { rounded, text: `${rounded / step}.${(rounded % step).toString().padStart(decimals, "0")}` };
-  };
-  const cents = at(2);
+  return (lux * digits * 10n ** BigInt(WORTH_DECIMALS) + scale / 2n) / scale;
+};
 
-  return cents.rounded > 0n || units === 0n ? cents.text : at(8).text.replace(/0+$/, "").replace(/\.$/, ".0");
-}
+/**
+ * Units of `WORTH_DECIMALS` as the file writes them: every value to the same
+ * 8 decimals, a cent's worth or a fraction of one.
+ *
+ * @param {bigint} units
+ */
+const worthText = (units) => `${units / 10n ** BigInt(WORTH_DECIMALS)}.${(units % 10n ** BigInt(WORTH_DECIMALS)).toString().padStart(WORTH_DECIMALS, "0")}`;
+
+/**
+ * @param {bigint} lux
+ * @param {{ digits: bigint, places: number }} price
+ */
+const worthOf = (lux, price) => worthText(worthUnits(lux, price));
 
 /**
  * A profile's name in a file's name: its letters and digits, without accents.
@@ -613,7 +620,8 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
       const ownParty = "counterparty" in line;
       const party = ownParty ? line.counterparty : row.counterparty;
       const internal = party && !self.has(party) ? own.get(party) : undefined;
-      const name = line.partyName ?? internal ?? (ownParty ? null : row.counterpartyName) ?? (ownParty && !party ? null : row.toName) ?? (party ? contactName?.(party) : "") ?? "";
+      // The person's own names first, where they asked for them: their contact's over a verified .dusk name.
+      const name = line.partyName ?? internal ?? ((party && contactName?.(party)) || null) ?? (ownParty ? null : row.counterpartyName) ?? (ownParty && !party ? null : row.toName) ?? "";
       const memo = line.memo ?? row.memo ?? "";
       const unit = price && line.valued !== null ? await priceAt(at) : null;
 

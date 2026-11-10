@@ -14,6 +14,8 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Changed
 
 - `/amounts`: `defaultCurrency` is the currency the browser's region pays in where CoinGecko gives DUSK's price in it, as SGD in Singapore, else USD; `PRICE_CURRENCIES` lists those it gives
+- `/export`: `accountingCsv` writes every value in fiat to 8 decimals, a cent's worth or a fraction of one
+- `/export`: `accountingCsv` writes the person's contact name for a counterparty, where they asked for theirs, before its verified .dusk name
 - `/amounts`: `readAmount` says a space the language doesn't group with is what's wrong: "Leave out the space: 1234,5."
 
 ### Fixed

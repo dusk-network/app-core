@@ -855,23 +855,29 @@ describe("the value at the time of payment", () => {
     assert.equal(unpriced, 0);
   });
 
-  it("is the app's price at the row's own time, to the cent", async () => {
+  it("is the app's price at the row's own time, to the same 8 decimals on every line", async () => {
     /** @type {any[]} */
     const asked = [];
     const { records, unpriced } = await fileOf(B, { public: [sent] }, { currency: "EUR", price: (query) => (asked.push(query), "0.25") });
 
     assert.deepEqual(asked, [{ at, coin: "DUSK" }]);
     // The value of what moved, 1.5 DUSK, not the unit's.
-    assert.equal(records[0]["Net Worth Amount"], "0.38");
+    assert.equal(records[0]["Net Worth Amount"], "0.37500000");
     assert.equal(records[0]["Net Worth Currency"], "EUR");
     assert.equal(unpriced, 0);
+
+    // Lena's: 0.2 DUSK staked and 0.02 sent on 10 November, a cent's worth and a fraction of one, at one precision.
+    const lena = [entryOf({ counterparty: A, fee: "0", hash: hash(1), timestamp: at, value: "200000000" }), entryOf({ counterparty: A, fee: "0", hash: hash(2), timestamp: at + 1000, value: "20000000" })];
+    const values = (await fileOf(B, { public: lena }, { price: () => "0.0628415" })).records.map((record) => record["Net Worth Amount"]);
+
+    assert.deepEqual(values, ["0.01256830", "0.00125683"]);
   });
 
   it("takes a price as a number, or as a promise of one, and exactly", async () => {
     const whole = entryOf({ counterparty: A, fee: "1", timestamp: at, value: "123456789012345" });
 
-    assert.equal((await fileOf(B, { public: [whole] }, { price: async () => 0.1 })).records[0]["Net Worth Amount"], "12345.68");
-    assert.equal((await fileOf(B, { public: [whole] }, { price: () => "1.123456789" })).records[0]["Net Worth Amount"], "138698.37");
+    assert.equal((await fileOf(B, { public: [whole] }, { price: async () => 0.1 })).records[0]["Net Worth Amount"], "12345.67890123");
+    assert.equal((await fileOf(B, { public: [whole] }, { price: () => "1.123456789" })).records[0]["Net Worth Amount"], "138698.36776406");
     assert.equal((await fileOf(B, { currency: "USD", public: [whole] }, { currency: "USD", price: () => 2 })).records[0]["Net Worth Currency"], "USD");
   });
 
@@ -896,7 +902,7 @@ describe("the value at the time of payment", () => {
     const { records } = await recordedFile(B, 4643699, { price: () => ((asked += 1), "1") });
 
     assert.equal(asked, 1);
-    assert.deepEqual(records.map((record) => record["Net Worth Amount"]), ["500000.00", "0.03"]);
+    assert.deepEqual(records.map((record) => record["Net Worth Amount"]), ["500000.00000000", "0.03307096"]);
   });
 });
 
@@ -933,6 +939,16 @@ describe("who the other side is", () => {
     assert.equal((await fileOf(A, { public: [entry] })).records[0]["Counterparty Name"], "");
     // Never as a formula.
     assert.equal((await fileOf(A, { public: [entry] }, { contactName: () => "=1+1" })).records[0]["Counterparty Name"], "'=1+1");
+  });
+
+  it("is the person's own contact name before a verified .dusk name, where they asked for theirs", async () => {
+    // Chen's: the contact he saved as Sofia was written as her sofiadesign.dusk.
+    const entry = recorded(A, 4655845);
+    const names = new Map([[/** @type {string} */ (entry.counterparty), "faucet.dusk"]]);
+
+    assert.equal((await fileOf(A, { names, public: [entry] }, { contactName: () => "The faucet" })).records[0]["Counterparty Name"], "The faucet");
+    // Without a contact of theirs for it, the .dusk name.
+    assert.equal((await fileOf(A, { names, public: [entry] }, { contactName: () => "" })).records[0]["Counterparty Name"], "faucet.dusk");
   });
 
   it("is the person's own name for their profile, before any other", async () => {

@@ -25,7 +25,8 @@
  *   device, stays what the chain says: a call, and its fee.
  * - The value at the time of payment is the app's: `price` is asked what one
  *   DUSK was worth, and without one those columns stay empty, for the tool to
- *   work out.
+ *   work out. Every value has 8 decimals, rounded half up, a cent's worth or a
+ *   fraction of one.
  * - A memo, with its commas, quotes and line breaks, is in the description and
  *   its own column, with nothing in it that hides or reorders what it says,
  *   and never as a formula: one starting with `=`, `+`, `-` or `@` has a `'` in
@@ -76,7 +77,7 @@ export declare function quarterPeriod(year: number, quarter: number, options?: {
  */
 export declare function datesPeriod(from: string, to: string, options?: { timeZone?: string }): ExportPeriod;
 
-/** A profile: the name the person gave it, and its public account and shielded address. */
+/** A profile: the name the person gave it (the file's `Account Name`, and its name), and its public account and shielded address. */
 export type ExportProfile = { name?: string | null; account?: string | null; address?: string | null };
 
 /** What `accountingCsv` takes. */
@@ -119,7 +120,11 @@ export type ExportOptions = {
    * account, as a customer to a shop's. Without it, every migration's is.
    */
   evmAddresses?: Iterable<string>;
-  /** The person's own name for a counterparty, only when they asked for their contact names to be in the file. */
+  /**
+   * The person's own name for a counterparty, only when they asked for their
+   * contact names to be in the file: it goes before a verified `.dusk` name
+   * and the name typed for it, a profile's own name aside.
+   */
   contactName?: (counterparty: string) => string | null | undefined;
   /** The network's name: the file's name says it, unless it's "mainnet". */
   network?: string;
