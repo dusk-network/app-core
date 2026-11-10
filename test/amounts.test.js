@@ -7,6 +7,7 @@ import {
   amountLocale,
   decimalSeparator,
   amountsMeant,
+  PRICE_CURRENCIES,
   defaultCurrency,
   formatAmount,
   formatDusk,
@@ -334,6 +335,13 @@ describe("reading amounts", () => {
     assert.deepEqual(readAmount("1,1234567891", "fr-FR"), { lux: null, problem: "DUSK has 9 decimals at most." });
     assert.deepEqual(readAmount("18446744074", "en-GB"), { lux: null, problem: "That amount is too large." });
     assert.deepEqual(readAmount("18446744073.709551615", "en-GB"), { lux: (1n << 64n) - 1n, problem: null });
+    // Sofia's and Lena's: a space where the language doesn't group with one is what's wrong, and it says so.
+    assert.deepEqual(readAmount("1 234,5", "es-ES"), { lux: null, problem: "Leave out the space: 1234,5." });
+    assert.deepEqual(readAmount("1 234,5", "de-DE"), { lux: null, problem: "Leave out the space: 1234,5." });
+    assert.deepEqual(readAmount("1 234 567.5", "en-US"), { lux: null, problem: "Leave out the spaces: 1234567.5." });
+    // Where the language groups with a space, it's read; where that isn't all that's wrong, nothing is said of it.
+    assert.deepEqual(readAmount("1 234,5", "fr-FR"), { lux: 1_234_500_000_000n, problem: null });
+    assert.deepEqual(readAmount("1 .000", "de-DE"), { lux: null, problem: "Enter an amount such as 10 or 10,5." });
   });
 
   it("writes and reads in the same language, unless told otherwise", () => {
@@ -371,14 +379,34 @@ describe("the currency a wallet starts on", () => {
     }
   });
 
-  it("is US dollars anywhere else, Singapore and Switzerland among them", () => {
-    for (const language of ["en-US", "en-GB", "en-SG", "zh-SG", "de-CH", "fr-CH", "en-IN", "hi-IN", "ja-JP", "pt-BR", "es-MX", "sv-SE", "da-DK", "pl-PL", "cs-CZ", "ro-RO", "fr-CA", "en-150"]) {
+  it("is the region's own currency where the price source has it, as Singapore dollars in Singapore", () => {
+    // Chen's, and Nandini's rupees.
+    for (const [language, currency] of [
+      ["en-SG", "SGD"], ["zh-SG", "SGD"], ["en-IN", "INR"], ["hi-IN", "INR"], ["de-CH", "CHF"], ["fr-CH", "CHF"], ["en-GB", "GBP"], ["ja-JP", "JPY"],
+      ["pt-BR", "BRL"], ["es-MX", "MXN"], ["sv-SE", "SEK"], ["da-DK", "DKK"], ["pl-PL", "PLN"], ["cs-CZ", "CZK"], ["fr-CA", "CAD"], ["en-AU", "AUD"],
+      ["ka-GE", "GEL"], ["fo-FO", "DKK"], ["zh-HK", "HKD"], ["zh-TW", "TWD"], ["ko-KR", "KRW"], ["ar-AE", "AED"], ["en-NZ", "NZD"], ["en-ZA", "ZAR"],
+    ]) {
+      assert.equal(defaultCurrency(language), currency, language);
+    }
+  });
+
+  it("is US dollars where the price source doesn't have the region's, or there's no region, and never one it doesn't have", () => {
+    // Romania's lei, Egypt's pounds, Kenya's shillings and Venezuela's bolívars (CoinGecko's VEF is the one it stopped paying in), Europe and Latin America.
+    for (const language of ["en-US", "ro-RO", "ar-EG", "sw-KE", "es-VE", "es-CO", "is-IS", "en-150", "es-419"]) {
       assert.equal(defaultCurrency(language), "USD", language);
+    }
+
+    for (let a = 65; a <= 90; a += 1) {
+      for (let b = 65; b <= 90; b += 1) {
+        const region = String.fromCharCode(a, b);
+
+        assert.ok(PRICE_CURRENCIES.includes(defaultCurrency(`und-${region}`)), region);
+      }
     }
   });
 
   it("takes a language's main region where it names none, and dollars for what isn't a language", () => {
-    for (const [language, currency] of [["de", "EUR"], ["fr", "EUR"], ["es", "EUR"], ["it", "EUR"], ["nl", "EUR"], ["bg", "EUR"], ["ca", "EUR"], ["en", "USD"], ["pt", "USD"], ["sv", "USD"], ["zh", "USD"]]) {
+    for (const [language, currency] of [["de", "EUR"], ["fr", "EUR"], ["es", "EUR"], ["it", "EUR"], ["nl", "EUR"], ["bg", "EUR"], ["ca", "EUR"], ["en", "USD"], ["pt", "BRL"], ["sv", "SEK"], ["zh", "CNY"], ["ja", "JPY"]]) {
       assert.equal(defaultCurrency(language), currency, language);
     }
 

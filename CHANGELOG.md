@@ -2,6 +2,32 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.10.0]
+
+### Added
+
+- `/text`: `numbersNote`, what a text's numbers ask a person to check, in the words both wallets show: "A number here uses digits that look like other digits. Check it digit by digit."
+- `/names`: `profileNameClash`, the name a profile's new name takes of the other profiles and the contacts, look-alikes too, to refuse
+- `/export`: `rewardsByYear`, staking's rewards by calendar year as they reached the account, native ones claimed and what Sozu's unstakes took out, in DUSK and at each one's price
+- `/sozu`: `nativeRewards`, what native staking paid over the last 30 days, measured from the stake contract's rewards on chain, and the yearly rate that comes to; `sozuRateLine` says it with its period (`native`)
+- `/bridge`: `migrationApprovals`, the approvals and revokes an owner sent for a migration's contract, each with its gas and whether a migration spent it
+- `/export`: `accountingCsv` takes `approvals` and books each approval or revoke no migration's lines have, as an approval never used and a revoke, at its own time
+- `/requests`: a match of a request of no amount says so (`anyAmount`), for its badge to say what came in rather than "Paid"
+- `/payment-links`: `parsePaymentLink` reads a plain `dusk:<address>` link, an account or a shielded address as written, with its query and network
+
+### Changed
+
+- `/amounts`: `defaultCurrency` is the currency the browser's region pays in where CoinGecko gives DUSK's price in it, as SGD in Singapore, else USD; `PRICE_CURRENCIES` lists those it gives
+- `/export`: `accountingCsv` writes every value in fiat to 8 decimals, a cent's worth or a fraction of one
+- `/export`: `accountingCsv` writes the person's contact name for a counterparty, where they asked for theirs, before its verified .dusk name
+- `/amounts`: `readAmount` says a space the language doesn't group with is what's wrong: "Leave out the space: 1234,5."
+
+### Fixed
+
+- `/text`: `displayText` shows a variation selector that isn't on an emoji or a keycap as its code, so `/names`' `nameHides` refuses "Alice" with U+FE0F after it
+- `/payment-links`: a `dusk:` link that also names a recipient in its query (`to=`) is refused as saying the recipient twice
+- `/payment-links`: a network whose number has a zero before it (`dusk:02`) is one that can't be read, not the one it looks like
+
 ## [0.9.1]
 
 ### Fixed

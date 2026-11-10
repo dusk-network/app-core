@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { activityRows } from "../src/activity.js";
-import { migrationFacts, migrationsOf } from "../src/bridge.js";
-import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod } from "../src/export.js";
+import { migrationApprovals, migrationFacts, migrationsOf } from "../src/bridge.js";
+import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear } from "../src/export.js";
 import { sozuFacts } from "../src/sozu.js";
 import { A, B, C, POOL, entryFrom, entryOf, hash, recorded } from "./fixtures/activity.js";
 import { fakeChain, hex } from "./fixtures/bridge.js";
+import { networks } from "@dusk-network/networks";
 import { readFixture } from "./fixtures/helpers.js";
 
 /** @typedef {import("../src/export.js").ExportOptions} ExportOptions */
@@ -855,23 +856,29 @@ describe("the value at the time of payment", () => {
     assert.equal(unpriced, 0);
   });
 
-  it("is the app's price at the row's own time, to the cent", async () => {
+  it("is the app's price at the row's own time, to the same 8 decimals on every line", async () => {
     /** @type {any[]} */
     const asked = [];
     const { records, unpriced } = await fileOf(B, { public: [sent] }, { currency: "EUR", price: (query) => (asked.push(query), "0.25") });
 
     assert.deepEqual(asked, [{ at, coin: "DUSK" }]);
     // The value of what moved, 1.5 DUSK, not the unit's.
-    assert.equal(records[0]["Net Worth Amount"], "0.38");
+    assert.equal(records[0]["Net Worth Amount"], "0.37500000");
     assert.equal(records[0]["Net Worth Currency"], "EUR");
     assert.equal(unpriced, 0);
+
+    // Lena's: 0.2 DUSK staked and 0.02 sent on 10 November, a cent's worth and a fraction of one, at one precision.
+    const lena = [entryOf({ counterparty: A, fee: "0", hash: hash(1), timestamp: at, value: "200000000" }), entryOf({ counterparty: A, fee: "0", hash: hash(2), timestamp: at + 1000, value: "20000000" })];
+    const values = (await fileOf(B, { public: lena }, { price: () => "0.0628415" })).records.map((record) => record["Net Worth Amount"]);
+
+    assert.deepEqual(values, ["0.01256830", "0.00125683"]);
   });
 
   it("takes a price as a number, or as a promise of one, and exactly", async () => {
     const whole = entryOf({ counterparty: A, fee: "1", timestamp: at, value: "123456789012345" });
 
-    assert.equal((await fileOf(B, { public: [whole] }, { price: async () => 0.1 })).records[0]["Net Worth Amount"], "12345.68");
-    assert.equal((await fileOf(B, { public: [whole] }, { price: () => "1.123456789" })).records[0]["Net Worth Amount"], "138698.37");
+    assert.equal((await fileOf(B, { public: [whole] }, { price: async () => 0.1 })).records[0]["Net Worth Amount"], "12345.67890123");
+    assert.equal((await fileOf(B, { public: [whole] }, { price: () => "1.123456789" })).records[0]["Net Worth Amount"], "138698.36776406");
     assert.equal((await fileOf(B, { currency: "USD", public: [whole] }, { currency: "USD", price: () => 2 })).records[0]["Net Worth Currency"], "USD");
   });
 
@@ -896,7 +903,7 @@ describe("the value at the time of payment", () => {
     const { records } = await recordedFile(B, 4643699, { price: () => ((asked += 1), "1") });
 
     assert.equal(asked, 1);
-    assert.deepEqual(records.map((record) => record["Net Worth Amount"]), ["500000.00", "0.03"]);
+    assert.deepEqual(records.map((record) => record["Net Worth Amount"]), ["500000.00000000", "0.03307096"]);
   });
 });
 
@@ -935,9 +942,131 @@ describe("who the other side is", () => {
     assert.equal((await fileOf(A, { public: [entry] }, { contactName: () => "=1+1" })).records[0]["Counterparty Name"], "'=1+1");
   });
 
+  it("is the person's own contact name before a verified .dusk name, where they asked for theirs", async () => {
+    // Chen's: the contact he saved as Sofia was written as her sofiadesign.dusk.
+    const entry = recorded(A, 4655845);
+    const names = new Map([[/** @type {string} */ (entry.counterparty), "faucet.dusk"]]);
+
+    assert.equal((await fileOf(A, { names, public: [entry] }, { contactName: () => "The faucet" })).records[0]["Counterparty Name"], "The faucet");
+    // Without a contact of theirs for it, the .dusk name.
+    assert.equal((await fileOf(A, { names, public: [entry] }, { contactName: () => "" })).records[0]["Counterparty Name"], "faucet.dusk");
+  });
+
   it("is the person's own name for their profile, before any other", async () => {
     const { records } = await fileOf(B, { names: new Map([[A, "faucet.dusk"]]), public: [recorded(B, BETWEEN)] }, { contactName: () => "A contact" });
 
     assert.equal(records[0]["Counterparty Name"], PERSONAL);
+  });
+});
+
+describe("staking rewards by calendar year", () => {
+  // B's three claims of native rewards, the first moved to the year before.
+  const claims = [recorded(B, 3412754, { timestamp: Date.UTC(2025, 11, 31, 23, 30) }), recorded(B, 4364676), recorded(B, 4643701)];
+  const [claimedFirst, claimedSecond, claimedThird] = [1_609_142_758_405_397n, 239_121_453_457_671n, 62_166_587_991_666n];
+  const price = (/** @type {{ at: number }} */ { at }) => (at < Date.UTC(2026, 0, 1) ? "0.05" : "0.06");
+
+  it("sums the native rewards claimed in each year, in DUSK and at each one's own price", async () => {
+    // Lena's: what staking earned her in 2026, for her tax return.
+    const rows = activityRows({ account: B, network: 2, public: claims });
+    const years = await rewardsByYear({ price, rows, timeZone: "UTC" });
+
+    assert.deepEqual(years.map(({ claimed, year }) => [year, claimed]), [
+      [2025, { lux: claimedFirst, unpriced: 0, worth: "80457.13792027" }],
+      [2026, { lux: claimedSecond + claimedThird, unpriced: 0, worth: "18077.28248696" }],
+    ]);
+    // A year on the person's own clock: half past midnight on 1 January in Berlin.
+    assert.deepEqual((await rewardsByYear({ rows, timeZone: "Europe/Berlin" })).map(({ claimed, year }) => [year, claimed]), [[2026, { lux: claimedFirst + claimedSecond + claimedThird, unpriced: 0, worth: null }]]);
+  });
+
+  it("counts what Sozu earned when an unstake takes it out, beyond what its stDUSK cost, deposit fees aside", async () => {
+    const pool = { stake: 2n, supply: 1n };
+    const entries = [
+      entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x01), kind: "contract_call", timestamp: Date.UTC(2025, 5, 1), value: "1000000000000" }),
+      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x02), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "550000000000" }),
+      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x03), kind: "contract_call", timestamp: Date.UTC(2026, 8, 1), value: "560000000000" }),
+    ];
+    // 997.5 DUSK, the deposit fee of 2.5 off, bought 500 stDUSK; each half came back for more.
+    const facts = new Map([
+      [hash(0x01), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool, stDusk: 500_000_000_000n }],
+      [hash(0x02), { amount: 550_000_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 250_000_000_000n }],
+      [hash(0x03), { amount: 560_000_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 250_000_000_000n }],
+    ]);
+    const rows = activityRows({ account: B, network: 2, public: entries });
+    const years = await rewardsByYear({ facts, price, rows, timeZone: "UTC" });
+
+    assert.deepEqual(years.map(({ sozu, year }) => [year, sozu]), [
+      [2025, { lux: 0n, unpriced: 0, worth: "0.00000000" }],
+      [2026, { lux: 51_250_000_000n + 61_250_000_000n, unpriced: 0, worth: "6.75000000" }],
+    ]);
+
+    // A first stake and its unstake in one block: the stake counts first, whichever hash sorts first.
+    const sameBlock = [
+      entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x02), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "1000000000000" }),
+      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x01), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "997000000000" }),
+    ];
+    const sameBlockFacts = new Map([
+      [hash(0x02), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool, stDusk: 500_000_000_000n }],
+      [hash(0x01), { amount: 997_000_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 500_000_000_000n }],
+    ]);
+
+    assert.deepEqual((await rewardsByYear({ facts: sameBlockFacts, rows: activityRows({ account: B, network: 2, public: sameBlock }), timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: -500_000_000n, unpriced: 0, worth: null }]);
+
+    // Without what a stake or an unstake did, or the whole history, what it earned isn't known.
+    const unknown = new Map([...facts].filter(([key]) => key !== hash(0x02)));
+
+    assert.deepEqual((await rewardsByYear({ facts: unknown, rows, timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: 0n, unpriced: 0, worth: null }, null]);
+    assert.deepEqual((await rewardsByYear({ complete: false, facts, rows, timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: 0n, unpriced: 0, worth: null }, null]);
+  });
+
+  it("says how many rewards have no price, and leaves out what didn't go through", async () => {
+    const failed = recorded(B, 4364676, { success: false });
+    const rows = activityRows({ account: B, network: 2, public: [claims[2], failed] });
+    const [year] = await rewardsByYear({ price: () => null, rows, timeZone: "UTC" });
+
+    assert.deepEqual(year, { claimed: { lux: claimedThird, unpriced: 1, worth: "0.00000000" }, sozu: { lux: 0n, unpriced: 0, worth: "0.00000000" }, year: 2026 });
+  });
+});
+
+describe("the gas of approvals and revokes on a migration's chain", () => {
+  // Nandini's 0xB472 on the BSC test chain: three ways back, and an approval and two revokes no migration had.
+  const testchain = readFixture("bridge-approvals-testchain.json");
+  const network = { ...networks.testnet, routes: testchain.routes };
+  const OWNER = "0xb472d149cd771f0807edece2cedccc612e103685";
+  const ACCOUNT = testchain.routes.migrations[0].payoutAccount;
+  /** @param {any} log */
+  const asLog = (log) => ({ address: log.address, block: BigInt(log.blockNumber), data: log.data, hash: log.transactionHash, index: Number(BigInt(log.logIndex)), topics: log.topics });
+  const chain = () => fakeChain({ head: BigInt(testchain.head), logs: testchain.logs.map(asLog), receipts: testchain.receipts, timeAt: (n) => Number(BigInt(testchain.blocks[hex(n)]?.timestamp ?? "0x0")) });
+  const migrations = [["0x0123503ac447d700c3df26b154774777deed5980cf047e52d82a0bab954a680e", "3000000"], ["0x627627c46ae0b46f3a36a2f8089ed1847c4262e369a0c235b48ed09e79bc1a15", "1000000"], ["0x45fe85ca7a191015c6439c15e13ecb8c01f596d76b682142173bca005adbdc68", "2000000"]];
+
+  it("books each once, at its own time, so the file's gas is all that left the address", async () => {
+    // Each way back's payout on Dusk, a minute after its migration.
+    const payouts = migrations.map(([migration, value], i) => {
+      const time = Number(BigInt(testchain.blocks[testchain.receipts[migration].blockNumber].timestamp)) * 1000 + 60_000;
+
+      return entryOf({ counterparty: ACCOUNT, direction: "in", hash: hash(0x60 + i), memo: migration, timestamp: time, value }, { network });
+    });
+    const rows = activityRows({ account: B, network, public: payouts });
+    const evm = await migrationFacts({ fetch: chain().fetch, migrations: migrationsOf(rows), network });
+    const { approvals } = await migrationApprovals({ fetch: chain().fetch, network, owners: [OWNER] });
+    const { records } = await fileOf(B, { network, public: payouts }, { approvals, evm, evmAddresses: [OWNER] });
+    const gas = records.filter((record) => record["Sent Currency"] === "ETH");
+
+    // The chain: 337,617,005,401,872 wei of gas over eight transactions, 94,638,001,514,208 of it on no screen and in no file before.
+    assert.equal(gas.length, 8);
+    assert.equal(new Set(gas.map((record) => record.TxHash)).size, 8);
+    const weiOf = (/** @type {string} */ text) => BigInt(text.split(".")[0]) * 10n ** 18n + BigInt((text.split(".")[1] ?? "").padEnd(18, "0"));
+
+    assert.equal(gas.reduce((sum, record) => sum + weiOf(record["Sent Amount"]), 0n), 337_617_005_401_872n);
+    assert.deepEqual(
+      gas.slice(-3).map((record) => [record.Date, record["Sent Amount"], record.Tag, record.Description, record.Account]),
+      [
+        ["2026-11-10 06:29:41", "0.000024222000387552", "cost", "Network fee on BSC test chain: approval for migrations to Dusk revoked", OWNER],
+        ["2026-11-10 06:30:33", "0.000046194000739104", "cost", "Network fee on BSC test chain: approval for a migration to Dusk, never used", OWNER],
+        ["2026-11-10 06:30:52", "0.000024222000387552", "cost", "Network fee on BSC test chain: approval for migrations to Dusk revoked", OWNER],
+      ]
+    );
+
+    // Another's approvals aren't the person's costs.
+    assert.equal((await fileOf(B, { network, public: payouts }, { approvals, evm, evmAddresses: [] })).records.filter((record) => record["Sent Currency"] === "ETH").length, 0);
   });
 });

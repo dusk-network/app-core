@@ -5,7 +5,7 @@ import { nativeRateEstimate, sozuRateEstimate } from "@dusk-network/networks/rat
 import { sozuFee, sozuStake } from "@dusk-network/networks/sozu";
 
 import { activityRows } from "../src/activity.js";
-import { GROWTH_MAX_AGE_MS, stDuskWorth, sozuFacts, sozuGrowth, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
+import { GROWTH_MAX_AGE_MS, nativeRewards, stDuskWorth, sozuFacts, sozuGrowth, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
 import { DUSK, POOL, entryFrom, entryOf, hash } from "./fixtures/activity.js";
 import { readFixture } from "./fixtures/helpers.js";
 
@@ -482,5 +482,95 @@ describe("how Sozu's stDUSK grew", () => {
     );
     assert.equal(await sozuGrowth({ archive: archiveOf(chains.mainnet), pool: "not a pool" }), null);
     assert.equal(sozuRateLine({ growth: null, nativeRate: 0.2, status: STATUS, locale: "en-GB" }), sozuRateLine({ nativeRate: 0.2, status: STATUS, locale: "en-GB" }));
+  });
+});
+
+describe("what native staking paid", () => {
+  // What Testnet's archive answered on 2026-11-10, and its provisioners then.
+  const recorded = readFixture("native-rewards.json");
+  const HOUR = 3_600_000;
+
+  /**
+   * An archive that answers the tip, the two ends' times and each block's
+   * events from the recording; `queries` keeps each query.
+   *
+   * @param {(answer: any) => any} [change]
+   */
+  const archiveOf = (change = (answer) => answer) => {
+    /** @type {string[]} */
+    const queries = [];
+
+    return {
+      queries,
+      query: async (/** @type {string} */ query) => {
+        queries.push(query);
+
+        return query.includes("tip: block(height: -1)") ? { tip: { header: { height: recorded.tip } } } : change(structuredClone(recorded.answer));
+      },
+    };
+  };
+
+  it("measures what a block paid stakers over the last 30 days, from the stake contract's own rewards, Dusk's tenth left out", async () => {
+    // Lena's: the provisioners' rewards grew 17.75 DUSK a block, Dusk's own 1.98574 among them.
+    const native = /** @type {any} */ (await nativeRewards({ archive: archiveOf(), provisioners: recorded.provisioners }));
+
+    assert.equal(native.days, 30);
+    assert.equal(native.blocks, 6);
+    assert.equal(native.perBlock, 15_516_918_020n);
+    assert.deepEqual([native.from.height, native.to.height], [recorded.tip - 30 * 8640, recorded.tip]);
+    // At the period's own pace, over what's staked now: the 87% the wallets showed, not 100%.
+    assert.equal(Math.round(native.rate * 1000) / 1000, 0.872);
+    assert.equal(native.staked > 56_000_000n * DUSK && native.staked < 56_200_000n * DUSK, true);
+    // How a million is shortened ("56.1M" or "56.1m") is the runtime's own, so it's asked of the same formatter.
+    const staked = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1, notation: "compact" }).format(56_100_000);
+    assert.equal(sozuRateLine({ locale: "en-GB", native, status: { fees: { reward: { denominator: 10n, numerator: 1n } } } }), `15.5 DUSK a block to stakers over the last 30 days, ${staked} DUSK staked now: about 87% a year. Less Sozu's 10%: about 78%, and a little over as it restakes rewards every hour.`);
+  });
+
+  it("takes two requests, one with the app's tip, keeps what it read for an hour, and makes one of two reads at once", async () => {
+    const archive = archiveOf();
+    const cache = new Map();
+    const now = Date.UTC(2026, 10, 10, 12);
+    const [first, second] = await Promise.all([0, 1].map(() => nativeRewards({ archive, cache, now, provisioners: recorded.provisioners })));
+
+    assert.equal(archive.queries.length, 2);
+    assert.deepEqual(first, second);
+    assert.deepEqual(await nativeRewards({ archive, cache, now: now + HOUR - 1, provisioners: recorded.provisioners }), first);
+    assert.equal(archive.queries.length, 2);
+    await nativeRewards({ archive, cache, now: now + HOUR, provisioners: recorded.provisioners });
+    assert.equal(archive.queries.length, 4);
+    // Another network's, kept apart.
+    await nativeRewards({ archive, cache, network: "mainnet", now: now + HOUR, provisioners: recorded.provisioners });
+    assert.equal(archive.queries.length, 6);
+
+    const told = archiveOf();
+
+    assert.deepEqual(await nativeRewards({ archive: told, provisioners: recorded.provisioners, tipHeight: recorded.tip }), first);
+    assert.equal(told.queries.length, 1);
+  });
+
+  it("counts what's staked at the app's tip, also where what was paid is kept from an earlier one", async () => {
+    const archive = archiveOf();
+    const cache = new Map();
+    const now = Date.UTC(2026, 10, 10, 12);
+    const first = /** @type {any} */ (await nativeRewards({ archive, cache, now, provisioners: recorded.provisioners }));
+    // A stake that's eligible 100 blocks after the tip read, asked about 200 blocks after it.
+    const newcomer = { amount: 1_000_000 * Number(DUSK), eligibility: recorded.tip + 100 };
+    const later = /** @type {any} */ (await nativeRewards({ archive, cache, now: now + 1, provisioners: [...recorded.provisioners, newcomer], tipHeight: recorded.tip + 200 }));
+
+    assert.equal(archive.queries.length, 2);
+    assert.equal(later.staked, first.staked + 1_000_000n * DUSK);
+    assert.ok(later.rate < first.rate);
+  });
+
+  it("is nothing where the blocks' rewards can't be read, or nothing is staked: the rate is estimated as before", async () => {
+    const thinned = archiveOf((answer) => ({ ...answer, e0: { json: [] }, e1: { json: [{ ...answer.e1.json[0], data: "00" }] }, e2: { json: null }, e3: { json: [{ ...answer.e3.json[0], source: POOL }] } }));
+
+    assert.equal(await nativeRewards({ archive: thinned, provisioners: recorded.provisioners }), null);
+    assert.equal(await nativeRewards({ archive: archiveOf(), provisioners: [] }), null);
+    assert.equal(await nativeRewards({ archive: { query: async () => Promise.reject(new Error("The archive answers with HTTP 502")) }, provisioners: recorded.provisioners }), null);
+    // Half of them read is enough.
+    const half = archiveOf((answer) => ({ ...answer, e0: { json: [] }, e1: { json: [] }, e2: { json: [] } }));
+
+    assert.equal((await nativeRewards({ archive: half, provisioners: recorded.provisioners }))?.blocks, 3);
   });
 });

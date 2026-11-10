@@ -23,7 +23,8 @@ export const MAX_MEMO_BYTES = 512;
 
 /** Where the web wallet's Send is, under the wallet's address. */
 const SEND_PATH = "/dashboard/send";
-const CHAIN_ID = /^dusk:(\d{1,32})$/i;
+// A chain's number as it's written once: "dusk:02" isn't chain 2's.
+const CHAIN_ID = /^dusk:(0|[1-9]\d{0,31})$/i;
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const ACCOUNT_BYTES = 96;
 const SHIELDED_BYTES = 64;
@@ -68,7 +69,7 @@ function chainIdOf(network) {
   const text = textOf(network);
 
   if (CHAIN_ID.test(text)) return text;
-  if (/^\d{1,32}$/.test(text)) return `dusk:${text}`;
+  if (CHAIN_ID.test(`dusk:${text}`)) return `dusk:${text}`;
 
   const named = Object.values(networks).find((each) => each.name === text.toLowerCase());
 
@@ -144,8 +145,11 @@ function amountsOf(params) {
 function saidTwice(params) {
   const field = SAID_ONCE.find((name) => params.getAll(name).length > 1);
 
-  return field ? `This link says ${FIELD_WORDS[/** @type {keyof typeof FIELD_WORDS} */ (field)]} twice. Ask for a new one.` : "";
+  return field ? twiceWords(/** @type {keyof typeof FIELD_WORDS} */ (field)) : "";
 }
+
+/** @param {keyof typeof FIELD_WORDS} field */
+const twiceWords = (field) => `This link says ${FIELD_WORDS[field]} twice. Ask for a new one.`;
 
 /**
  * @param {string} a A chain ID, "dusk:1"
@@ -155,10 +159,11 @@ const twoNetworks = (a, b) => `This link names two networks, ${chainLabel(a)} an
 
 /**
  * A `dusk:` link: `dusk:public-<recipient>[@dusk:<chain>][?amount=…&memo=…&network=…]`,
- * or `shielded-`, with `//` after the scheme or not, and its query, its
+ * or `shielded-`, or `dusk:<recipient>` with an account or a shielded
+ * address as it is, with `//` after the scheme or not, and its query, its
  * network after the `@` or in its query, as an https link's; why it's
  * refused where it names two networks, one that can't be read, says a field
- * twice or no recipient; and null for any other.
+ * twice (a recipient in its query too) or no recipient; and null for any other.
  *
  * @param {string} raw
  * @returns {{ link: PaymentLink, params: URLSearchParams } | { problem: string } | null}
@@ -176,23 +181,26 @@ function duskForm(raw) {
     head = head.slice(0, at).trim();
   }
 
-  const kind = /^public-/i.test(head) ? "public" : /^shielded-/i.test(head) ? "shielded" : null;
+  const named = /^public-/i.test(head) ? "public" : /^shielded-/i.test(head) ? "shielded" : null;
+  // Without its kind, the recipient is all there is: an account or a shielded address, as it's written.
+  const bare = named ? null : recipientKind(head);
+  const kind = named ?? (bare === "unknown" ? null : bare);
 
   if (!kind) return null;
 
-  const twice = saidTwice(params);
-  const named = textOf(params.get("network"));
-  const queryChain = chainIdOf(named);
+  // The link names its recipient already: one in its query says it twice.
+  const twice = saidTwice(params) || (params.has("to") ? twiceWords("to") : "");
+  const network = textOf(params.get("network"));
+  const queryChain = chainIdOf(network);
 
   if (twice) return { problem: twice };
-  if ((atChain && !referenceOf(atChain)) || (named && !queryChain)) return { problem: LINK_NETWORK_UNREAD };
+  if ((atChain && !referenceOf(atChain)) || (network && !queryChain)) return { problem: LINK_NETWORK_UNREAD };
   if (atChain && queryChain && referenceOf(atChain) !== referenceOf(queryChain)) return { problem: twoNetworks(atChain, queryChain) };
 
-  const encoded = head.slice(kind.length + 1);
-  let to = encoded;
+  let to = named ? head.slice(named.length + 1) : head;
 
   try {
-    to = decodeURIComponent(encoded);
+    if (named) to = decodeURIComponent(to);
   } catch {
     // Not percent-encoding after all: as it is.
   }

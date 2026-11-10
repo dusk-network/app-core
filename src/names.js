@@ -126,6 +126,23 @@ export function nameClash(name, { contacts = [], except, profiles = [] } = {}) {
 }
 
 /**
+ * @template {{ name?: unknown, account?: unknown, address?: unknown }} P
+ * @template {{ name?: unknown, address?: unknown }} C
+ * @param {unknown} name
+ * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, self?: unknown }} [among]
+ * @returns {{ kind: "profile", same: boolean, entry: P } | { kind: "contact", same: boolean, entry: C } | null}
+ */
+export function profileNameClash(name, { contacts = [], profiles = [], self } = {}) {
+  const named = profiles.find((profile) => self !== undefined && self !== null && self !== "" && (profile?.account === self || profile?.address === self));
+  // The profile named, and a contact saved with either of its addresses: its own name is no other's.
+  const own = new Set([self, named?.account, named?.address].filter((id) => id !== undefined && id !== null && id !== ""));
+  /** @param {{ account?: unknown, address?: unknown } | undefined} entry */
+  const itself = (entry) => own.has(entry?.account) || own.has(entry?.address);
+
+  return nameClash(name, { contacts: contacts.filter((contact) => !itself(contact)), profiles: profiles.filter((profile) => profile !== named && !itself(profile)) });
+}
+
+/**
  * @template {{ name?: unknown, address?: unknown }} T
  * @param {Iterable<T>} entries
  * @returns {Set<T>}

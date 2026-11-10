@@ -676,6 +676,80 @@ export declare function migrationFacts(options: {
 /** The migrations `/activity`'s rows were paid for: each payout on Dusk a migration's route paid, with the migration's hash, which is its memo, its route and the payout's hash. */
 export declare function migrationsOf(rows: Iterable<ActivityRow>): { hash: string; route: string; payout: string }[];
 
+/**
+ * An approval of a migration's contract on its token, or its revoke, that
+ * an owner sent on the route's own chain, and what it paid there. Amounts in
+ * that chain's smallest unit (wei).
+ */
+export type MigrationApproval = {
+  /** Its transaction there, in lower case. */
+  hash: string;
+  route: string;
+  /** The chain's name, "BSC test chain", its coin, "ETH" or "BNB", and that coin's decimals. */
+  chain: string;
+  coin: string;
+  decimals: number;
+  /** The route's contract, and the owner that sent it, in lower case. */
+  contract: string;
+  owner: string;
+  block: number;
+  /** Its block's time, in milliseconds. */
+  at: number | null;
+  /** What it lets the contract take of the token; 0 for a revoke. */
+  allowance: bigint;
+  /** What it paid in gas: `gasUsed` × `effectiveGasPrice`. */
+  gasWei: bigint | null;
+  /**
+   * "spent": a migration drew on it before the owner's next approval, and its
+   * gas is that migration's (`migrationFacts`'s approval); "unused": the
+   * owner's next approval or revoke came first; "open": none of those since;
+   * "uncertain": a transfer to the contract came between whose transaction
+   * can't be read, so whether a migration drew on it isn't known; "revoke":
+   * it took the approval away. A migration's draw is a transfer to the
+   * contract the token writes an Approval beside, or, for a token that
+   * writes none, one in a transaction sent to the contract or with an event
+   * of its own: the owner's own transfer to the contract draws on nothing.
+   */
+  state: "spent" | "unused" | "open" | "uncertain" | "revoke";
+};
+
+/**
+ * How far back an owner's approvals of a route were read: from block `from`
+ * to the head (`to`). "read": back to the chain's start; "beyond": the
+ * windows read stop at `from`; "unread": the RPC keeps no logs before
+ * `from`; "error": it couldn't be read (`error`).
+ */
+export type ApprovalsRead = {
+  route: string;
+  owner: string;
+  from: number | null;
+  to: number | null;
+  state: "read" | "beyond" | "unread" | "error";
+  error?: string;
+};
+
+/**
+ * The approvals and revokes the `owners` (the EVM addresses the app knows as
+ * the person's own) sent for each migration route's contract on its token,
+ * oldest first by time, across the routes' chains (one whose time can't be
+ * read after the rest), with what each paid in gas there: found among the token's
+ * Approval logs between them, read back from the head, 5,000 blocks first and
+ * twice as many each window after, 8 windows at most, an Approval in a
+ * migration's transaction aside. One another address sent for an owner, as a
+ * permit, paid nothing of theirs and isn't there. A few requests each: what's
+ * final is kept in `cache` (a `Map` of text does) and not read again.
+ * `accountingCsv` of `/export` books each that no migration's lines have
+ * (`approvals`), so an unused approval and a revoke cost what they did too.
+ */
+export declare function migrationApprovals(options: {
+  network: BridgeNetwork;
+  owners: Iterable<string>;
+  fetch?: FetchLike;
+  rpcUrl?: string;
+  cache?: FactCache;
+  timeoutMs?: number;
+}): Promise<{ approvals: MigrationApproval[]; reads: ApprovalsRead[] }>;
+
 /** How long `bridgeStatus` keeps what it read: 10 minutes, in milliseconds. */
 export declare const STATUS_MAX_AGE_MS: 600000;
 

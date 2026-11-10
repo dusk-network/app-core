@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { nameSkeleton } from "../src/names.js";
-import { displayText, searchKey } from "../src/text.js";
+import { displayText, numbersNote, searchKey } from "../src/text.js";
 
 describe("text a person must trust", () => {
   it("shows what a sign request's bytes say, not what its controls make them read as", () => {
@@ -135,8 +135,10 @@ describe("text a person must trust", () => {
     // Adlam's digits read right to left too, and a single one turns what's beside it around.
     assert.deepEqual(displayText("Pay \u{1e951}\u{1e950} DUSK").flags, ["rtl_digits"]);
     assert.deepEqual(displayText("Pay ߁ 10 ߂ 1000 DUSK").flags, ["rtl_digits"]);
-    // An emoji's selector or a keycap's mark is part of the number it's on: it shows as the digits do.
-    for (const mixed of ["1\ufe0f\u0660\ufe0f5", "1\ufe0f\u20e3\u0660\ufe0f\u20e35\ufe0f\u20e3", "1\ufe0e\u0660"]) assert.deepEqual(displayText(mixed).flags, ["mixed_digits"], mixed);
+    // A keycap's selector and mark are part of the number they're on: it shows as the digits do.
+    assert.deepEqual(displayText("1\ufe0f\u20e3\u06605\ufe0f\u20e3").flags, ["mixed_digits"]);
+    // A selector on a digit it makes no keycap of does nothing to be seen: it shows as its code, and the number is still read.
+    for (const mixed of ["1\ufe0f\u0660\ufe0f5", "1\ufe0e\u0660"]) assert.deepEqual(displayText(mixed).flags, ["invisible_format", "mixed_digits"], mixed);
     // A number goes on past a decimal or group mark, not past a space.
     for (const mixed of ["1.٠5", "1,٠٠٠", "1'٠00", "١٢٣۴", "𝟏𝟙", "1½", "١0"]) assert.deepEqual(displayText(mixed).flags, ["mixed_digits"], mixed);
     // With what else it flags, as it's shown.
@@ -149,6 +151,13 @@ describe("text a person must trust", () => {
       assert.deepEqual(displayText(misread), { flags: ["lookalike_digits"], neutralized: false, text: misread }, misread);
     }
     assert.deepEqual(displayText("Pay 1\u09ea DUSK").flags, ["mixed_digits", "lookalike_digits"]);
+    // In the words both wallets show under it, Marek's for the extension's.
+    assert.equal(numbersNote(displayText("Pay \u09ea DUSK").flags), "A number here uses digits that look like other digits. Check it digit by digit.");
+    assert.equal(numbersNote(displayText("Pay 1\u09ea DUSK").flags), "A number here mixes digits of different scripts, and some look like other digits. Check it digit by digit.");
+    assert.equal(numbersNote(displayText("Pay \u07c0\u07c1 or 1\u0660\u09ea").flags), "A number here mixes digits of different scripts, some read right to left, and some look like other digits. Check it digit by digit.");
+    assert.equal(numbersNote(displayText("Pay \u07c0\u07c0\u07c0\u07c1 DUSK").flags), "A number here uses digits that read right to left. Check it digit by digit.");
+    assert.equal(numbersNote(displayText("Pay 1000 DUSK \u202e").flags), "");
+    assert.equal(numbersNote(undefined), "");
 
     // Every digit Unicode's table (UTS #39) gives the skeleton of another Latin digit, and no other.
     const DIGIT = /^\p{Nd}$/u;

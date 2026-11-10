@@ -251,16 +251,48 @@ const EURO_REGIONS = new Set([
 ]);
 
 /**
+ * The currencies the apps' price source, CoinGecko, gives DUSK's price in,
+ * as its list of them said in November 2026: all of its own but the
+ * bolívar Venezuela no longer pays in, gold, silver, the IMF's drawing
+ * right and coins.
+ *
+ * @type {ReadonlyArray<import("./amounts.js").PriceCurrency>}
+ */
+export const PRICE_CURRENCIES = Object.freeze(
+  /** @type {const} */ ([
+    ...["AED", "ARS", "AUD", "BDT", "BHD", "BMD", "BRL", "CAD", "CHF", "CLP", "CNY", "CZK", "DKK", "EUR", "GBP"],
+    ...["GEL", "HKD", "HUF", "IDR", "ILS", "INR", "JPY", "KRW", "KWD", "LKR", "MMK", "MXN", "MYR", "NGN", "NOK"],
+    ...["NZD", "PHP", "PKR", "PLN", "RUB", "SAR", "SEK", "SGD", "THB", "TRY", "TWD", "UAH", "USD", "VND", "ZAR"],
+  ])
+);
+
+/**
+ * The regions that pay in one of those, by their own currency, but the euro's
+ * and the dollar's: a country, and the territories that pay in its currency.
+ *
+ * @type {Readonly<Record<string, import("./amounts.js").PriceCurrency>>}
+ */
+const REGION_CURRENCIES = Object.freeze({
+  ...{ AE: "AED", AR: "ARS", BD: "BDT", BH: "BHD", BM: "BMD", BR: "BRL", CA: "CAD", CL: "CLP", CN: "CNY", CZ: "CZK" },
+  ...{ AU: "AUD", CC: "AUD", CX: "AUD", HM: "AUD", KI: "AUD", NF: "AUD", NR: "AUD", TV: "AUD", CH: "CHF", LI: "CHF" },
+  ...{ DK: "DKK", FO: "DKK", GL: "DKK", GB: "GBP", GG: "GBP", GS: "GBP", IM: "GBP", JE: "GBP", TA: "GBP", GE: "GEL" },
+  ...{ HK: "HKD", HU: "HUF", ID: "IDR", IL: "ILS", PS: "ILS", IN: "INR", JP: "JPY", KR: "KRW", KW: "KWD", LK: "LKR" },
+  ...{ MM: "MMK", MX: "MXN", MY: "MYR", NG: "NGN", BV: "NOK", NO: "NOK", SJ: "NOK", CK: "NZD", NU: "NZD", NZ: "NZD" },
+  ...{ PN: "NZD", TK: "NZD", PH: "PHP", PK: "PKR", PL: "PLN", RU: "RUB", SA: "SAR", SE: "SEK", SG: "SGD", TH: "THB" },
+  ...{ TR: "TRY", TW: "TWD", UA: "UAH", VN: "VND", ZA: "ZAR" },
+});
+
+/**
  * @param {string} [language] The browser's, unless given
- * @returns {"EUR" | "USD"}
+ * @returns {import("./amounts.js").PriceCurrency}
  */
 export function defaultCurrency(language = globalThis.navigator?.language || "en-US") {
   try {
     const locale = new Intl.Locale(language);
     // A language alone: the region it's most spoken in.
-    const region = locale.region ?? locale.maximize().region;
+    const region = (locale.region ?? locale.maximize().region ?? "").toUpperCase();
 
-    return region && EURO_REGIONS.has(region.toUpperCase()) ? "EUR" : "USD";
+    return EURO_REGIONS.has(region) ? "EUR" : (REGION_CURRENCIES[region] ?? "USD");
   } catch {
     return "USD";
   }
@@ -436,6 +468,11 @@ export function readAmount(text, language) {
 
   const plain = normalizeAmount(typed, decimal, language);
   const lux = parseDusk(plain);
+  const spaces = typed.match(SPACES)?.length ?? 0;
+  const unspaced = typed.replace(SPACES, "");
+
+  // Spaces between groups the language doesn't write with them, as "1 234,5" in Spanish: say so.
+  if (lux === null && spaces && readAmount(unspaced, language).lux !== null) return { lux: null, problem: `Leave out the space${spaces > 1 ? "s" : ""}: ${unspaced}.` };
 
   if (lux === null) {
     return {

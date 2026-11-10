@@ -25,7 +25,8 @@
  *   device, stays what the chain says: a call, and its fee.
  * - The value at the time of payment is the app's: `price` is asked what one
  *   DUSK was worth, and without one those columns stay empty, for the tool to
- *   work out.
+ *   work out. Every value has 8 decimals, rounded half up, a cent's worth or a
+ *   fraction of one.
  * - A memo, with its commas, quotes and line breaks, is in the description and
  *   its own column, with nothing in it that hides or reorders what it says,
  *   and never as a formula: one starting with `=`, `+`, `-` or `@` has a `'` in
@@ -55,7 +56,7 @@
  */
 
 import type { ActivityRow } from "./activity.js";
-import type { MigrationEvm } from "./bridge.js";
+import type { MigrationApproval, MigrationEvm } from "./bridge.js";
 import type { SozuFact } from "./sozu.js";
 
 /** The file's columns: Koinly's universal twelve, then what it ignores. */
@@ -76,7 +77,7 @@ export declare function quarterPeriod(year: number, quarter: number, options?: {
  */
 export declare function datesPeriod(from: string, to: string, options?: { timeZone?: string }): ExportPeriod;
 
-/** A profile: the name the person gave it, and its public account and shielded address. */
+/** A profile: the name the person gave it (the file's `Account Name`, and its name), and its public account and shielded address. */
 export type ExportProfile = { name?: string | null; account?: string | null; address?: string | null };
 
 /** What `accountingCsv` takes. */
@@ -119,7 +120,19 @@ export type ExportOptions = {
    * account, as a customer to a shop's. Without it, every migration's is.
    */
   evmAddresses?: Iterable<string>;
-  /** The person's own name for a counterparty, only when they asked for their contact names to be in the file. */
+  /**
+   * The approvals and revokes the person sent on a migration's own chain
+   * (`migrationApprovals` of `/bridge`): each that no migration's lines here
+   * have (one never used, a revoke, or one whose migration's lines aren't in
+   * the file) is a line of its own, a cost of its gas there, at its own time;
+   * with `evmAddresses`, only one sent from one of them.
+   */
+  approvals?: Iterable<MigrationApproval>;
+  /**
+   * The person's own name for a counterparty, only when they asked for their
+   * contact names to be in the file: it goes before a verified `.dusk` name
+   * and the name typed for it, a profile's own name aside.
+   */
   contactName?: (counterparty: string) => string | null | undefined;
   /** The network's name: the file's name says it, unless it's "mainnet". */
   network?: string;
@@ -145,3 +158,47 @@ export type ExportResult = {
 
 /** The profile's activity in the period, as a file. */
 export declare function accountingCsv(options: ExportOptions): Promise<ExportResult>;
+
+/**
+ * Rewards that reached the account, in lux, and what they were worth in the
+ * currency `price` answers in, each at its own time, to 8 decimals: the sum
+ * of those whose price is known (null without a `price`), and how many
+ * aren't (`unpriced`).
+ */
+export type RewardsSum = { lux: bigint; worth: string | null; unpriced: number };
+
+/** A calendar year's staking rewards, as they reached the account. */
+export type YearRewards = {
+  year: number;
+  /** Native staking's rewards claimed that year, as the file's `reward` lines. */
+  claimed: RewardsSum;
+  /**
+   * What Sozu's unstakes that year gave back beyond what their stDUSK cost,
+   * deposit fees aside, at what the stDUSK held had cost on average: what
+   * Sozu earned that was taken out. Null where a stake or an unstake before
+   * one of them isn't known (`facts` lacks it, or the history isn't
+   * `complete`).
+   */
+  sozu: RewardsSum | null;
+};
+
+/**
+ * Staking rewards by calendar year, on the clock of `timeZone` (the
+ * device's, unless given), from what the file has: the rewards native
+ * staking claimed, and what Sozu earned that its unstakes took out, as they
+ * reached the account, each worth what `price` says at its own time. What's
+ * still staked has earned more, which isn't the account's yet: `sozuPosition`
+ * of `/sozu` says Sozu's so far. `rows` are `/activity`'s, all of them, with
+ * `facts` (`sozuFacts` of `/sozu`); `complete` is `read()`'s, without which
+ * Sozu's are null. The rows don't say the order within a block: a stake there
+ * counts before an unstake, so an unstake never comes before the stake that
+ * minted what it gives back. A year is there where a reward was claimed, or a
+ * stake or an unstake with Sozu went through, oldest first.
+ */
+export declare function rewardsByYear(options: {
+  rows: Iterable<ActivityRow>;
+  facts?: ReadonlyMap<string, SozuFact>;
+  price?: ExportOptions["price"];
+  timeZone?: string;
+  complete?: boolean;
+}): Promise<YearRewards[]>;

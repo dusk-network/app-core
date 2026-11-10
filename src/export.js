@@ -48,6 +48,7 @@ import { displayText } from "./text.js";
 /** @typedef {import("./export.js").ExportResult} ExportResult */
 /** @typedef {import("./sozu.js").SozuFact} SozuFact */
 /** @typedef {import("./bridge.js").MigrationEvm} MigrationEvm */
+/** @typedef {import("./bridge.js").MigrationApproval} MigrationApproval */
 
 /** The format's twelve, then what it ignores. */
 export const CSV_COLUMNS = Object.freeze([
@@ -74,6 +75,8 @@ export const CSV_COLUMNS = Object.freeze([
 const DUSK = "DUSK";
 const ST_DUSK = "stDUSK";
 const LUX_DECIMALS = 9;
+/** The decimals of every value in fiat: one precision, from a fraction of a cent up. */
+const WORTH_DECIMALS = 8;
 // The most a token's decimals can be, as a contract's `u8` has them.
 const MAX_TOKEN_DECIMALS = 255;
 const BOM = "\ufeff";
@@ -309,6 +312,33 @@ function evmLines(row, fact) {
   return lines;
 }
 
+/** What an approval that's no migration's own did, after "approval for a migration to Dusk". */
+const APPROVAL_WORDS = Object.freeze({ open: ", not used yet", revoke: ", revoked", spent: "", uncertain: "", unused: ", never used" });
+
+/**
+ * The line of an approval or a revoke of a migration's contract on its own
+ * chain: the gas it paid there, at its own time and hash, of the address that
+ * sent it, as a cost.
+ *
+ * @param {MigrationApproval} approval
+ * @returns {Line}
+ */
+const approvalLine = ({ at, chain, coin, contract, decimals, gasWei, hash, owner, state }) => ({
+  account: owner,
+  accountName: chain,
+  at: /** @type {number} */ (at),
+  counterparty: contract,
+  hash,
+  memo: "",
+  partyName: "",
+  sent: /** @type {bigint} */ (gasWei),
+  sentCoin: coin,
+  sentDecimals: decimals,
+  tag: "cost",
+  valued: null,
+  words: `Network fee on ${chain}: ${state === "revoke" ? "approval for migrations to Dusk revoked" : `approval for a migration to Dusk${APPROVAL_WORDS[state]}`}`,
+});
+
 /**
  * What a contract call is, in words.
  *
@@ -504,25 +534,60 @@ function priceOf(price) {
 }
 
 /**
- * What an amount of DUSK comes to at a price: to the cent, or where that
- * would read 0, to 8 decimals.
+ * What an amount of DUSK comes to at a price, in units of `WORTH_DECIMALS`,
+ * rounded half up.
  *
  * @param {bigint} lux
  * @param {{ digits: bigint, places: number }} price
  */
-function worthOf(lux, { digits, places }) {
+const worthUnits = (lux, { digits, places }) => {
   const scale = 10n ** BigInt(LUX_DECIMALS + places);
-  const units = lux * digits;
-  /** @param {number} decimals */
-  const at = (decimals) => {
-    const step = 10n ** BigInt(decimals);
-    const rounded = (units * step + scale / 2n) / scale;
 
-    return { rounded, text: `${rounded / step}.${(rounded % step).toString().padStart(decimals, "0")}` };
+  return (lux * digits * 10n ** BigInt(WORTH_DECIMALS) + scale / 2n) / scale;
+};
+
+/**
+ * Units of `WORTH_DECIMALS` as the file writes them: every value to the same
+ * 8 decimals, a cent's worth or a fraction of one.
+ *
+ * @param {bigint} units
+ */
+function worthText(units) {
+  const size = units < 0n ? -units : units;
+  const step = 10n ** BigInt(WORTH_DECIMALS);
+
+  return `${units < 0n ? "-" : ""}${size / step}.${(size % step).toString().padStart(WORTH_DECIMALS, "0")}`;
+}
+
+/**
+ * @param {bigint} lux
+ * @param {{ digits: bigint, places: number }} price
+ */
+const worthOf = (lux, price) => worthText(worthUnits(lux, price));
+
+/**
+ * A price lookup that asks once for each time: what one DUSK was worth then,
+ * as digits, or null where `price` doesn't say or its lookup fails.
+ *
+ * @param {ExportOptions["price"]} price
+ * @returns {(at: number) => Promise<{ digits: bigint, places: number } | null>}
+ */
+function pricesOf(price) {
+  /** @type {Map<number, Promise<{ digits: bigint, places: number } | null>>} */
+  const asked = new Map();
+
+  return (at) => {
+    let known = asked.get(at);
+
+    if (!known) {
+      known = Promise.resolve()
+        .then(() => /** @type {NonNullable<ExportOptions["price"]>} */ (price)({ at, coin: DUSK }))
+        .then(priceOf, () => null);
+      asked.set(at, known);
+    }
+
+    return known;
   };
-  const cents = at(2);
-
-  return cents.rounded > 0n || units === 0n ? cents.text : at(8).text.replace(/0+$/, "").replace(/\.$/, ".0");
 }
 
 /**
@@ -540,7 +605,7 @@ function slugOf(name) {
  * @param {ExportOptions} options
  * @returns {Promise<ExportResult>}
  */
-export async function accountingCsv({ bom = false, contactName, currency = "EUR", evm, evmAddresses, facts, network, period, price, profile, profiles = [], rows }) {
+export async function accountingCsv({ approvals, bom = false, contactName, currency = "EUR", evm, evmAddresses, facts, network, period, price, profile, profiles = [], rows }) {
   const account = String(profile?.account ?? "");
   // The EVM addresses the app knows as the person's, where it gives them: anyone can migrate to an account.
   const ownEvm = evmAddresses === undefined || evmAddresses === null ? null : new Set([...evmAddresses].map((address) => String(address ?? "").toLowerCase()));
@@ -554,26 +619,65 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
   }
 
   const left = { notRead: 0, outOfPeriod: 0, pending: 0 };
-  /** @type {Map<number, Promise<{ digits: bigint, places: number } | null>>} */
-  const prices = new Map();
+  const priceAt = pricesOf(price);
   let unpriced = 0;
-  /** @param {number} at */
-  const priceAt = (at) => {
-    let known = prices.get(at);
-
-    if (!known) {
-      known = Promise.resolve()
-        .then(() => /** @type {NonNullable<ExportOptions["price"]>} */ (price)({ at, coin: DUSK }))
-        .then(priceOf, () => null);
-      prices.set(at, known);
-    }
-
-    return known;
-  };
   const chronological = [...(rows ?? [])].sort((a, b) => (a.time ?? 0) - (b.time ?? 0) || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
   /** @type {{ at: number, text: string }[]} */
   const written = [];
   let count = 0;
+  // The transactions on another chain a migration's own lines have: an approval among them is booked once.
+  /** @type {Set<string>} */
+  const booked = new Set();
+  /** @param {number} at */
+  const inPeriod = (at) => !period || (at >= period.from && at < period.to);
+
+  /**
+   * Writes a line, of a row where it's one's, in the period of its own time.
+   *
+   * @param {Line} line
+   * @param {ActivityRow | null} row
+   */
+  const write = async (line, row) => {
+    const at = /** @type {number} */ (line.at ?? row?.time);
+
+    if (!inPeriod(at)) return;
+
+    // A token's own line says who it went to, or that it isn't known: never the contract called.
+    const ownParty = "counterparty" in line;
+    const party = ownParty ? line.counterparty : row?.counterparty;
+    const internal = party && !self.has(party) ? own.get(party) : undefined;
+    // The person's own names first, where they asked for them: their contact's over a verified .dusk name.
+    const name = line.partyName ?? internal ?? ((party && contactName?.(party)) || null) ?? (ownParty ? null : row?.counterpartyName) ?? (ownParty && !party ? null : row?.toName) ?? "";
+    const memo = line.memo ?? row?.memo ?? "";
+    const unit = price && line.valued !== null ? await priceAt(at) : null;
+
+    if (price && !unit) unpriced += 1;
+
+    written.push({
+      at,
+      text: [
+        field(dateOf(at)),
+        field(amountOf(line.sent, line.sentDecimals)),
+        line.sent === undefined ? "" : textField(line.sentCoin),
+        field(amountOf(line.received)),
+        field(line.received === undefined ? "" : line.receivedCoin),
+        field(amountOf(line.fee)),
+        field(line.fee ? DUSK : ""),
+        field(unit && line.valued !== null ? worthOf(line.valued, unit) : ""),
+        field(unit ? currency : ""),
+        field(line.tag ?? ""),
+        textField([line.words, memo].filter(Boolean).join(" · ")),
+        field(line.hash ?? row?.hash),
+        textField(line.accountName ?? profile?.name ?? ""),
+        field(line.account ?? account),
+        textField(name),
+        textField(party ?? ""),
+        field(internal ? "yes" : ""),
+        textField(memo),
+      ].join(","),
+    });
+    count += 1;
+  };
 
   for (const row of chronological) {
     // Never on the chain, so it never happened.
@@ -593,9 +697,10 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
     // and, where the app gives the person's EVM addresses, sent from one of them. Another's gas is no cost of theirs.
     const fact = row.route?.kind === "migration" && row.direction === "in" ? evm?.get((memoTextOf(row) ?? "").toLowerCase()) : undefined;
     const migration = !ownEvm || (fact?.from && ownEvm.has(fact.from.toLowerCase())) ? fact : undefined;
-    /** @param {number} at */
-    const inPeriod = (at) => !period || (at >= period.from && at < period.to);
     const rowIn = inPeriod(row.time);
+    const evmOwn = evmLines(row, migration);
+
+    for (const line of evmOwn) booked.add(String(line.hash));
 
     // Each line goes in the period of its own time: a migration's fees on its
     // own chain may be in one before its payout's, the rest of a row in its.
@@ -604,46 +709,12 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
       if (!migration) continue;
     }
 
-    for (const line of [...evmLines(row, migration), ...(rowIn ? linesOf(row, { address: Boolean(profile?.address), facts, own, self }) : [])]) {
-      const at = line.at ?? row.time;
+    for (const line of [...evmOwn, ...(rowIn ? linesOf(row, { address: Boolean(profile?.address), facts, own, self }) : [])]) await write(line, row);
+  }
 
-      if (!inPeriod(at)) continue;
-
-      // A token's own line says who it went to, or that it isn't known: never the contract called.
-      const ownParty = "counterparty" in line;
-      const party = ownParty ? line.counterparty : row.counterparty;
-      const internal = party && !self.has(party) ? own.get(party) : undefined;
-      const name = line.partyName ?? internal ?? (ownParty ? null : row.counterpartyName) ?? (ownParty && !party ? null : row.toName) ?? (party ? contactName?.(party) : "") ?? "";
-      const memo = line.memo ?? row.memo ?? "";
-      const unit = price && line.valued !== null ? await priceAt(at) : null;
-
-      if (price && !unit) unpriced += 1;
-
-      written.push({
-        at,
-        text: [
-          field(dateOf(at)),
-          field(amountOf(line.sent, line.sentDecimals)),
-          line.sent === undefined ? "" : textField(line.sentCoin),
-          field(amountOf(line.received)),
-          field(line.received === undefined ? "" : line.receivedCoin),
-          field(amountOf(line.fee)),
-          field(line.fee ? DUSK : ""),
-          field(unit && line.valued !== null ? worthOf(line.valued, unit) : ""),
-          field(unit ? currency : ""),
-          field(line.tag ?? ""),
-          textField([line.words, memo].filter(Boolean).join(" · ")),
-          field(line.hash ?? row.hash),
-          textField(line.accountName ?? profile?.name ?? ""),
-          field(line.account ?? account),
-          textField(name),
-          textField(party ?? ""),
-          field(internal ? "yes" : ""),
-          textField(memo),
-        ].join(","),
-      });
-      count += 1;
-    }
+  // The approvals and revokes on a migration's own chain that no migration's lines have, each once.
+  for (const approval of approvals ?? []) {
+    if (!booked.has(approval.hash) && approval.at !== null && approval.gasWei !== null && (!ownEvm || ownEvm.has(approval.owner))) await write(approvalLine(approval), null);
   }
 
   const slug = slugOf(profile?.name) || "profile";
@@ -657,4 +728,92 @@ export async function accountingCsv({ bom = false, contactName, currency = "EUR"
     left,
     unpriced,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Rewards by year
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {{ rows: Iterable<ActivityRow>, facts?: ReadonlyMap<string, SozuFact>, price?: ExportOptions["price"], timeZone?: string, complete?: boolean }} options
+ * @returns {Promise<import("./export.js").YearRewards[]>}
+ */
+export async function rewardsByYear({ complete = true, facts, price, rows, timeZone }) {
+  const yearOf = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" });
+  const priceAt = pricesOf(price);
+  /** @typedef {{ at: number, lux: bigint }} Reward */
+  /** @type {Map<number, { claimed: Reward[], sozu: Reward[] | null }>} */
+  const years = new Map();
+  // Sozu's stDUSK held and what it cost, deposit fees aside, while every stake and unstake before is known.
+  let held = 0n;
+  let cost = 0n;
+  let known = complete;
+
+  const went = [...(rows ?? [])].filter((row) => row.status === "executed" && !row.dropped && typeof row.time === "number" && (row.kind === "withdraw_reward" || row.sozu));
+  // In the chain's order, as far as the rows say it: by block, and within one a stake before an unstake, as the rows don't say which
+  // went first and an unstake can't give back stDUSK its own block's stake hadn't minted yet.
+  /** @param {ActivityRow} row */
+  const blockOf = (row) => [/** @type {number} */ (row.time), row.blockHeight ?? 0, row.sozu === "unstake" ? 1 : 0];
+  const inOrder = went.sort((a, b) => {
+    const [x, y] = [blockOf(a), blockOf(b)];
+
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0);
+  });
+
+  for (const row of inOrder) {
+    const at = /** @type {number} */ (row.time);
+    const year = Number(yearOf.format(at));
+    const rewards = years.get(year) ?? { claimed: [], sozu: [] };
+
+    years.set(year, rewards);
+
+    if (!row.sozu) {
+      rewards.claimed.push({ at, lux: row.value });
+      continue;
+    }
+
+    const fact = facts?.get(row.hash);
+
+    if (row.sozu === "stake") {
+      known &&= fact !== undefined;
+      held += fact?.stDusk ?? 0n;
+      cost += row.value - (fact?.fee ?? 0n);
+      continue;
+    }
+
+    // An unstake: what it gave back beyond what its stDUSK cost, at what stDUSK cost on average.
+    if (!known || !fact || fact.stDusk > held || held === 0n) {
+      known = false;
+      rewards.sozu = null;
+      continue;
+    }
+
+    const spent = (cost * fact.stDusk) / held;
+
+    rewards.sozu?.push({ at, lux: row.value - spent });
+    held -= fact.stDusk;
+    cost -= spent;
+  }
+
+  /**
+   * @param {Reward[]} list
+   * @returns {Promise<import("./export.js").RewardsSum>}
+   */
+  const sumOf = async (list) => {
+    let units = 0n;
+    let unpriced = 0;
+
+    for (const { at, lux } of list) {
+      const unit = price ? await priceAt(at) : null;
+
+      if (unit) units += lux < 0n ? -worthUnits(-lux, unit) : worthUnits(lux, unit);
+      else if (price) unpriced += 1;
+    }
+
+    return { lux: list.reduce((sum, each) => sum + each.lux, 0n), unpriced, worth: price ? worthText(units) : null };
+  };
+
+  return Promise.all(
+    [...years.entries()].sort(([a], [b]) => a - b).map(async ([year, { claimed, sozu }]) => ({ claimed: await sumOf(claimed), sozu: sozu && (await sumOf(sozu)), year }))
+  );
 }

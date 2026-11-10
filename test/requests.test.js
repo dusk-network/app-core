@@ -41,7 +41,9 @@ describe("what came in for each request", () => {
   it("calls a request of no amount paid by a payment with its memo, of any amount, and paid twice by another with it", () => {
     const anyAmount = asked({ lux: null });
 
-    assert.deepEqual(matchRequests([anyAmount], [payment({ value: 7n })]).get("a"), { at: NOW + HOUR, hash: "h1", lux: 7n, matched: "amount-memo", memo: "Factura 33", state: "paid" });
+    // Marek's: one lux pays it as well as any amount, so it says what came in, for its badge to say rather than "Paid".
+    assert.deepEqual(matchRequests([anyAmount], [payment({ value: 1n })]).get("a"), { anyAmount: true, at: NOW + HOUR, hash: "h1", lux: 1n, matched: "amount-memo", memo: "Factura 33", state: "paid" });
+    assert.equal(matchRequests([asked()], [payment()]).get("a")?.anyAmount, undefined);
     const twice = matchRequests([anyAmount], [payment(), payment({ hash: "h2", time: NOW + 2 * HOUR, value: 9n })]).get("a");
 
     like(twice, { hash: "h1", state: "paid" });
@@ -185,12 +187,12 @@ describe("what came in for each request", () => {
     // Marek's: a request of any amount, paid with its memo and one lux.
     const kept = (/** @type {unknown} */ lux) => asked({ lux: null, paid: { at: NOW + HOUR, hash: "h1", lux } });
 
-    assert.deepEqual(matchRequests([kept("1")], []).get("a"), { at: NOW + HOUR, hash: "h1", lux: 1n, matched: "amount-memo", state: "paid" });
+    assert.deepEqual(matchRequests([kept("1")], []).get("a"), { anyAmount: true, at: NOW + HOUR, hash: "h1", lux: 1n, matched: "amount-memo", state: "paid" });
     // The chain's, where its payment is read.
     like(matchRequests([kept("1")], [payment({ value: 9n })]).get("a"), { lux: 9n, state: "paid" });
     // Kept without it, or not as lux: not known.
     for (const lux of [undefined, "abc", "-1", 5]) {
-      assert.deepEqual(matchRequests([kept(lux)], []).get("a"), { at: NOW + HOUR, hash: "h1", matched: "amount-memo", state: "paid" }, String(lux));
+      assert.deepEqual(matchRequests([kept(lux)], []).get("a"), { anyAmount: true, at: NOW + HOUR, hash: "h1", matched: "amount-memo", state: "paid" }, String(lux));
     }
   });
 });

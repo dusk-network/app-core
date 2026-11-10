@@ -15,8 +15,13 @@ const FORMAT_CONTROL = /\p{Cf}/u;
 // What renders as nothing though it isn't a format control: Hangul fillers,
 // the combining grapheme joiner and most variation selectors.
 const IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
-// What picks an emoji's look, and hides nothing.
+// What picks an emoji's look, and hides nothing on one: on anything else it
+// does nothing to be seen.
 const EMOJI_SELECTOR = /[\ufe0e\ufe0f]/u;
+const EMOJI = /^\p{Emoji}$/u;
+// A keycap's digit, # or *: an emoji only with the keycap's mark after its selector.
+const KEYCAP_BASE = /^[0-9#*]$/u;
+const KEYCAP = "\u20e3";
 const LINE_SEPARATOR = /[\n\r\u2028\u2029]/u;
 const LINE_BREAK = /[\n\r]/u;
 const CONTROL = /\p{Cc}/u;
@@ -183,6 +188,19 @@ function isolated(shown) {
 }
 
 /**
+ * Whether a selector picks the look of the emoji it's on: right after one, or
+ * after a keycap's digit, # or * with the keycap's mark after it.
+ *
+ * @param {string[]} chars
+ * @param {number} at
+ */
+function emojiOwn(chars, at) {
+  const before = chars[at - 1] ?? "";
+
+  return EMOJI.test(before) && (!KEYCAP_BASE.test(before) || chars[at + 1] === KEYCAP);
+}
+
+/**
  * @param {unknown} raw
  * @param {{ maxChars?: number, lineBreaks?: boolean, isolate?: boolean }} [options]
  * @returns {{ text: string, neutralized: boolean, flags: TextFlag[] }}
@@ -193,8 +211,9 @@ export function displayText(raw, { isolate = false, lineBreaks = false, maxChars
   const flags = new Set();
   /** @type {string[]} */
   const out = [];
+  const chars = Array.from(source);
 
-  for (const char of source) {
+  for (const [at, char] of chars.entries()) {
     const code = /** @type {number} */ (char.codePointAt(0));
 
     if (code >= 0xd800 && code <= 0xdfff) {
@@ -213,7 +232,7 @@ export function displayText(raw, { isolate = false, lineBreaks = false, maxChars
     } else if (CONTROL.test(char)) {
       flags.add("control_chars");
       out.push(visible(char));
-    } else if (FORMAT_CONTROL.test(char) || (IGNORABLE.test(char) && !EMOJI_SELECTOR.test(char))) {
+    } else if (FORMAT_CONTROL.test(char) || (IGNORABLE.test(char) && !(EMOJI_SELECTOR.test(char) && emojiOwn(chars, at)))) {
       flags.add("invisible_format");
       out.push(visible(char));
     } else {
@@ -233,6 +252,26 @@ export function displayText(raw, { isolate = false, lineBreaks = false, maxChars
   const shown = out.slice(0, maxChars);
 
   return { flags: [...flags], neutralized, text: isolate ? isolated(shown) : shown.join("") };
+}
+
+/**
+ * @param {Iterable<string> | null | undefined} flags
+ * @returns {string}
+ */
+export function numbersNote(flags) {
+  const has = new Set(flags ?? []);
+  const mixed = has.has("mixed_digits");
+  const rightToLeft = has.has("rtl_digits");
+  // The first that holds says what the number is in; the others what some of its digits do.
+  const parts = [
+    mixed ? "mixes digits of different scripts" : "",
+    rightToLeft ? (mixed ? "some read right to left" : "uses digits that read right to left") : "",
+    has.has("lookalike_digits") ? (mixed || rightToLeft ? "some look like other digits" : "uses digits that look like other digits") : "",
+  ].filter(Boolean);
+
+  if (!parts.length) return "";
+
+  return `A number here ${parts.length > 2 ? `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}` : parts.join(", and ")}. Check it digit by digit.`;
 }
 
 // What a search leaves out of what it compares: accents and other marks, and

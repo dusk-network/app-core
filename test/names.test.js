@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { CONFUSABLES, CONFUSABLES_VERSION } from "../src/confusables.js";
-import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, sameName } from "../src/names.js";
+import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, profileNameClash, sameName } from "../src/names.js";
 
 describe("names that look alike", () => {
   it("catches Marek's: Armenian, Cherokee and a small capital I, as Cyrillic before", () => {
@@ -48,8 +48,12 @@ describe("names that look alike", () => {
     for (const hidden of ["\u202e2 eliforP", "\u202eecilA", "Ali\u200bce", "Ali\u200dce", "Ali\u00adce", "Alice\u2069", "Ali\tce", "Ali\nce", "Ali\u2028ce", "Al\u3164ice", "\ufeffAlice", "Alice\u{e0041}", "Ali\ud800ce", "Mom \u{1f469}\u200d\u{1f467}"]) {
       assert.equal(nameHides(hidden), true, JSON.stringify(hidden));
     }
-    // An emoji's own selector, accents and any script hide nothing.
-    for (const plain of ["Alice", "Am\u00e9lie", "e\u0301", "Ilustraci\u00f3n Sol", "\u05e9\u05dc\u05d5\u05dd", "\u0639\u0644\u064a", "\u0939\u093f\u0928\u094d\u0926\u0940", "\u65e5\u672c", "Caf\u00e9 \u2764\ufe0f", "\u{1f600}", "Profile 2", "", "  "]) {
+    // Marek's: a selector on what it can't make an emoji of does nothing to be seen, wherever it is.
+    for (const hidden of ["Alice\ufe0f", "Ali\ufe0fce", "\ufe0eAlice", "Bob 1\ufe0f", "Kim\ufe00", "\u2764\ufe0f\ufe0f"]) {
+      assert.equal(nameHides(hidden), true, JSON.stringify(hidden));
+    }
+    // An emoji's own selector, a keycap's, accents and any script hide nothing.
+    for (const plain of ["Alice", "Am\u00e9lie", "e\u0301", "Ilustraci\u00f3n Sol", "\u05e9\u05dc\u05d5\u05dd", "\u0639\u0644\u064a", "\u0939\u093f\u0928\u094d\u0926\u0940", "\u65e5\u672c", "Caf\u00e9 \u2764\ufe0f", "Team \u0031\ufe0f\u20e3", "\u2122\ufe0e", "\u{1f600}", "Profile 2", "", "  "]) {
       assert.equal(nameHides(plain), false, JSON.stringify(plain));
     }
     assert.equal(nameHides(null), false);
@@ -114,5 +118,29 @@ describe("a contact's name", () => {
 
     assert.deepEqual(lookAlikes([marta, cyrillic, dotted, own, savedOwn, other]), new Set([marta, cyrillic, dotted]));
     assert.deepEqual(lookAlikes([]), new Set());
+  });
+});
+
+describe("a profile's name", () => {
+  const profiles = [{ account: "p1", address: "s1", name: "Profile 1" }, { account: "p2", address: "s2", name: "Profile 2" }];
+  const contacts = [
+    { address: "q", id: "c1", name: "Alice" },
+    { address: "p2", id: "c2", name: "Lena Sparen" },
+  ];
+
+  it("takes the other profile's name, or a contact's, as written or in other letters: refused, as History would read one as the other", () => {
+    // Marek's: Profile 2 named "Profile 1", then "Alice" beside his contact Alice.
+    assert.deepEqual(profileNameClash("Profile 1", { contacts, profiles, self: "p2" }), { entry: profiles[0], kind: "profile", same: true });
+    assert.deepEqual(profileNameClash("ProfiIe 1", { contacts, profiles, self: "p2" }), { entry: profiles[0], kind: "profile", same: false });
+    assert.deepEqual(profileNameClash("alice", { contacts, profiles, self: "p2" }), { entry: contacts[0], kind: "contact", same: true });
+    assert.deepEqual(profileNameClash("\u0410lice", { contacts, profiles, self: "p2" }), { entry: contacts[0], kind: "contact", same: false });
+  });
+
+  it("takes nothing from itself, or from a contact saved with its own address", () => {
+    assert.equal(profileNameClash("Profile 2", { contacts, profiles, self: "p2" }), null);
+    assert.equal(profileNameClash("Lena Sparen", { contacts, profiles, self: "p2" }), null);
+    assert.equal(profileNameClash("Lena Sparen", { contacts, profiles, self: "s2" }), null);
+    assert.deepEqual(profileNameClash("Lena Sparen", { contacts, profiles, self: "p1" }), { entry: contacts[1], kind: "contact", same: true });
+    assert.equal(profileNameClash("Carla", { contacts, profiles, self: "p2" }), null);
   });
 });

@@ -61,18 +61,35 @@ export declare function formatDuskPlain(lux: bigint | number | string): string;
 /** The browser's language, unless given, with digits a person can type back. */
 export declare function amountLocale(language?: string): string;
 
+/** A currency the apps' price source gives DUSK's price in, by its ISO 4217 code. */
+export type PriceCurrency =
+  | "AED" | "ARS" | "AUD" | "BDT" | "BHD" | "BMD" | "BRL" | "CAD" | "CHF" | "CLP" | "CNY" | "CZK" | "DKK" | "EUR" | "GBP"
+  | "GEL" | "HKD" | "HUF" | "IDR" | "ILS" | "INR" | "JPY" | "KRW" | "KWD" | "LKR" | "MMK" | "MXN" | "MYR" | "NGN" | "NOK"
+  | "NZD" | "PHP" | "PKR" | "PLN" | "RUB" | "SAR" | "SEK" | "SGD" | "THB" | "TRY" | "TWD" | "UAH" | "USD" | "VND" | "ZAR";
+
 /**
- * The fiat currency a wallet starts on, by the browser's region: "EUR" where
- * it pays in euros, "USD" anywhere else. The euro's regions are the euro area,
- * Bulgaria in it since 2026; Andorra, Monaco, San Marino, the Vatican,
- * Montenegro and Kosovo; France's overseas regions and the collectivities
- * that use it (GF, GP, MQ, RE, YT, BL, MF, PM, TF); and Åland, the Canary
- * Islands, Ceuta and Melilla. A language without a region takes the one it's
- * most spoken in, as the browser's likely subtags say: "de", "fr", "es", "it"
- * and "nl" are EUR; "en" (the US), "pt" (Brazil) and "sv" (Sweden) are USD.
- * What isn't a language is USD.
+ * The currencies the apps' price source, CoinGecko, gives DUSK's price in,
+ * as its list of them said in November 2026, in alphabetical order: all of
+ * its own but the bolívar Venezuela no longer pays in (VEF), gold, silver,
+ * the IMF's drawing right and coins. What a wallet offers to show values in.
  */
-export declare function defaultCurrency(language?: string): "EUR" | "USD";
+export declare const PRICE_CURRENCIES: ReadonlyArray<PriceCurrency>;
+
+/**
+ * The fiat currency a wallet starts on, by the browser's region: the one it
+ * pays in, where the price source gives DUSK's price in it, as "SGD" in
+ * Singapore, "INR" in India and "CHF" in Switzerland; "USD" anywhere else.
+ * The euro's regions are the euro area, Bulgaria in it since 2026; Andorra,
+ * Monaco, San Marino, the Vatican, Montenegro and Kosovo; France's overseas
+ * regions and the collectivities that use it (GF, GP, MQ, RE, YT, BL, MF,
+ * PM, TF); and Åland, the Canary Islands, Ceuta and Melilla. A territory
+ * that pays in another country's currency takes that one, as the Faroes
+ * take Danish kroner. A language without a region takes the one it's most
+ * spoken in, as the browser's likely subtags say: "de" and "fr" are EUR,
+ * "pt" (Brazil) BRL, "ja" JPY, "en" (the US) USD. What isn't a language is
+ * USD.
+ */
+export declare function defaultCurrency(language?: string): PriceCurrency;
 
 /** How a language writes decimals, in digits a person can type back: the browser's, unless given. */
 export declare const decimalSeparator: (language?: string) => string;
@@ -111,7 +128,9 @@ export declare function parseDusk(plain: string): bigint | null;
 /**
  * An amount of DUSK as a person typed it, in the language's reading (the
  * browser's, unless given): the lux it is, or what's wrong with it in plain
- * words. Nothing typed is neither.
+ * words: that it could be two amounts, that a space the language doesn't
+ * group with is in it ("Leave out the space: 1234,5."), that it has too many
+ * decimals, or what an amount looks like. Nothing typed is neither.
  */
 export declare function readAmount(text: string, language?: string): { lux: bigint | null; problem: string | null };
 

@@ -13,6 +13,7 @@
  *
  * const matches = matchRequests(kept, rows); // the wallet's requests, `/activity`'s rows
  * matches.get(id); // { state: "paid", matched: "amount-memo", hash, at, lux, memo, more: [{ … }] }
+ * // A request of no amount: { state: "paid", anyAmount: true, lux: 1n, … }: say what came in, not "Paid"
  * refundOf(request, matches.get(id).more[0], rows); // { to, lux, memo: "Refund: Factura 33" }: Send back
  *
  * // Before a send: the same payment, made already.
@@ -75,12 +76,16 @@ export type RequestPayment = {
  * `lux` is what the payment paid, to show on every request it pays, as one of
  * any amount can be paid with any: for a request kept paid, the chain's where
  * its payment is among the rows, else what was kept with it, and none where
- * neither says. `more` holds the other payments that match it, oldest first,
- * which no other request took: one with all of it again (`matched`
- * "amount-memo") is the request paid twice.
+ * neither says. `anyAmount` marks a request that asked no amount: its payer
+ * chose what it paid, one lux as well as a thousand DUSK, so its badge says
+ * what came in (`lux`), in no colour that says all is well, rather than
+ * "Paid". `more` holds the other payments that match it, oldest first, which
+ * no other request took: one with all of it again (`matched` "amount-memo")
+ * is the request paid twice.
  */
 export type RequestMatch = {
   state: "check" | "paid" | "waiting";
+  anyAmount?: true;
   at?: number;
   hash?: string;
   lux?: bigint;
