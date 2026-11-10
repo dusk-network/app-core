@@ -521,7 +521,9 @@ describe("what native staking paid", () => {
     // At the period's own pace, over what's staked now: the 87% the wallets showed, not 100%.
     assert.equal(Math.round(native.rate * 1000) / 1000, 0.872);
     assert.equal(native.staked > 56_000_000n * DUSK && native.staked < 56_200_000n * DUSK, true);
-    assert.equal(sozuRateLine({ locale: "en-GB", native, status: { fees: { reward: { denominator: 10n, numerator: 1n } } } }), "15.5 DUSK a block to stakers over the last 30 days, 56.1M DUSK staked now: about 87% a year. Less Sozu's 10%: about 78%, and a little over as it restakes rewards every hour.");
+    // How a million is shortened ("56.1M" or "56.1m") is the runtime's own, so it's asked of the same formatter.
+    const staked = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1, notation: "compact" }).format(56_100_000);
+    assert.equal(sozuRateLine({ locale: "en-GB", native, status: { fees: { reward: { denominator: 10n, numerator: 1n } } } }), `15.5 DUSK a block to stakers over the last 30 days, ${staked} DUSK staked now: about 87% a year. Less Sozu's 10%: about 78%, and a little over as it restakes rewards every hour.`);
   });
 
   it("takes two requests, one with the app's tip, keeps what it read for an hour, and makes one of two reads at once", async () => {
