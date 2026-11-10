@@ -552,16 +552,17 @@ async function readNative(archive, days, tipHeight) {
     if (!Number.isSafeInteger(tip) || start < 1) return null;
 
     const heights = Array.from({ length: NATIVE_SAMPLES }, (_, i) => Math.round(start + ((i + 0.5) * (tip - start)) / NATIVE_SAMPLES));
+    // The period ends at the archive's own tip, which may trail the node's by a block or two.
     const read = await archive.query(
-      `query { a: block(height: ${start}) { header { height timestamp } } b: block(height: ${tip}) { header { height timestamp } } ${heights.map((height, i) => `e${i}: contractEvents(height: ${height}) { json }`).join(" ")} }`
+      `query { a: block(height: ${start}) { header { height timestamp } } b: block(height: -1) { header { height timestamp } } ${heights.map((height, i) => `e${i}: contractEvents(height: ${height}) { json }`).join(" ")} }`
     );
     const paid = heights.map((_, i) => paidToStakers(read?.[`e${i}`]?.json)).filter((each) => each !== null);
     const from = { at: Number(read?.a?.header?.timestamp) * 1000, height: start };
-    const to = { at: Number(read?.b?.header?.timestamp) * 1000, height: tip };
+    const to = { at: Number(read?.b?.header?.timestamp) * 1000, height: Number(read?.b?.header?.height) };
     const span = to.at - from.at;
 
     // Most blocks read, or it says too little.
-    if (paid.length * 2 < NATIVE_SAMPLES || !(span > 0)) return null;
+    if (paid.length * 2 < NATIVE_SAMPLES || !(span > 0) || !(to.height > start)) return null;
 
     return { blocks: paid.length, days: Math.round(span / DAY_MS), from, perBlock: paid.reduce((sum, each) => sum + each, 0n) / BigInt(paid.length), to };
   } catch {

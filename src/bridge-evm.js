@@ -401,9 +401,10 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
           /** @param {any} log */
           const txOf = (log) => String(log?.transactionHash ?? "").toLowerCase();
           const ordered = logs.sort((a, b) => (before(placeOf(a), placeOf(b)) ? -1 : 1));
-          // What a migration drew on: a Transfer to the contract. An Approval in a transaction of its own is the owner's approve.
-          const spends = new Set(ordered.filter((log) => log?.topics?.[0] === TRANSFER_TOPIC).map(txOf));
-          const own = ordered.filter((log) => log?.topics?.[0] === APPROVAL_TOPIC && !spends.has(txOf(log)));
+          const transfers = new Set(ordered.filter((log) => log?.topics?.[0] === TRANSFER_TOPIC).map(txOf));
+          // An Approval in a transaction of its own is the owner's approve; one beside a Transfer to the contract is the token's, as a migration draws on it.
+          const own = ordered.filter((log) => log?.topics?.[0] === APPROVAL_TOPIC && !transfers.has(txOf(log)));
+          const draws = ordered.filter((log) => log?.topics?.[0] === APPROVAL_TOPIC && transfers.has(txOf(log)));
 
           reads.push({ from, owner, route: route.id, state, to: head });
 
@@ -427,7 +428,7 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
 
             const allowance = bigOf(log.data) ?? 0n;
             const next = own[i + 1];
-            const spent = ordered.some((each) => each?.topics?.[0] === TRANSFER_TOPIC && before(placeOf(log), placeOf(each)) && (!next || before(placeOf(each), placeOf(next))));
+            const spent = draws.some((each) => before(placeOf(log), placeOf(each)) && (!next || before(placeOf(each), placeOf(next))));
 
             approvals.push({
               allowance,

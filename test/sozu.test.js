@@ -505,7 +505,7 @@ describe("what native staking paid", () => {
       query: async (/** @type {string} */ query) => {
         queries.push(query);
 
-        return query.includes("block(height: -1)") ? { tip: { header: { height: recorded.tip } } } : change(structuredClone(recorded.answer));
+        return query.includes("tip: block(height: -1)") ? { tip: { header: { height: recorded.tip } } } : change(structuredClone(recorded.answer));
       },
     };
   };
