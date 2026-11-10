@@ -56,6 +56,15 @@ function matchOf(request, row) {
 }
 
 /**
+ * A request of no amount, whose payer chose what it paid: one lux pays it as a
+ * thousand DUSK do, so what came in is what's said of it, never paid alone.
+ *
+ * @param {KeptRequest} request
+ * @returns {{ anyAmount?: true }}
+ */
+const chosen = (request) => (request.lux === null ? { anyAmount: true } : {});
+
+/**
  * @param {ReadonlyArray<KeptRequest>} list
  * @param {ReadonlyArray<ActivityRow>} rows
  * @returns {Map<string, RequestMatch>}
@@ -79,6 +88,7 @@ export function matchRequests(list, rows) {
       if (matched && (wanted === "guess") === (matched !== "amount-memo")) {
         taken.add(row.hash);
         matches.set(request.id, {
+          ...chosen(request),
           at: row.time ?? undefined,
           hash: row.hash,
           lux: movedBy(row),
@@ -99,7 +109,7 @@ export function matchRequests(list, rows) {
       const kept = /** @type {unknown} */ (request.paid.lux);
       const lux = row ? movedBy(row) : typeof kept === "string" && /^\d+$/.test(kept) ? BigInt(kept) : undefined;
 
-      matches.set(request.id, { at: request.paid.at, hash: request.paid.hash, ...(lux === undefined ? {} : { lux }), matched: "amount-memo", state: "paid" });
+      matches.set(request.id, { ...chosen(request), at: request.paid.at, hash: request.paid.hash, ...(lux === undefined ? {} : { lux }), matched: "amount-memo", state: "paid" });
     } else {
       answer(request, "amount-memo");
     }

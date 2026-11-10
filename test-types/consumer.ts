@@ -621,12 +621,13 @@ const keptRequests: KeptRequest[] = [
 const requestMatches: Map<string, RequestMatch> = matchRequests(keptRequests, readRowsForRequests);
 const requestState: "check" | "paid" | "waiting" | undefined = requestMatches.get("a")?.state;
 const cameIn: bigint | undefined = requestMatches.get("b")?.lux;
+const payerChose: true | undefined = requestMatches.get("b")?.anyAmount;
 declare const paidAgainOnce: RequestPayment;
 const sendBack: { to: string; lux: bigint; memo: string } | null = refundOf(keptRequests[1], paidAgainOnce, readRowsForRequests);
 const paidAgain: RequestMatched[] | undefined = requestMatches.get("a")?.more?.map((each) => each.matched);
 const repeat: import("@dusk-network/app-core/activity").ActivityRow | null = sentAlready(readRowsForRequests, { lux: 1n, memo: "", to: "account" });
 const requestWindows: [300000, 600000] = [CLOCK_SKEW_MS, AGAIN_MS];
-void [requestState, cameIn, sendBack, paidAgain, repeat, requestWindows];
+void [requestState, cameIn, payerChose, sendBack, paidAgain, repeat, requestWindows];
 // @ts-expect-error a request's amount is lux as text, or null
 void matchRequests([{ at: 1, id: "a", lux: 1n, memo: "", to: "account" }], []);
 
