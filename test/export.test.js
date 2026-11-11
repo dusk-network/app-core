@@ -984,40 +984,103 @@ describe("staking rewards by calendar year", () => {
     const pool = { stake: 2n, supply: 1n };
     const entries = [
       entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x01), kind: "contract_call", timestamp: Date.UTC(2025, 5, 1), value: "1000000000000" }),
-      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x02), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "550000000000" }),
-      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x03), kind: "contract_call", timestamp: Date.UTC(2026, 8, 1), value: "560000000000" }),
+      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x02), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "548625000000" }),
+      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x03), kind: "contract_call", timestamp: Date.UTC(2026, 8, 1), value: "558600000000" }),
     ];
-    // 997.5 DUSK, the deposit fee of 2.5 off, bought 500 stDUSK; each half came back for more.
+    // 997.5 DUSK, the deposit fee of 2.5 off, bought 498.75 stDUSK at 2 DUSK each; one half came back at 2.2, the
+    // other at 2.24.
     const facts = new Map([
-      [hash(0x01), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool, stDusk: 500_000_000_000n }],
-      [hash(0x02), { amount: 550_000_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 250_000_000_000n }],
-      [hash(0x03), { amount: 560_000_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 250_000_000_000n }],
+      [hash(0x01), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool, stDusk: 498_750_000_000n }],
+      [hash(0x02), { amount: 548_625_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool: { stake: 11n, supply: 5n }, stDusk: 249_375_000_000n }],
+      [hash(0x03), { amount: 558_600_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool: { stake: 56n, supply: 25n }, stDusk: 249_375_000_000n }],
     ]);
     const rows = activityRows({ account: B, network: 2, public: entries });
     const years = await rewardsByYear({ facts, price, rows, timeZone: "UTC" });
 
     assert.deepEqual(years.map(({ sozu, year }) => [year, sozu]), [
       [2025, { lux: 0n, unpriced: 0, worth: "0.00000000" }],
-      [2026, { lux: 51_250_000_000n + 61_250_000_000n, unpriced: 0, worth: "6.75000000" }],
+      [2026, { lux: 49_875_000_000n + 59_850_000_000n, unpriced: 0, worth: "6.58350000" }],
     ]);
 
     // A first stake and its unstake in one block: the stake counts first, whichever hash sorts first.
     const sameBlock = [
       entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x02), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "1000000000000" }),
-      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x01), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "997000000000" }),
+      entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x01), kind: "contract_call", timestamp: Date.UTC(2026, 2, 1), value: "997500000000" }),
     ];
     const sameBlockFacts = new Map([
-      [hash(0x02), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool, stDusk: 500_000_000_000n }],
-      [hash(0x01), { amount: 997_000_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 500_000_000_000n }],
+      [hash(0x02), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool, stDusk: 498_750_000_000n }],
+      [hash(0x01), { amount: 997_500_000_000n, fee: 0n, kind: /** @type {const} */ ("unstake"), pool, stDusk: 498_750_000_000n }],
     ]);
 
-    assert.deepEqual((await rewardsByYear({ facts: sameBlockFacts, rows: activityRows({ account: B, network: 2, public: sameBlock }), timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: -500_000_000n, unpriced: 0, worth: null }]);
+    assert.deepEqual((await rewardsByYear({ facts: sameBlockFacts, rows: activityRows({ account: B, network: 2, public: sameBlock }), timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: 0n, unpriced: 0, worth: null }]);
+
+    // Where the rate had fallen, to 1.6, the second half came back for less than it cost: a loss, said as one.
+    const fell = new Map([...facts].map(([key, fact]) => [key, key === hash(0x03) ? { ...fact, amount: 399_000_000_000n, pool: { stake: 8n, supply: 5n } } : fact]));
+    const fellRows = activityRows({ account: B, network: 2, public: entries.map((entry, i) => (i === 2 ? { ...entry, value: "399000000000" } : entry)) });
+
+    assert.deepEqual((await rewardsByYear({ facts: fell, rows: fellRows, timeZone: "UTC" })).map(({ sozu }) => sozu?.lux), [0n, 49_875_000_000n - 99_750_000_000n]);
 
     // Without what a stake or an unstake did, or the whole history, what it earned isn't known.
     const unknown = new Map([...facts].filter(([key]) => key !== hash(0x02)));
 
     assert.deepEqual((await rewardsByYear({ facts: unknown, rows, timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: 0n, unpriced: 0, worth: null }, null]);
     assert.deepEqual((await rewardsByYear({ complete: false, facts, rows, timeZone: "UTC" })).map(({ sozu }) => sozu), [{ lux: 0n, unpriced: 0, worth: null }, null]);
+  });
+
+  it("shows no rounding remainder as a reward: Nandini's stake and its unstake at the same rate earned nothing", async () => {
+    // Nandini's: 0.2 DUSK staked, its 0.0005 deposit fee off, for 0.063348206 stDUSK at 3.149260449, all of it
+    // unstaked at that rate for 0.199499999, a lux short of what went in as the pool rounds down: shown as a
+    // Sozu reward of -0.000000001.
+    const pool = { stake: 944_778_134_700_000n, supply: 300_000_000_000_000n };
+    const minted = /** @type {bigint} */ (stDuskFor(199_500_000n, pool));
+    const after = { stake: pool.stake + 199_500_000n, supply: pool.supply + minted };
+    const back = (minted * after.stake) / after.supply;
+    const rows = activityRows({
+      account: B,
+      network: 2,
+      public: [
+        entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x31), kind: "contract_call", timestamp: Date.UTC(2026, 10, 10, 20), value: "200000000" }),
+        entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x32), kind: "contract_call", timestamp: Date.UTC(2026, 10, 10, 20, 30), value: String(back) }),
+      ],
+    });
+    const facts = new Map([
+      [hash(0x31), { amount: 200_000_000n, fee: 500_000n, kind: /** @type {const} */ ("stake"), pool, stDusk: minted }],
+      [hash(0x32), { amount: back, fee: 0n, kind: /** @type {const} */ ("unstake"), pool: after, stDusk: minted }],
+    ]);
+    const nothing = { lux: 0n, unpriced: 0, worth: "0.00000000" };
+
+    assert.deepEqual([minted, back], [63_348_206n, 199_499_999n]);
+    assert.deepEqual((await rewardsByYear({ facts, price, rows, timeZone: "UTC" })).map(({ sozu, sozuGrown, year }) => [year, sozu, sozuGrown]), [[2026, nothing, nothing]]);
+
+    // Nor do twenty such remainders add up to one: odd amounts staked and unstaked in turn, the pool's rate the
+    // same throughout but for what its rounding leaves it.
+    const turns = [];
+    const turnFacts = new Map();
+    let figures = { ...pool };
+
+    for (let i = 0; i < 20; i += 1) {
+      const amount = 100_000_000n + BigInt(i) * 1_234_567n;
+      const fee = (amount + 399n) / 400n;
+      const stDusk = /** @type {bigint} */ (stDuskFor(amount - fee, figures));
+      const stakeFact = { amount, fee, kind: /** @type {const} */ ("stake"), pool: figures, stDusk };
+
+      figures = { stake: figures.stake + amount - fee, supply: figures.supply + stDusk };
+
+      const out = (stDusk * figures.stake) / figures.supply;
+      const unstakeFact = { amount: out, fee: 0n, kind: /** @type {const} */ ("unstake"), pool: figures, stDusk };
+
+      figures = { stake: figures.stake - out, supply: figures.supply - stDusk };
+      turns.push(
+        entryOf({ blockHeight: 4_830_000 + 2 * i, contractId: POOL, fnName: "sozu_stake", hash: hash(0x40 + 2 * i), kind: "contract_call", timestamp: Date.UTC(2026, 10, 10, 21, 2 * i), value: String(amount) }),
+        entryOf({ blockHeight: 4_830_001 + 2 * i, contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x41 + 2 * i), kind: "contract_call", timestamp: Date.UTC(2026, 10, 10, 21, 2 * i + 1), value: String(out) })
+      );
+      turnFacts.set(hash(0x40 + 2 * i), stakeFact).set(hash(0x41 + 2 * i), unstakeFact);
+    }
+
+    assert.deepEqual(
+      (await rewardsByYear({ facts: turnFacts, price, rows: activityRows({ account: B, network: 2, public: turns }), timeZone: "UTC" })).map(({ sozu, sozuGrown }) => [sozu, sozuGrown]),
+      [[nothing, nothing]]
+    );
   });
 
   it("says how many rewards have no price, and leaves out what didn't go through", async () => {
@@ -1053,17 +1116,19 @@ describe("staking rewards by calendar year", () => {
       return { earned: sozuPosition({ facts, rows, status }).earned, years: years.map(({ sozu, sozuGrown, year }) => [year, sozuGrown?.lux, sozu?.lux]) };
     };
 
-    // At her run's start: grown 0.029536859, where her box said "Rewards so far 0.0295" (0.029536836 to the lux) and
-    // her own sum of the export's rates 0.029536861; her unstakes had taken out the 0.0062 shown before.
+    // At her run's start: grown 0.029536860, her own sum of the export's rates being 0.02953686098, where her box said
+    // "Rewards so far 0.0295" (0.029536836 to the lux); her unstakes had taken out the 0.0062 shown before: their
+    // stDUSK at their own rates, beyond what it cost at the rates it was staked at, 0.00620959764 to the export's.
     const before = await yearOf(lena.moves.slice(0, -3), lena.before, Date.UTC(2026, 10, 11, 0, 5));
 
-    assert.deepEqual(before.years, [[2026, 29_536_859n, 6_209_599n]]);
+    assert.deepEqual(before.years, [[2026, 29_536_860n, 6_209_597n]]);
     assert.equal(before.earned, 29_536_836n);
 
-    // At its end, after two stakes and an unstake: 0.0298 grown, and the 0.0077 taken out she saw.
+    // At its end, after two stakes and an unstake: 0.0298 grown (0.02980845917), and the 0.0077 taken out she saw
+    // (0.00768663599).
     const after = await yearOf(lena.moves, lena.after, Date.UTC(2026, 10, 11, 0, 30));
 
-    assert.deepEqual(after.years, [[2026, 29_808_457n, 7_686_638n]]);
+    assert.deepEqual(after.years, [[2026, 29_808_459n, 7_686_635n]]);
     assert.equal(after.earned, 29_808_431n);
   });
 
@@ -1096,8 +1161,8 @@ describe("staking rewards by calendar year", () => {
 
     // Grown while held: to the restake before midnight in Berlin, and from it on; beside it, what the unstake took out.
     assert.deepEqual(years.map(({ sozu, sozuGrown, year }) => [year, sozuGrown?.lux, sozu?.lux]), [
-      [2025, 9_688_015_009n, 0n],
-      [2026, 118_858_069_243n, 8_155_553_283n],
+      [2025, 9_688_015_008n, 0n],
+      [2026, 118_858_069_242n, 8_155_553_283n],
     ]);
     // Each part at the price of its end: 2025's at the year's last moment, 2026's at the unstake and now.
     assert.deepEqual(years.map(({ sozuGrown }) => [sozuGrown?.worth, sozuGrown?.unpriced]), [["0.48440075", 0], ["7.13148415", 0]]);
@@ -1113,8 +1178,8 @@ describe("staking rewards by calendar year", () => {
     const utc = await rewardsByYear({ archive: chainArchive(newYear), facts: heldFacts, now: NOW, rows, status, timeZone: "UTC" });
 
     assert.deepEqual(utc.map(({ sozuGrown, year }) => [year, sozuGrown?.lux]), [
-      [2025, 9_709_995_168n],
-      [2026, 118_836_089_084n],
+      [2025, 9_709_995_167n],
+      [2026, 118_836_089_083n],
     ]);
   });
 
@@ -1123,11 +1188,12 @@ describe("staking rewards by calendar year", () => {
     const facts = new Map([...heldFacts].filter(([key]) => key === hash(0x21)));
     const now = { balance: (minted * figures(newYear.rates.now).stake) / figures(newYear.rates.now).supply, stDusk: minted };
     const years = await rewardsByYear({ archive: chainArchive(newYear), facts, now: NOW, rows, status: { ...status, position: now }, timeZone: "Europe/Berlin" });
-    const atNewYear = (minted * figures(newYear.newYear.berlin).stake) / figures(newYear.newYear.berlin).supply;
+    const atNewYear = figures(newYear.newYear.berlin);
 
+    // 2026's: what it's worth now, less what it was worth at the new year, exactly, to the lux toward nothing.
     assert.deepEqual(years.map(({ claimed, sozu, sozuGrown, year }) => [year, claimed.lux, sozu?.lux, sozuGrown?.lux]), [
-      [2025, 0n, 0n, 9_688_015_009n],
-      [2026, 0n, 0n, now.balance - atNewYear],
+      [2025, 0n, 0n, 9_688_015_008n],
+      [2026, 0n, 0n, (now.balance * atNewYear.supply - minted * atNewYear.stake) / atNewYear.supply],
     ]);
   });
 
@@ -1142,20 +1208,24 @@ describe("staking rewards by calendar year", () => {
     assert.deepEqual(await grownBy({ archive: failing }), [null, null]);
     assert.deepEqual((await rewardsByYear({ facts: heldFacts, now: NOW, rows, status, timeZone: "Europe/Berlin" })).map(({ sozu }) => sozu?.lux), [0n, 8_155_553_283n]);
     // Without what it's worth now, this year's.
-    assert.deepEqual(await grownBy({ archive: chainArchive(newYear), status: null }), [9_688_015_009n, null]);
+    assert.deepEqual(await grownBy({ archive: chainArchive(newYear), status: null }), [9_688_015_008n, null]);
     // From a stake or an unstake not known on, and from the first with Sozu where the history isn't whole.
-    assert.deepEqual(await grownBy({ archive: chainArchive(newYear), facts: new Map([...heldFacts].filter(([key]) => key !== hash(0x22))) }), [9_688_015_009n, null]);
+    assert.deepEqual(await grownBy({ archive: chainArchive(newYear), facts: new Map([...heldFacts].filter(([key]) => key !== hash(0x22))) }), [9_688_015_008n, null]);
     assert.deepEqual(await grownBy({ archive: chainArchive(newYear), complete: false }), [null, null]);
     // Nor from one whose facts lack the pool's figures, which says nothing of the rate, and throws nothing.
     const figureless = new Map([...heldFacts].map(([key, { pool, ...fact }]) => [key, key === hash(0x22) ? fact : { ...fact, pool }]));
 
-    assert.deepEqual(await grownBy({ archive: chainArchive(newYear), facts: /** @type {any} */ (figureless) }), [9_688_015_009n, null]);
+    assert.deepEqual(await grownBy({ archive: chainArchive(newYear), facts: /** @type {any} */ (figureless) }), [9_688_015_008n, null]);
 
 
     // A year that began and ended its own stake needs no read: its stake's rate and its unstake's say it.
     const within = await rewardsByYear({ facts: new Map([...heldFacts].map(([key, fact]) => [key, key === hash(0x22) ? { ...fact, stDusk: minted } : fact])), rows: heldRows().map((row) => ({ ...row, time: row.sozu === "stake" ? Date.UTC(2026, 0, 2) : row.time })), timeZone: "Europe/Berlin" });
 
-    assert.deepEqual(within.map(({ sozuGrown, year }) => [year, sozuGrown?.lux]), [[2026, (minted * figures(newYear.rates.unstake).stake) / figures(newYear.rates.unstake).supply - (minted * figures(newYear.rates.stake).stake) / figures(newYear.rates.stake).supply]]);
+    const [atStake, atUnstake] = [figures(newYear.rates.stake), figures(newYear.rates.unstake)];
+    const rose = (minted * (atUnstake.stake * atStake.supply - atStake.stake * atUnstake.supply)) / (atStake.supply * atUnstake.supply);
+
+    // What it grew, exactly, to the lux toward nothing; and as all of it was unstaked, what that took out is the same.
+    assert.deepEqual(within.map(({ sozu, sozuGrown, year }) => [year, sozuGrown?.lux, sozu?.lux]), [[2026, rose, rose]]);
   });
 
   it("counts a pool's first stake, into a pool of no stDUSK yet, at one stDUSK a DUSK, as the pool mints it", async () => {
@@ -1165,7 +1235,7 @@ describe("staking rewards by calendar year", () => {
 
     assert.deepEqual(years.map(({ sozuGrown, year }) => [year, sozuGrown?.lux]), [
       [2025, atNewYear - minted],
-      [2026, 118_858_069_243n],
+      [2026, 118_858_069_242n],
     ]);
   });
 });

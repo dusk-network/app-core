@@ -8,14 +8,15 @@
  *
  * @example
  * ```js
- * import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, profileNameClash } from "@dusk/app-core/names";
+ * import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameStarts, profileNameClash } from "@dusk/app-core/names";
  *
  * nameHides("\u202eecilA"); // true: it reads as "Alice". Refuse it, saying NAME_HIDES
  * looksAlike("Bob", "Bօb"); // true: an Armenian օ
  * nameClash("Profile 2", { profiles, contacts, except: editedId });
- * // { kind: "profile", same: true, entry: { name: "Profile 2", … } }: refuse it
- * profileNameClash("Alice", { profiles, contacts, self: account });
- * // { kind: "contact", same: true, entry: { name: "Alice", … } }: refuse it too
+ * // { kind: "profile", same: true, entry: { name: "Profile 2", … }, name: "Profile 2" }: refuse it
+ * profileNameClash("sofiadesign.dusk", { profiles: [{ account, name: "Profile 1", duskName: "sofiadesign.dusk" }, …], contacts, self: other });
+ * // { kind: "profile", same: true, entry: { name: "Profile 1", … }, name: "sofiadesign.dusk" }: refuse it too
+ * nameStarts("Lucas (petit-fils)", { profiles }); // { kind: "profile", entry: { name: "Lucas", … }, name: "Lucas" }: ask
  * lookAlikes([...profiles, ...contacts]); // the ones to show with their address
  * ```
  *
@@ -65,30 +66,52 @@ export declare function looksAlike(a: unknown, b: unknown): boolean;
 
 /**
  * The name a new or changed contact's name takes, or looks like, of the
- * person's own profiles first, then of their other contacts: `except` is the
- * ID of the contact being changed. `same` says it reads as that name, rather
- * than looking like it in other letters. A contact that takes a profile's name
+ * person's own profiles first, by the name each was given and by its
+ * verified .dusk name (`duskName`), then of their other contacts: `except`
+ * is the ID of the contact being changed. `name` is the name it takes, as
+ * that entry goes by it, and `same` says it reads as that name, rather than
+ * looking like it in other letters. A contact that takes a profile's name
  * would read as that profile wherever money is confirmed: refuse it. One that
  * takes a contact's can be saved, with the other's address beside it. Null
  * for none.
  */
-export declare function nameClash<P extends { name?: unknown }, C extends { name?: unknown; id?: unknown }>(
+export declare function nameClash<P extends { name?: unknown; duskName?: unknown }, C extends { name?: unknown; id?: unknown }>(
   name: unknown,
   among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; except?: unknown }
-): { kind: "profile"; same: boolean; entry: P } | { kind: "contact"; same: boolean; entry: C } | null;
+): { kind: "profile"; same: boolean; entry: P; name: string } | { kind: "contact"; same: boolean; entry: C; name: string } | null;
 
 /**
  * The name a profile's new name takes, or looks like, as `nameClash` says it
- * for a contact's: of the person's other profiles first, then of their
- * contacts. `self` is the account or address of the profile named: it and a
+ * for a contact's: of the person's other profiles first, by the name each
+ * was given and by its verified .dusk name (`duskName`), as "sofiadesign.dusk"
+ * of the wallet's other profile, then of their contacts. `self` is the
+ * account or address of the profile named: it, its own .dusk name and a
  * contact saved with its address take nothing from it. Refuse both kinds: a
  * profile named like another, or like a contact, reads as that one in
  * History and on Review. Null for none.
  */
-export declare function profileNameClash<P extends { name?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; address?: unknown }>(
+export declare function profileNameClash<P extends { name?: unknown; duskName?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; address?: unknown }>(
   name: unknown,
   among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; self?: unknown }
-): { kind: "profile"; same: boolean; entry: P } | { kind: "contact"; same: boolean; entry: C } | null;
+): { kind: "profile"; same: boolean; entry: P; name: string } | { kind: "contact"; same: boolean; entry: C; name: string } | null;
+
+/**
+ * The profile, then the contact, whose name starts with this one's, word for
+ * word, or is the start of it, as the look-alike rules read names (whatever
+ * their case, accents, spaces, punctuation and what can't be seen, and in
+ * letters that look alike): "Lucas" and "Lucas (petit-fils)", but not "Ann"
+ * and "Anna". A profile's verified .dusk name (`duskName`) counts as one of
+ * its names. For a question, not a refusal: the two read differently, but a
+ * glance can take one for the other, as Send's "From Lucas … To Lucas
+ * (petit-fils)". Pass what to check against: a contact's name against
+ * `profiles`, a profile's against `contacts` (and `self`, as
+ * `profileNameClash` takes it). The same name is `nameClash`'s, not this.
+ * Null for none.
+ */
+export declare function nameStarts<P extends { name?: unknown; duskName?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; address?: unknown }>(
+  name: unknown,
+  among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; self?: unknown }
+): { kind: "profile"; entry: P; name: string } | { kind: "contact"; entry: C; name: string } | null;
 
 /**
  * The entries whose name looks like another's of another address, profiles

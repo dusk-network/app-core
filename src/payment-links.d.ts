@@ -59,18 +59,24 @@ export type PaymentLink = {
  * and its network as `@dusk:2` or, as an https link says it, `network=` in
  * its query), an https link to the web wallet's Send on any network there's a
  * file for (or at `walletUrl`, the app's own address), or a recipient as it
- * is, as a QR code may hold. Null for nothing, for a `dusk:` link that isn't
- * one of those, for a link that says one of its fields (`to`, `amount`,
- * `amountLux`, `memo`, `label`, `network`) more than once, or a `dusk:` link
- * that names a recipient in its query too, for one without a recipient, for
- * one that names a network that can't be read (as "dusk:02", a number with a
- * zero before it), for one that names two (a `dusk:` link's `@` and query, or
- * a network on another network's wallet), and for one with a user part before
- * its host (`https://apps.testnet.dusk.network@apps.dusk.network/…`, which
- * goes to the host after the `@`). An https link to anywhere else is no
- * payment link: it reads as a recipient, which Send refuses. Nothing is
- * checked here but its form: Send checks what it fills in. `readPaymentLink`
- * says why a link is refused.
+ * is, as a QR code may hold. A field is read by its name in any case: `To=`
+ * is `to=`, and `AMOUNT=` is `amount=`. Null for nothing, for a `dusk:` link
+ * that isn't one of those, for a link that says one of its fields (`to`,
+ * `amount`, `amountLux`, `memo`, `label`, `network`) more than once, in any
+ * case, or a `dusk:` link that names a recipient in its query too, for one
+ * without a recipient, for one that names a network that can't be read (as
+ * "dusk:02", a number with a zero before it), for one that names two (a
+ * `dusk:` link's `@` and query, or a network on another network's wallet),
+ * for one with a user part before its host
+ * (`https://apps.testnet.dusk.network@apps.dusk.network/…`, which goes to the
+ * host after the `@`), for a `dusk:shielded-` link to a public account or a
+ * `dusk:public-` link to a shielded address, and for a `dusk:` link with a
+ * `#` in it, which readers read in different ways. An https link's fragment
+ * is the browser's: left out, as the page it opens leaves it out. An https
+ * link to anywhere else is no payment link: it reads as a recipient, which
+ * Send refuses. Nothing is checked here but its form: Send checks what it
+ * fills in. `readPaymentLink` says why a link is refused, and refuses one
+ * whose recipient is no address too.
  */
 export declare function parsePaymentLink(input: unknown, options?: { walletUrl?: string }): PaymentLink | null;
 
@@ -79,6 +85,9 @@ export declare const LINK_UNREADABLE: "That link can't be read. Ask for a new on
 
 /** "This link asks for two different amounts. Ask for a new one." */
 export declare const LINK_TWO_AMOUNTS: "This link asks for two different amounts. Ask for a new one.";
+
+/** "This link's address isn't valid. Ask for a new one.": a link whose recipient Send can't pay, as `readPaymentLink` refuses it. */
+export declare const LINK_BAD_ADDRESS: "This link's address isn't valid. Ask for a new one.";
 
 /**
  * A link as Send reads it on the wallet's network: what it fills in, or why it
@@ -90,12 +99,15 @@ export type LinkRead = {
   /**
    * Why it fills in nothing, in plain words, for whoever sent it to fix: "This
    * link says the memo twice. Ask for a new one." (or the recipient, as a
-   * `dusk:` link with `to=` says it), "This link has something
-   * before the site's address. Ask for a new one.", "This link names two
-   * networks, Testnet and Mainnet. Ask for a new one.", "This link's network
-   * can't be read. Ask for a new one.", "This link doesn't say who to pay. Ask
-   * for a new one.", or `LINK_UNREADABLE` for what has no form a payment
-   * link's has; "" when it fills in `link`.
+   * `dusk:` link with `to=` says it, or `To=` beside `to=`), "This link has
+   * something before the site's address. Ask for a new one.", "This link
+   * names two networks, Testnet and Mainnet. Ask for a new one.", "This
+   * link's network can't be read. Ask for a new one.", "This link doesn't say
+   * who to pay. Ask for a new one.", "This link asks for a shielded payment to
+   * a public account. Ask for a new one." (or a public one to a shielded
+   * address), `LINK_BAD_ADDRESS` for a recipient Send can't pay, or
+   * `LINK_UNREADABLE` for what has no form a payment link's has, as a `dusk:`
+   * link with a `#`; "" when it fills in `link`.
    */
   problem: string;
   /**
@@ -112,14 +124,19 @@ export type LinkRead = {
 };
 
 /**
- * What a link asks of Send, the same whether it's pasted, scanned or opened,
- * so a wallet says at once what's wrong with it: before Review, and never as
- * a recipient. Null for what isn't a link, as an address, a name or an https
- * link to anywhere but the web wallet's Send: Send reads that as a recipient.
- * `network` is the wallet's (a network, its chain ID, "dusk:2" or its name),
- * and `walletUrl` the app's own address, as `parsePaymentLink` takes it.
- * Refused, in this order: amounts that differ (in DUSK and in lux, or one of
- * them twice); what `parsePaymentLink` can't read, saying why; a link for
+ * What a link asks of Send, the same whether it's pasted, scanned, opened or
+ * handed over by a site, so a wallet says at once what's wrong with it:
+ * before Review, and never as a recipient. Null for what isn't a link, as an
+ * address, a name or an https link to anywhere but the web wallet's Send:
+ * Send reads that as a recipient. `network` is the wallet's (a network, its
+ * chain ID, "dusk:2" or its name), and `walletUrl` the app's own address, as
+ * `parsePaymentLink` takes it; without `network`, a link for any network
+ * fills in. Refused, in this order: amounts that differ (in DUSK and in lux,
+ * or one of them twice, in any case); what `parsePaymentLink` can't read,
+ * saying why; a recipient Send can't pay (`LINK_BAD_ADDRESS`): one that isn't
+ * an account, a shielded address, a `.dusk` name or an EVM address, as two
+ * addresses in one, or one with a line break or a hidden character in it,
+ * which a field that drops them would make an address to pay; and a link for
  * another network, a `dusk:` link's by its `@` or its query alike.
  */
 export declare function readPaymentLink(input: unknown, options?: { network?: unknown; walletUrl?: string }): LinkRead | null;

@@ -223,6 +223,117 @@ describe("a link as Send reads it, pasted, scanned or opened", () => {
     like(readPaymentLink(`dusk:public-${A}?memo=One&memo=Two`, { network: 2 }), { problem: "This link says the memo twice. Ask for a new one.", reason: "unreadable" });
   });
 
+  it("refuses a field said twice in two cases, in every shape: Marek's To= beside to=, and Amount= beside amount=", () => {
+    // Each was filled in with the field in its own case, the other dropped without a word: a reader that
+    // ignores case would have paid the other recipient, or 0.15.
+    for (const [twice, problem] of [
+      [`To=${B}&to=${A}&amount=0.001`, "This link says the recipient twice. Ask for a new one."],
+      [`to=${A}&TO=${B}`, "This link says the recipient twice. Ask for a new one."],
+      [`to=${A}&amount=0.001&Amount=0.15`, LINK_TWO_AMOUNTS],
+      [`to=${A}&amount=0.001&amountlux=150000000`, LINK_TWO_AMOUNTS],
+      [`to=${A}&amount=0.001&AMOUNT=0.001`, "This link says the amount twice. Ask for a new one."],
+      [`to=${A}&memo=One&Memo=One`, "This link says the memo twice. Ask for a new one."],
+      [`to=${A}&label=A&LABEL=B`, "This link says the label twice. Ask for a new one."],
+      // A Kelvin sign is a K in lower case, as any reader that ignores case reads it.
+      [`to=${A}&network=testnet&NETWOR%E2%84%AA=mainnet`, "This link says the network twice. Ask for a new one."],
+    ]) {
+      const link = `${testnetSend}?${twice}`;
+      const reason = problem === LINK_TWO_AMOUNTS ? "two-amounts" : "unreadable";
+
+      if (reason === "unreadable") assert.equal(parsePaymentLink(link), null, twice);
+      like(readPaymentLink(link, { network: 2 }), { link: null, problem, reason }, twice);
+    }
+
+    for (const [link, problem] of [
+      [`dusk:public-${A}?To=${B}`, "This link says the recipient twice. Ask for a new one."],
+      [`dusk:${A}?amount=0.001&Amount=0.15`, LINK_TWO_AMOUNTS],
+      [`dusk:${A}?amount=0.001&AMOUNTLUX=150000000`, LINK_TWO_AMOUNTS],
+      [`dusk:shielded-${SHIELDED}?memo=One&MEMO=Two`, "This link says the memo twice. Ask for a new one."],
+      [`dusk://public-${A}@dusk:2?network=testnet&Network=testnet`, "This link says the network twice. Ask for a new one."],
+    ]) {
+      like(readPaymentLink(link, { network: 2 }), { link: null, problem }, link);
+    }
+
+    // Said once, in any case, it's that field: nothing a link says is dropped.
+    like(readPaymentLink(`${testnetSend}?To=${A}&Amount=0.15&MEMO=Factura+33`, { network: 2 })?.link, { amountDusk: "0.15", lux: 150_000_000n, memo: "Factura 33", to: A });
+    like(readPaymentLink(`dusk:${A}?AmountLux=1500000000&Network=testnet`, { network: 2 })?.link, { chainId: "dusk:2", lux: 1_500_000_000n });
+    like(readPaymentLink(`${testnetSend}?to=${A}&Network=mainnet`, { network: 2 }), { link: null, problem: "This link names two networks, Testnet and Mainnet. Ask for a new one." });
+  });
+
+  it("refuses a link whose recipient is no address, as the web wallet does: a second address in it, a line break, a hidden character", () => {
+    // Marek's: the extension filled these into To, under "Filled in from the link", one backspace from paying.
+    const badAddress = { link: null, problem: "This link's address isn't valid. Ask for a new one.", reason: "unreadable" };
+
+    for (const to of [
+      `${A},${B}`,
+      `${A}%2C${B}`,
+      `${A}%20${B}`,
+      `${A}+${B}`,
+      `${A};${B}`,
+      `${A}%00`,
+      `${A.slice(0, 40)}%0A${A.slice(40)}`,
+      `${A.slice(0, 40)}%0D${A.slice(40)}`,
+      `${A.slice(0, 40)}%E2%80%AE${A.slice(40)}`,
+      `${A}%E2%80%8B`,
+      `${A}%EF%B8%8F`,
+      A.slice(0, -6),
+      "1".repeat(96),
+      "Wendy",
+      "ali%E2%80%8Bce.dusk",
+      "alice.dusk%0Abob.dusk",
+    ]) {
+      const link = `${testnetSend}?to=${to}&amount=0.001&network=testnet`;
+
+      like(readPaymentLink(link, { network: 2 }), { ...badAddress, chainId: "dusk:2" }, to);
+      // On any network: what can't be paid anywhere says so before which network it's for.
+      like(readPaymentLink(link, { network: 1 }), badAddress, to);
+      like(readPaymentLink(link), badAddress, to);
+    }
+
+    like(readPaymentLink(`dusk:public-${A}%2C${B}?amount=0.001`, { network: 2 }), badAddress);
+    like(readPaymentLink(`dusk:shielded-${SHIELDED}%E2%80%8B`, { network: 2 }), badAddress);
+
+    // What Send takes, or says more of: an account, a shielded address, a .dusk name and an EVM address; the
+    // ends' spaces and line breaks aren't the address's.
+    for (const to of [A, SHIELDED, "alice.dusk", "Shop-2.Alice.dusk", "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F", `%0A${A}%20`]) {
+      like(readPaymentLink(`${testnetSend}?to=${to}&amount=0.001`, { network: 2 }), { problem: "", reason: "" }, to);
+    }
+
+    // Read as a link, its form alone, it still is one: Send's reading is the one that refuses.
+    like(parsePaymentLink(`${testnetSend}?to=${A},${B}`), { form: "https", to: `${A},${B}` });
+  });
+
+  it("refuses a dusk: link that asks for a shielded payment to a public account, or a public one to a shielded address", () => {
+    // Marek's: dusk:shielded- with his public account filled in a public send, without a word of what it asked.
+    like(readPaymentLink(`dusk:shielded-${A}?amount=0.001`, { network: 2 }), {
+      link: null,
+      problem: "This link asks for a shielded payment to a public account. Ask for a new one.",
+      reason: "unreadable",
+    });
+    like(readPaymentLink(`dusk:public-${SHIELDED}@dusk:2?amount=0.001`, { network: 2 }), {
+      link: null,
+      problem: "This link asks for a public payment to a shielded address. Ask for a new one.",
+      reason: "unreadable",
+    });
+    assert.equal(parsePaymentLink(`dusk:shielded-${A}`), null);
+    assert.equal(parsePaymentLink(`DUSK:SHIELDED-${A}`), null);
+    // Each to its own kind, as it asks.
+    like(readPaymentLink(`dusk:shielded-${SHIELDED}?amount=0.001`, { network: 2 })?.link, { kind: "shielded", to: SHIELDED });
+    like(readPaymentLink(`dusk:public-${A}?amount=0.001`, { network: 2 })?.link, { kind: "public", to: A });
+  });
+
+  it("refuses a dusk: link with a # in it, rather than reading what follows it into a field", () => {
+    // Marek's: a second recipient after the # landed in Amount.
+    for (const link of [`dusk:${A}?amount=0.001#to=${B}`, `dusk:public-${A}?amount=0.001#`, `dusk:public-${A}#amount=5`, `dusk:${A}?amount=0.001#&amount=0.15`, `dusk:public-${A}@dusk:2#x`]) {
+      assert.equal(parsePaymentLink(link), null, link);
+      like(readPaymentLink(link, { network: 2 }), { link: null, problem: LINK_UNREADABLE, reason: "unreadable" }, link);
+    }
+
+    // An https link's fragment is the browser's, as the page it opens leaves it out: never read into a field.
+    like(readPaymentLink(`${testnetSend}?to=${A}&amount=0.001#to=${B}`, { network: 2 })?.link, { amountDusk: "0.001", to: A });
+    like(readPaymentLink(`dusk:${A}?amount=0.001&memo=Order%20%2312`, { network: 2 })?.link, { amountDusk: "0.001", memo: "Order #12" });
+  });
+
   it("refuses a dusk: link that names a recipient in its query too, as an https link naming two", () => {
     // Marek's: it filled in the first and dropped the other without a word.
     for (const link of [`dusk:public-${A}?to=${B}&amount=0.001`, `dusk:${A}?to=${B}&amount=0.001`, `dusk:public-${A}?to=${A}`, `dusk:public-${A}@dusk:2?amount=0.001&to=`]) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { networks } from "@dusk-network/networks";
 import { nativeRateEstimate, sozuRateEstimate } from "@dusk-network/networks/rates";
 import { sozuFee, sozuStake } from "@dusk-network/networks/sozu";
 
@@ -517,10 +518,14 @@ describe("what native staking paid", () => {
 
     assert.equal(native.days, 30);
     assert.equal(native.blocks, 6);
-    assert.equal(native.perBlock, 15_516_918_020n);
-    assert.deepEqual([native.from.height, native.to.height], [recorded.tip - 30 * 8640, recorded.tip]);
+    // The six paid 15.2343, 15.2971, 15.4855 twice, 15.6739 and 15.9251: the four between the least and the most.
+    assert.equal(native.perBlock, (15_297_142_114n + 2n * 15_485_521_462n + 15_673_900_810n) / 4n);
+    // The 30 days to the last whole day of blocks an hour below the tip.
+    const end = Math.floor((recorded.tip - 360) / 8640) * 8640;
+
+    assert.deepEqual([native.from.height, native.to.height], [end - 30 * 8640, end]);
     // At the period's own pace, over what's staked now: the 87% the wallets showed, not 100%.
-    assert.equal(Math.round(native.rate * 1000) / 1000, 0.872);
+    assert.equal(Math.round(native.rate * 1000) / 1000, 0.871);
     assert.equal(native.staked > 56_000_000n * DUSK && native.staked < 56_200_000n * DUSK, true);
     // How a million is shortened ("56.1M" or "56.1m") is the runtime's own, so it's asked of the same formatter.
     const staked = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1, notation: "compact" }).format(56_100_000);
@@ -549,18 +554,115 @@ describe("what native staking paid", () => {
     assert.equal(told.queries.length, 1);
   });
 
-  it("counts what's staked at the app's tip, also where what was paid is kept from an earlier one", async () => {
+  it("counts what's staked now, also where what was paid is kept from an earlier read", async () => {
     const archive = archiveOf();
     const cache = new Map();
     const now = Date.UTC(2026, 10, 10, 12);
     const first = /** @type {any} */ (await nativeRewards({ archive, cache, now, provisioners: recorded.provisioners }));
-    // A stake that's eligible 100 blocks after the tip read, asked about 200 blocks after it.
+    // A stake made since, eligible 100 blocks after the tip read, asked about 50 blocks after it: staked already.
     const newcomer = { amount: 1_000_000 * Number(DUSK), eligibility: recorded.tip + 100 };
-    const later = /** @type {any} */ (await nativeRewards({ archive, cache, now: now + 1, provisioners: [...recorded.provisioners, newcomer], tipHeight: recorded.tip + 200 }));
+    const later = /** @type {any} */ (await nativeRewards({ archive, cache, now: now + 1, provisioners: [...recorded.provisioners, newcomer], tipHeight: recorded.tip + 50 }));
 
     assert.equal(archive.queries.length, 2);
     assert.equal(later.staked, first.staked + 1_000_000n * DUSK);
     assert.ok(later.rate < first.rate);
+  });
+
+  /**
+   * An archive whose every block pays stakers what `pays` says of its height, in the stake contract's reward
+   * event as the chain writes it, a block every 10 seconds up to `tip`; `queries` keeps each query.
+   *
+   * @param {(height: number) => bigint} pays
+   * @param {number} [tip]
+   */
+  const paying = (pays, tip = recorded.tip) => {
+    /** @type {string[]} */
+    const queries = [];
+    const STAKE = networks.mainnet.contracts.stake;
+    /** @param {bigint} value */
+    const u64 = (value) => Buffer.from(BigInt.asUintN(64, value).toString(16).padStart(16, "0"), "hex").reverse().toString("hex");
+    // One reward, to the generator, then rkyv's root: the rewards' count, and where they start from it.
+    const eventOf = (/** @type {number} */ height) => ({ data: `${"00".repeat(200)}${u64(pays(height))}${"00".repeat(8)}${u64((1n << 32n) | BigInt.asUintN(32, -216n))}`, source: STAKE, topic: "reward" });
+
+    return {
+      queries,
+      query: async (/** @type {string} */ query) => {
+        queries.push(query);
+
+        /** @type {Record<string, any>} */
+        const data = {};
+
+        for (const [, alias, asked] of query.matchAll(/(\w+): block\(height: (-?\d+)\) \{ header \{ height(?: timestamp)? \} \}/g)) {
+          const height = asked === "-1" ? tip : Number(asked);
+
+          data[alias] = height > tip ? null : { header: { height, timestamp: 1_790_000_000 + height * 10 } };
+        }
+        for (const [, alias, height] of query.matchAll(/(\w+): contractEvents\(height: (\d+)\)/g)) data[alias] = Number(height) > tip ? { json: [] } : { json: [eventOf(Number(height))] };
+
+        return data;
+      },
+    };
+  };
+  // Lena's: the chain's blocks pay stakers a little more or less, by the votes each counts.
+  const varied = (/** @type {number} */ height) => 15_200_000_000n + BigInt(height % 97) * 10_000_000n;
+
+  it("is the same for apps that read it in the same day of blocks, where the web wallet said 89% and the extension 88% at once", async () => {
+    // Two apps a block or two apart, and one later that day, whether they give their tip or the archive says it.
+    const reads = await Promise.all(
+      [0, 1, 7, 600].map((ahead) => nativeRewards({ archive: paying(varied, recorded.tip + ahead), provisioners: recorded.provisioners, tipHeight: ahead % 2 ? recorded.tip + ahead : undefined }))
+    );
+
+    for (const read of reads.slice(1)) assert.deepEqual(read, reads[0]);
+    assert.equal(reads[0]?.days, 30);
+    assert.equal(reads[0]?.blocks, 6);
+    // The 30 days end on a whole day of blocks, kept clear of the tip.
+    assert.equal(reads[0]?.to.height, Math.floor((recorded.tip - 360) / 8640) * 8640);
+    assert.equal(/** @type {any} */ (reads[0]).to.height - /** @type {any} */ (reads[0]).from.height, 30 * 8640);
+
+    // A day of blocks on, it's the next 30 days', and most of what it read is the same.
+    const next = await nativeRewards({ archive: paying(varied, recorded.tip + 8640), provisioners: recorded.provisioners, tipHeight: recorded.tip + 8640 });
+
+    assert.equal(/** @type {any} */ (next).to.height - /** @type {any} */ (reads[0]).to.height, 8640);
+    assert.ok(Math.abs(Number(/** @type {any} */ (next).perBlock - /** @type {any} */ (reads[0]).perBlock)) <= (96 * 10_000_000) / 4);
+  });
+
+  it("is the same for reads minutes apart across an epoch's start where a suspended stake is eligible again, where the extension said 94.05% and then 88.32%", async () => {
+    // Testnet on 11 November: 3.41M DUSK suspended for a fault was eligible again from 4,829,760, an epoch's start,
+    // between two of the extension's reads four minutes apart; the period's pay was the same in both. Here the
+    // recorded 3,421,103 DUSK stake is suspended until 606 blocks past the tip, and read every 25 blocks across that.
+    const suspended = recorded.provisioners.map((/** @type {any} */ each) => (String(each.amount).startsWith("3421103") ? { ...each, eligibility: recorded.tip + 606 } : each));
+
+    assert.equal(suspended.filter((/** @type {any} */ each, /** @type {number} */ i) => each !== recorded.provisioners[i]).length, 1);
+    const archive = paying(varied, recorded.tip + 700);
+    const reads = await Promise.all([580, 605, 630, 655].map((ahead) => nativeRewards({ archive, provisioners: suspended, tipHeight: recorded.tip + ahead })));
+
+    for (const read of reads.slice(1)) assert.deepEqual(read, reads[0]);
+    // What's staked is all of it, eligible yet or not: the suspended stake, and one waiting for its first epoch.
+    const all = recorded.provisioners.reduce((/** @type {bigint} */ sum, /** @type {any} */ each) => (BigInt(each.amount) >= 1000n * DUSK ? sum + BigInt(each.amount) : sum), 0n);
+
+    assert.equal(reads[0]?.staked, all);
+  });
+
+  it("keeps what it read for as long as the app's tip is in the same day of blocks, and reads the next day's anew", async () => {
+    const archive = paying(varied, recorded.tip + 9000);
+    const cache = new Map();
+    const now = Date.UTC(2026, 10, 10, 12);
+    const first = await nativeRewards({ archive, cache, now, provisioners: recorded.provisioners, tipHeight: recorded.tip });
+
+    assert.equal(archive.queries.length, 1);
+    // Two hours on, the same day of blocks: what was read is what would be read.
+    assert.deepEqual(await nativeRewards({ archive, cache, now: now + 2 * HOUR, provisioners: recorded.provisioners, tipHeight: recorded.tip + 600 }), first);
+    assert.equal(archive.queries.length, 1);
+    // The next day's, read once.
+    const next = await nativeRewards({ archive, cache, now: now + 2 * HOUR, provisioners: recorded.provisioners, tipHeight: recorded.tip + 8640 });
+
+    assert.notDeepEqual(next?.to, first?.to);
+    assert.equal(archive.queries.length, 2);
+
+    // What 0.11 kept, of the tip it read and no more, is read again rather than thrown on.
+    const old = new Map([["native-rewards::30", JSON.stringify({ measure: { ...first, perBlock: `${first?.perBlock}`, rate: undefined, staked: undefined }, readAt: now })]]);
+
+    assert.deepEqual(await nativeRewards({ archive, cache: old, now, provisioners: recorded.provisioners }), await nativeRewards({ archive, now, provisioners: recorded.provisioners }));
   });
 
   it("is nothing where the blocks' rewards can't be read, or nothing is staked: the rate is estimated as before", async () => {

@@ -26,6 +26,8 @@ const SEND_PATH = "/dashboard/send";
 // A chain's number as it's written once: "dusk:02" isn't chain 2's.
 const CHAIN_ID = /^dusk:(0|[1-9]\d{0,31})$/i;
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+// A .dusk name as it can be written: its labels' letters, digits and hyphens, which Send resolves or says more of.
+const DUSK_NAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.dusk$/i;
 const ACCOUNT_BYTES = 96;
 const SHIELDED_BYTES = 64;
 const MAX_U64 = (1n << 64n) - 1n;
@@ -33,12 +35,18 @@ const MAX_U64 = (1n << 64n) - 1n;
 /** What a link may say, each once: the recipient, what's asked, and the network. */
 const SAID_ONCE = Object.freeze(["to", "amount", "amountLux", "memo", "label", "network"]);
 
+/** Each field by its name in lower case: a field is read by its name in any case, as a reader that ignores case reads it. */
+const FIELD_NAMED = new Map(SAID_ONCE.map((name) => [name.toLowerCase(), name]));
+
 /** Why a link fills in nothing, in the words both wallets use. */
 export const LINK_UNREADABLE = "That link can't be read. Ask for a new one.";
 export const LINK_TWO_AMOUNTS = "This link asks for two different amounts. Ask for a new one.";
+export const LINK_BAD_ADDRESS = "This link's address isn't valid. Ask for a new one.";
 const LINK_NO_RECIPIENT = "This link doesn't say who to pay. Ask for a new one.";
 const LINK_USER_PART = "This link has something before the site's address. Ask for a new one.";
 const LINK_NETWORK_UNREAD = "This link's network can't be read. Ask for a new one.";
+const LINK_SHIELDED_TO_PUBLIC = "This link asks for a shielded payment to a public account. Ask for a new one.";
+const LINK_PUBLIC_TO_SHIELDED = "This link asks for a public payment to a shielded address. Ask for a new one.";
 
 /** A field a link says twice, as a refusal names it. */
 const FIELD_WORDS = Object.freeze({ amount: "the amount", amountLux: "the amount", label: "the label", memo: "the memo", network: "the network", to: "the recipient" });
@@ -122,6 +130,37 @@ export function recipientKind(recipient) {
 }
 
 /**
+ * A query with each field named as links write it, whatever its case: "To"
+ * and "AMOUNT" are `to` and `amount`. A field said in two cases is said
+ * twice, and one said once in another case is still that field, never left
+ * out.
+ *
+ * @param {URLSearchParams} params
+ */
+function fieldsOf(params) {
+  const named = new URLSearchParams();
+
+  params.forEach((value, name) => named.append(FIELD_NAMED.get(name.toLowerCase()) ?? name, value));
+
+  return named;
+}
+
+/**
+ * Whether a link's recipient is one Send can pay, or says more of: an
+ * account, a shielded address, a `.dusk` name or an EVM address. Anything
+ * else is no one to pay, as two addresses in one, or one with a line break
+ * or a hidden character in it, though a field that drops what's in the way
+ * would leave an address to pay.
+ *
+ * @param {string} to
+ */
+function payable(to) {
+  const kind = recipientKind(to);
+
+  return kind === "public" ? isAccount(to) : kind === "shielded" || DUSK_NAME.test(to) || EVM_ADDRESS.test(to);
+}
+
+/**
  * The amounts a link's query says: an exact amount in lux decides, and the
  * amount in DUSK is what it comes to.
  *
@@ -136,8 +175,8 @@ function amountsOf(params) {
 }
 
 /**
- * Why a query can't be read: a field it says more than once, as the link
- * could be read two ways. "" for none.
+ * Why a query can't be read: a field it says more than once, in any case
+ * (`fieldsOf`), as the link could be read two ways. "" for none.
  *
  * @param {URLSearchParams} params
  * @returns {string}
@@ -163,15 +202,19 @@ const twoNetworks = (a, b) => `This link names two networks, ${chainLabel(a)} an
  * address as it is, with `//` after the scheme or not, and its query, its
  * network after the `@` or in its query, as an https link's; why it's
  * refused where it names two networks, one that can't be read, says a field
- * twice (a recipient in its query too) or no recipient; and null for any other.
+ * twice (a recipient in its query too) or no recipient, asks for one kind of
+ * payment to the other kind's recipient, or has a `#`; and null for any other.
  *
  * @param {string} raw
  * @returns {{ link: PaymentLink, params: URLSearchParams } | { problem: string } | null}
  */
 function duskForm(raw) {
+  // Readers differ on what follows a #, a fragment to leave out or more of the query: it's read as neither.
+  if (raw.includes("#")) return { problem: LINK_UNREADABLE };
+
   const rest = raw.replace(/^dusk:/i, "").replace(/^\/+/, "");
   const q = rest.indexOf("?");
-  const params = new URLSearchParams(q >= 0 ? rest.slice(q + 1) : "");
+  const params = fieldsOf(new URLSearchParams(q >= 0 ? rest.slice(q + 1) : ""));
   let head = (q >= 0 ? rest.slice(0, q) : rest).trim();
   let atChain = "";
   const at = head.lastIndexOf("@");
@@ -209,6 +252,12 @@ function duskForm(raw) {
 
   if (!to) return { problem: LINK_NO_RECIPIENT };
 
+  // The kind it names is the payment it asks for: a recipient of the other kind would be paid the other way.
+  const actual = recipientKind(to);
+
+  if (named === "shielded" && actual === "public") return { problem: LINK_SHIELDED_TO_PUBLIC };
+  if (named === "public" && actual === "shielded") return { problem: LINK_PUBLIC_TO_SHIELDED };
+
   return { link: { ...amountsOf(params), chainId: atChain || queryChain, form: "dusk", kind, label: textOf(params.get("label")), memo: textOf(params.get("memo")), raw, to }, params };
 }
 
@@ -245,7 +294,8 @@ function walletForm(raw, walletUrl) {
 
   if (!ours && (!walletUrl || `${trimmed(walletUrl)}${SEND_PATH}` !== page)) return undefined;
 
-  const params = url.searchParams;
+  // Its fragment is the browser's: the page it opens leaves it out, and so does this.
+  const params = fieldsOf(url.searchParams);
   const said = textOf(params.get("network"));
   const chainId = chainIdOf(said);
   const to = textOf(params.get("to"));
@@ -304,20 +354,22 @@ export function parsePaymentLink(input, { walletUrl } = {}) {
 }
 
 /**
- * A link's query, as its form reads it: all after the `?` of a `dusk:` link,
+ * A link's query, as its form reads it, its fields named in any case: all
+ * after the `?` of a `dusk:` link, up to a `#`, which its reading refuses;
  * an https link's search.
  *
  * @param {string} raw
  */
 function queryOf(raw) {
   if (/^dusk:/i.test(raw)) {
-    const q = raw.indexOf("?");
+    const [link] = raw.split("#");
+    const q = link.indexOf("?");
 
-    return new URLSearchParams(q >= 0 ? raw.slice(q + 1) : "");
+    return fieldsOf(new URLSearchParams(q >= 0 ? link.slice(q + 1) : ""));
   }
 
   try {
-    return new URL(raw).searchParams;
+    return fieldsOf(new URL(raw).searchParams);
   } catch {
     return new URLSearchParams();
   }
@@ -362,6 +414,8 @@ export function readPaymentLink(input, { network, walletUrl } = {}) {
 
   if (amountsDiffer(queryOf(raw))) return said({ chainId, link: null, problem: LINK_TWO_AMOUNTS, reason: "two-amounts" });
   if (!link) return said({ chainId, link: null, problem: (read && "problem" in read && read.problem) || LINK_UNREADABLE, reason: "unreadable" });
+  // A recipient that can't be paid on any network, before which network the link is for.
+  if (!payable(link.to)) return said({ chainId, link: null, problem: LINK_BAD_ADDRESS, reason: "unreadable" });
 
   const otherNetwork = networkMismatch(chainId, network);
 

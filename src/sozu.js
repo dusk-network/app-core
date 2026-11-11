@@ -83,8 +83,12 @@ const growthsUnderWay = new WeakMap();
 const nativeUnderWay = new WeakMap();
 /** The stake contract, whose event in each block says what that block paid. */
 const STAKE_CONTRACT = networks.mainnet.contracts.stake;
-/** Blocks read across the period, each the middle of its share of it. */
+/** Blocks read across the period, at fixed heights, one in each sixth of it. */
 const NATIVE_SAMPLES = 6;
+/** How far past the middle of its sixth a block read is: off the round heights epochs start at, where testnet's blocks pay further from the rest. */
+const NATIVE_OFFSET = 997;
+/** Blocks native staking's period keeps clear of the tip, an hour's: it ends on a final block the archive has. */
+const NATIVE_MARGIN = 360;
 /** A reward in the stake contract's event, as rkyv writes it: a key's 193 bytes, to 8, its u64 value and its reason. */
 const REWARD_BYTES = 216;
 const REWARD_VALUE_AT = 200;
@@ -705,6 +709,25 @@ function paidToStakers(list) {
 }
 
 /**
+ * The period native staking's pay is measured over at a tip: `days` of
+ * blocks ending on the last whole day of them (8,640) an hour or more below
+ * the tip, so every app that reads in that day reads the same blocks; and
+ * the heights of the blocks it reads, fixed ones, one in each sixth of the
+ * time, so the next day's period reads all of them but one at most.
+ *
+ * @param {number} tip
+ * @param {number} days
+ */
+function nativePeriod(tip, days) {
+  const end = Math.floor((tip - NATIVE_MARGIN) / BLOCKS_PER_DAY) * BLOCKS_PER_DAY;
+  const start = end - days * BLOCKS_PER_DAY;
+  const step = (days * BLOCKS_PER_DAY) / NATIVE_SAMPLES;
+  const first = start + ((((step / 2 + NATIVE_OFFSET - start) % step) + step) % step);
+
+  return { end, heights: Array.from({ length: NATIVE_SAMPLES }, (_, i) => first + i * step), start };
+}
+
+/**
  * What native staking paid over `days`, as the chain says: null where it
  * can't be read. Nothing here knows what's staked.
  *
@@ -716,24 +739,29 @@ function paidToStakers(list) {
 async function readNative(archive, days, tipHeight) {
   try {
     const tip = tipHeight === undefined || tipHeight === null ? Number((await archive.query("query { tip: block(height: -1) { header { height } } }"))?.tip?.header?.height) : Number(tipHeight);
-    const start = tip - days * BLOCKS_PER_DAY;
 
-    if (!Number.isSafeInteger(tip) || start < 1) return null;
+    if (!Number.isSafeInteger(tip)) return null;
 
-    const heights = Array.from({ length: NATIVE_SAMPLES }, (_, i) => Math.round(start + ((i + 0.5) * (tip - start)) / NATIVE_SAMPLES));
-    // The period ends at the archive's own tip, which may trail the node's by a block or two.
+    const { end, heights, start } = nativePeriod(tip, days);
+
+    if (start < 1) return null;
+
     const read = await archive.query(
-      `query { a: block(height: ${start}) { header { height timestamp } } b: block(height: -1) { header { height timestamp } } ${heights.map((height, i) => `e${i}: contractEvents(height: ${height}) { json }`).join(" ")} }`
+      `query { a: block(height: ${start}) { header { height timestamp } } b: block(height: ${end}) { header { height timestamp } } ${heights.map((height, i) => `e${i}: contractEvents(height: ${height}) { json }`).join(" ")} }`
     );
     const paid = heights.map((_, i) => paidToStakers(read?.[`e${i}`]?.json)).filter((each) => each !== null);
     const from = { at: Number(read?.a?.header?.timestamp) * 1000, height: start };
-    const to = { at: Number(read?.b?.header?.timestamp) * 1000, height: Number(read?.b?.header?.height) };
+    const to = { at: Number(read?.b?.header?.timestamp) * 1000, height: end };
     const span = to.at - from.at;
 
     // Most blocks read, or it says too little.
-    if (paid.length * 2 < NATIVE_SAMPLES || !(span > 0) || !(to.height > start)) return null;
+    if (paid.length * 2 < NATIVE_SAMPLES || !(span > 0)) return null;
 
-    return { blocks: paid.length, days: Math.round(span / DAY_MS), from, perBlock: paid.reduce((sum, each) => sum + each, 0n) / BigInt(paid.length), to };
+    // Without the most and the least of them: a block that took a large fee, as testnet's do now and then, would
+    // hold the figure off for every app for days, its height being theirs for that long.
+    const middle = paid.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).slice(1, -1);
+
+    return { blocks: paid.length, days: Math.round(span / DAY_MS), from, perBlock: middle.reduce((sum, each) => sum + each, 0n) / BigInt(middle.length), to };
   } catch {
     // What can't be read says nothing: the rate is estimated as before.
     return null;
@@ -747,13 +775,18 @@ async function readNative(archive, days, tipHeight) {
 export async function nativeRewards({ archive, cache, days = GROWTH_DAYS, maxAgeMs = GROWTH_MAX_AGE_MS, network = "", now = Date.now(), provisioners, tipHeight }) {
   if (!Number.isSafeInteger(days) || days < 1) throw new RangeError("A period is a whole number of days");
 
-  const key = `native-rewards:${String(network)}:${days}`;
+  // What 0.11 kept, over a period that moved with the tip, is under another key: read again.
+  const key = `native-rewards2:${String(network)}:${days}`;
+  const appTip = tipHeight === undefined || tipHeight === null ? null : Number(tipHeight);
+  // The day of blocks the app's tip is in, where it says one: what was read of it is what would be read again.
+  const period = appTip !== null && Number.isSafeInteger(appTip) ? nativePeriod(appTip, days).end : null;
   /** @param {string | null | undefined} text */
   const kept = (text) => {
     try {
       const { measure, readAt } = JSON.parse(String(text));
+      const still = period === null ? now - readAt >= 0 && now - readAt < maxAgeMs : measure.to.height === period;
 
-      return now - readAt >= 0 && now - readAt < maxAgeMs ? { ...measure, perBlock: BigInt(measure.perBlock) } : null;
+      return still ? { ...measure, perBlock: BigInt(measure.perBlock) } : null;
     } catch {
       return null;
     }
@@ -762,17 +795,18 @@ export async function nativeRewards({ archive, cache, days = GROWTH_DAYS, maxAge
 
   if (!measure) {
     const reads = cache ? (nativeUnderWay.get(cache) ?? new Map()) : null;
-    const under = reads?.get(key) ?? readNative(archive, days, tipHeight);
+    const reading = period === null ? key : `${key}:${period}`;
+    const under = reads?.get(reading) ?? readNative(archive, days, tipHeight);
 
     if (cache && reads) {
       nativeUnderWay.set(cache, reads);
-      reads.set(key, under);
+      reads.set(reading, under);
     }
 
     try {
       measure = await under;
     } finally {
-      reads?.delete(key);
+      reads?.delete(reading);
     }
 
     if (measure) cache?.set(key, JSON.stringify({ measure: { ...measure, perBlock: `${measure.perBlock}` }, readAt: now }));
@@ -780,8 +814,7 @@ export async function nativeRewards({ archive, cache, days = GROWTH_DAYS, maxAge
 
   if (!measure || !Array.isArray(provisioners)) return null;
 
-  // What's staked now, as consensus counts it at the tip the app has, else the one read: what a staker shares a block's pay with.
-  const { staked } = working(provisioners, tipHeight === undefined || tipHeight === null ? measure.to.height : tipHeight, 0);
+  const staked = stakedNow(provisioners);
   const blocksAYear = ((measure.to.height - measure.from.height) * YEAR_MS) / (measure.to.at - measure.from.at);
 
   return staked > 0n ? { ...measure, rate: (Number(measure.perBlock) * blocksAYear) / Number(staked), staked } : null;
@@ -865,6 +898,27 @@ export function sozuYear({ amount, growth, nativeRate, status }) {
   const rewards = rate === null || worth === null ? null : (worth * BigInt(Math.round(rate * RATE_SCALE))) / BigInt(RATE_SCALE);
 
   return { depositFee, earned: rewards === null || depositFee === null ? null : rewards - depositFee, rate, rewards, worth };
+}
+
+/**
+ * What's staked now, in lux: every provisioner's stake of at least the
+ * minimum, eligible yet or not. One suspended for a fault, or waiting for its
+ * first epoch, is staked all the same and shares the pay again within days:
+ * counted only while eligible, it made the rate jump by points at an epoch's
+ * start, from one minute to the next.
+ *
+ * @param {ReadonlyArray<{ amount?: unknown }>} provisioners
+ */
+function stakedNow(provisioners) {
+  let staked = 0n;
+
+  for (const provisioner of provisioners) {
+    const stake = typeof provisioner?.amount === "number" ? BigInt(Math.trunc(provisioner.amount)) : luxOf(provisioner?.amount);
+
+    if (stake !== null && stake >= MINIMUM_STAKE_LUX) staked += stake;
+  }
+
+  return staked;
 }
 
 /**

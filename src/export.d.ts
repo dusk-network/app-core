@@ -161,10 +161,10 @@ export type ExportResult = {
 export declare function accountingCsv(options: ExportOptions): Promise<ExportResult>;
 
 /**
- * Rewards that reached the account, in lux, and what they were worth in the
- * currency `price` answers in, each at its own time, to 8 decimals: the sum
- * of those whose price is known (null without a `price`), and how many
- * aren't (`unpriced`).
+ * Rewards that reached the account, in whole lux, toward nothing: what's
+ * under a lux is no reward. And what they were worth in the currency `price`
+ * answers in, each at its own time, to 8 decimals: the sum of those whose
+ * price is known (null without a `price`), and how many aren't (`unpriced`).
  */
 export type RewardsSum = { lux: bigint; worth: string | null; unpriced: number };
 
@@ -174,10 +174,13 @@ export type YearRewards = {
   /** Native staking's rewards claimed that year, as the file's `reward` lines. */
   claimed: RewardsSum;
   /**
-   * Taken out by unstaking: what Sozu's unstakes that year gave back beyond
-   * what their stDUSK cost, deposit fees aside, at what the stDUSK held had
-   * cost on average. Null where a stake or an unstake before one of them
-   * isn't known (`facts` lacks it, or the history isn't `complete`).
+   * Taken out by unstaking: what the stDUSK Sozu's unstakes that year gave
+   * back was worth at their own rates, beyond what it cost at the rates it
+   * was staked at, on average: deposit fees and the pool's rounding aside, as
+   * the pool rounds what each stake mints and each unstake pays by a lux or
+   * so. A stake and its unstake at one rate took out nothing. Null where a
+   * stake or an unstake before one of them isn't known (`facts` lacks it, or
+   * the history isn't `complete`).
    */
   sozu: RewardsSum | null;
   /**
@@ -189,9 +192,10 @@ export type YearRewards = {
    * worth. Each part between two of those is worth what `price` says at its
    * end: a new year's at the year's last moment. Every year's together are
    * what the stake earned so far (`earned` of `sozuPosition`), but for a lux
-   * or so of the pool's rounding in each stake and unstake. Null where a new
-   * year's rate can't be read, this year's worth isn't known (no `status`),
-   * or a stake or an unstake in it or before isn't known.
+   * or so of the pool's rounding in each stake and unstake, and a stake all
+   * unstaked within a year grew what it took out. Null where a new year's
+   * rate can't be read, this year's worth isn't known (no `status`), or a
+   * stake or an unstake in it or before isn't known.
    */
   sozuGrown: RewardsSum | null;
 };

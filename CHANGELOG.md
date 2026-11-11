@@ -2,6 +2,27 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.12.0]
+
+### Added
+
+- `/payment-links`: `LINK_BAD_ADDRESS`, what `readPaymentLink` says of a link whose recipient Send can't pay: "This link's address isn't valid. Ask for a new one."
+- `/names`: `profileNameClash` and `nameClash` take each profile's verified .dusk name (`duskName`), look-alikes too, and say the name taken (`name`)
+- `/names`: `nameStarts`, the profile or contact whose name starts with a name word for word, or is its start, as "Lucas" and "Lucas (petit-fils)", to ask about
+
+### Changed
+
+- `/payment-links`: `readPaymentLink` refuses a link whose recipient isn't an account, a shielded address, a .dusk name or an EVM address, as two addresses in one, or one with a line break or a hidden character in it
+- `/payment-links`: a link's fields are read by their names in any case, so `To=` is `to=`
+
+### Fixed
+
+- `/payment-links`: a link that says a field twice in two cases, as `To=` beside `to=` or `Amount=` beside `amount=`, is refused
+- `/payment-links`: a `dusk:shielded-` link to a public account, or a `dusk:public-` link to a shielded address, is refused, saying which it asks for
+- `/payment-links`: a `dusk:` link with a `#` in it is refused, rather than reading what follows into a field
+- `/export`: `rewardsByYear` shows no rounding remainder as a reward: Sozu's at stDUSK's own rates, the pool's rounding aside, and each year in whole lux
+- `/sozu`: `nativeRewards` is the same for every app that reads it in the same day of blocks: its 30 days end on a whole day of blocks, its six blocks are at fixed heights, the most and the least of them are left out, and what's staked counts every stake, eligible yet or not
+
 ## [0.11.0]
 
 ### Added

@@ -590,16 +590,17 @@ void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
 // @ts-expect-error a request needs its recipient
 void makePaymentLink({ amount: "1" });
 
-import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
+import { LINK_BAD_ADDRESS, LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
 
 const sendRead: LinkRead | null = readPaymentLink("dusk:public-x@dusk:1", { network: 2, walletUrl: "https://wallet.example" });
 const sendReason: "" | "unreadable" | "two-amounts" | "other-network" | undefined = sendRead?.reason;
 const sendFills: PaymentLink | null | undefined = sendRead?.link;
 const sendWords: string[] = [LINK_UNREADABLE, LINK_TWO_AMOUNTS, sendRead?.problem ?? "", sendRead?.network ?? "", sendRead?.chainId ?? ""];
-void [sendReason, sendFills, sendWords];
+const badAddress: "This link's address isn't valid. Ask for a new one." = LINK_BAD_ADDRESS;
+void [sendReason, sendFills, sendWords, badAddress];
 
 // /names
-import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, profileNameClash, sameName } from "@dusk-network/app-core/names";
+import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameClash, sameName } from "@dusk-network/app-core/names";
 
 const contactsHere = [{ address: "q", id: "c1", name: "Estudio Marta" }];
 const profilesHere = [{ account: "p", name: "Profile 2" }];
@@ -612,7 +613,16 @@ const hiddenName: boolean = nameHides("\u202eecilA");
 const hiddenWords: "This name has hidden characters. Type it again without them." = NAME_HIDES;
 const profileClash = profileNameClash("Alice", { contacts: contactsHere, profiles: profilesHere, self: "p" });
 const profileClashName: unknown = profileClash?.kind === "contact" ? profileClash.entry.id : profileClash?.entry.account;
-void [clashKind, clashAccount, alikeHere, nameChecks, hiddenName, hiddenWords, profileClashName];
+const clashTaken: string | undefined = clash?.name;
+const ownNames = [{ account: "p", duskName: "sofiadesign.dusk", name: "Profile 1" }];
+const ownNameClash = profileNameClash("sofiadesign.dusk", { profiles: ownNames, self: "q" });
+const ownNameTaken: string | undefined = ownNameClash?.kind === "profile" ? `${ownNameClash.entry.duskName} ${ownNameClash.name}` : undefined;
+const starts = nameStarts("Lucas (petit-fils)", { contacts: contactsHere, profiles: ownNames, self: "q" });
+const startsName: string | undefined = starts?.name;
+const startsAccount: string | undefined = starts?.kind === "profile" ? starts.entry.account : starts?.entry.address;
+// @ts-expect-error a name that starts as another is asked about, never said to be the same
+void starts?.same;
+void [clashKind, clashAccount, alikeHere, nameChecks, hiddenName, hiddenWords, profileClashName, clashTaken, ownNameTaken, startsName, startsAccount];
 
 // /requests
 import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, refundOf, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched, type RequestPayment } from "@dusk-network/app-core/requests";
