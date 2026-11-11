@@ -590,13 +590,14 @@ void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
 // @ts-expect-error a request needs its recipient
 void makePaymentLink({ amount: "1" });
 
-import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
+import { LINK_BAD_ADDRESS, LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
 
 const sendRead: LinkRead | null = readPaymentLink("dusk:public-x@dusk:1", { network: 2, walletUrl: "https://wallet.example" });
 const sendReason: "" | "unreadable" | "two-amounts" | "other-network" | undefined = sendRead?.reason;
 const sendFills: PaymentLink | null | undefined = sendRead?.link;
 const sendWords: string[] = [LINK_UNREADABLE, LINK_TWO_AMOUNTS, sendRead?.problem ?? "", sendRead?.network ?? "", sendRead?.chainId ?? ""];
-void [sendReason, sendFills, sendWords];
+const badAddress: "This link's address isn't valid. Ask for a new one." = LINK_BAD_ADDRESS;
+void [sendReason, sendFills, sendWords, badAddress];
 
 // /names
 import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, profileNameClash, sameName } from "@dusk-network/app-core/names";
