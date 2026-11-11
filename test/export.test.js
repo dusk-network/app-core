@@ -1146,11 +1146,27 @@ describe("staking rewards by calendar year", () => {
     // From a stake or an unstake not known on, and from the first with Sozu where the history isn't whole.
     assert.deepEqual(await grownBy({ archive: chainArchive(newYear), facts: new Map([...heldFacts].filter(([key]) => key !== hash(0x22))) }), [9_688_015_009n, null]);
     assert.deepEqual(await grownBy({ archive: chainArchive(newYear), complete: false }), [null, null]);
+    // Nor from one whose facts lack the pool's figures, which says nothing of the rate, and throws nothing.
+    const figureless = new Map([...heldFacts].map(([key, { pool, ...fact }]) => [key, key === hash(0x22) ? fact : { ...fact, pool }]));
+
+    assert.deepEqual(await grownBy({ archive: chainArchive(newYear), facts: /** @type {any} */ (figureless) }), [9_688_015_009n, null]);
+
 
     // A year that began and ended its own stake needs no read: its stake's rate and its unstake's say it.
     const within = await rewardsByYear({ facts: new Map([...heldFacts].map(([key, fact]) => [key, key === hash(0x22) ? { ...fact, stDusk: minted } : fact])), rows: heldRows().map((row) => ({ ...row, time: row.sozu === "stake" ? Date.UTC(2026, 0, 2) : row.time })), timeZone: "Europe/Berlin" });
 
     assert.deepEqual(within.map(({ sozuGrown, year }) => [year, sozuGrown?.lux]), [[2026, (minted * figures(newYear.rates.unstake).stake) / figures(newYear.rates.unstake).supply - (minted * figures(newYear.rates.stake).stake) / figures(newYear.rates.stake).supply]]);
+  });
+
+  it("counts a pool's first stake, into a pool of no stDUSK yet, at one stDUSK a DUSK, as the pool mints it", async () => {
+    const first = new Map([...heldFacts].map(([key, fact]) => [key, key === hash(0x21) ? { ...fact, pool: { stake: 0n, supply: 0n } } : fact]));
+    const atNewYear = (minted * figures(newYear.newYear.berlin).stake) / figures(newYear.newYear.berlin).supply;
+    const years = await rewardsByYear({ archive: chainArchive(newYear), facts: first, now: NOW, rows: heldRows(), status, timeZone: "Europe/Berlin" });
+
+    assert.deepEqual(years.map(({ sozuGrown, year }) => [year, sozuGrown?.lux]), [
+      [2025, atNewYear - minted],
+      [2026, 118_858_069_243n],
+    ]);
   });
 });
 

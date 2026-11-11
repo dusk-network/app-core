@@ -738,12 +738,13 @@ export async function accountingCsv({ approvals, bom = false, contactName, curre
 // ---------------------------------------------------------------------------
 
 /**
- * What an amount of stDUSK was worth at a pool's figures, in lux, rounded down.
+ * What an amount of stDUSK was worth at a pool's figures, in lux, rounded
+ * down: one for one in a pool of none, as it mints its first.
  *
  * @param {bigint} stDusk
  * @param {{ stake: bigint, supply: bigint }} pool
  */
-const heldWorth = (stDusk, { stake, supply }) => (stDusk * stake) / supply;
+const heldWorth = (stDusk, { stake, supply }) => (supply > 0n ? (stDusk * stake) / supply : stDusk);
 
 /**
  * @param {{ rows: Iterable<ActivityRow>, facts?: ReadonlyMap<string, SozuFact>, price?: ExportOptions["price"], timeZone?: string, complete?: boolean, status?: (SozuStatusLike & { contracts?: { pool?: string | null } | null }) | null, archive?: Pick<Archive, "query">, cache?: FactCache, now?: number }} options
@@ -810,7 +811,8 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
       cost -= spent;
     }
 
-    if (known && fact) moves.push({ at, held, pool: fact.pool });
+    // One without the pool's figures says nothing of the rate.
+    if (known && typeof fact?.pool?.stake === "bigint" && typeof fact.pool.supply === "bigint") moves.push({ at, held, pool: fact.pool });
     else unknownFrom ??= at;
   }
 
