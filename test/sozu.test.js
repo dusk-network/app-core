@@ -609,6 +609,31 @@ describe("what one stDUSK was worth at a moment", () => {
     assert.equal(told.queries.length, 3);
   });
 
+  it("says nothing until the archive has passed the moment, and keeps only what it read once well past it", async () => {
+    // The archive ten blocks short of the restake at 23:52:16, its tip under ten minutes before the UTC new year.
+    /** @param {number} height */
+    const archiveTo = async (height) => {
+      const { b } = await chainArchive(newYear).query(`query { b: block(height: ${height}) { header { height timestamp } } }`);
+
+      return chainArchive({ ...newYear, tip: b.header, txs: newYear.txs.filter((/** @type {any} */ tx) => tx.blockHeight <= height) });
+    };
+    const failing = { query: async () => Promise.reject(new Error("The archive answers with HTTP 502")) };
+    const cache = new Map();
+
+    // A restake may still come before midnight: nothing to say, and nothing kept, also from the rows' blocks.
+    assert.equal(await sozuPointAt({ archive: await archiveTo(3_059_982), at: UTC, cache, pool: newYear.pool }), null);
+    assert.equal(await sozuPointAt({ anchors: [anchors[0]], archive: await archiveTo(3_059_982), at: UTC, cache, pool: newYear.pool }), null);
+    assert.equal(cache.size, 0);
+
+    // Just past midnight, the restake before it, but not kept yet: the blocks at the tip may still change.
+    assert.equal((await sozuPointAt({ archive: await archiveTo(3_060_062), at: UTC, cache, pool: newYear.pool }))?.height, 3_059_992);
+    assert.equal(await sozuPointAt({ archive: failing, at: UTC, cache, pool: newYear.pool }), null);
+
+    // Well past it, kept for good.
+    assert.equal((await sozuPointAt({ anchors, archive: chainArchive(newYear), at: UTC, cache, pool: newYear.pool }))?.height, 3_059_992);
+    assert.equal((await sozuPointAt({ archive: failing, at: UTC, cache, pool: newYear.pool }))?.height, 3_059_992);
+  });
+
   it("is nothing where no restake is found before the moment, the archive can't be read, or the moment is past the tip", async () => {
     const idle = { ...newYear, txs: newYear.txs.filter((/** @type {any} */ tx) => tx.blockHeight > 3_060_000) };
 

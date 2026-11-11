@@ -67,6 +67,8 @@ const RATE_TOLERANCE = 0.005;
 const REWARD_STAKE_FROM_END = 24;
 /** How near a moment the block found for it is: ten minutes, where Sozu restakes every hour. */
 const NEAR_MS = 10 * 60_000;
+/** How far the archive's tip is past a moment before what was read of it is kept: ten minutes, past the blocks at a tip that may still change. */
+const KEEP_AFTER_MS = 10 * 60_000;
 /** The most blocks whose time is read to find one near a moment. */
 const PROBES = 16;
 /** A block every 10 seconds, for a first guess of a height from a time. */
@@ -530,8 +532,8 @@ function headerOf(block) {
  * between the nearest known on either side of it (`anchors`, and the tip
  * where none is after it, read with the first guess), each guess where the
  * time between them puts the moment, and every fourth halfway, as a halt of
- * the chain stretches that time. Null where none is found, or the moment is
- * past the tip.
+ * the chain stretches that time. Null where none is found, or the archive's
+ * tip hasn't passed the moment.
  *
  * @param {Pick<Archive, "query">} archive
  * @param {number} at
@@ -588,8 +590,8 @@ async function heightNear(archive, at, anchors) {
     if (!after) {
       const tip = headerOf(read?.tip);
 
-      // A moment after the tip is the tip's, if it's near.
-      if (!tip || tip.at <= at) return tip && at - tip.at <= NEAR_MS ? tip.height : null;
+      // A moment the archive hasn't passed: a restake may still come before it.
+      if (!tip || tip.at <= at) return null;
 
       place(tip);
     }
@@ -637,11 +639,15 @@ export async function sozuPointAt({ anchors = [], archive, at, cache, pool }) {
 
     if (near === null) return null;
 
-    // The pool's last restake by the moment, among the transactions calling it around the block found.
+    // The pool's last restake by the moment, among the transactions calling it around the block found, and the
+    // archive's tip with them: until it's past the moment, a restake may still come before it.
     const ends = POINT_WINDOW_ENDS.map((end) => near + end).filter((end) => end >= 0);
     const listed = await archive.query(
-      `query { ${ends.map((end, i) => `w${i}: blockTxs(range: [${Math.max(0, end - TXS_BLOCKS + 1)}, ${end}], contract: ${JSON.stringify(id)}) { id blockHeight blockTimestamp err tx { json } }`).join(" ")} }`
+      `query { tip: block(height: -1) { header { height timestamp } } ${ends.map((end, i) => `w${i}: blockTxs(range: [${Math.max(0, end - TXS_BLOCKS + 1)}, ${end}], contract: ${JSON.stringify(id)}) { id blockHeight blockTimestamp err tx { json } }`).join(" ")} }`
     );
+    const tip = headerOf(listed?.tip);
+
+    if (!tip || tip.at <= at) return null;
     const [restake] = ends
       .flatMap((_, i) => (Array.isArray(listed?.[`w${i}`]) ? listed[`w${i}`] : []))
       .map((each) => restakeOf(each, id))
@@ -653,8 +659,8 @@ export async function sozuPointAt({ anchors = [], archive, at, cache, pool }) {
 
     const point = pointOf((await archive.query(`query { e: contractEvents(height: ${restake.height}) { json } }`))?.e?.json, restake, id);
 
-    // What the chain says of a moment past doesn't change: kept for good.
-    if (point) cache?.set(key, keptText(point));
+    // What the chain says of a moment well past doesn't change: kept for good.
+    if (point && tip.at - at >= KEEP_AFTER_MS) cache?.set(key, keptText(point));
 
     return point;
   } catch {

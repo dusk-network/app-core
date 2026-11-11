@@ -179,11 +179,12 @@ export declare function sozuGrowth(options: {
  * event says them. That block is found by its time, between blocks whose
  * height and time are known (`anchors`, as an account's rows) and the tip:
  * three requests with rows on both sides of the moment, about six without
- * any. With `cache`, a `Map` of text does, what it found is kept for good,
- * as it doesn't change. Null where no restake is found in the 800 blocks
- * before the moment's (about two hours, where Sozu restakes every hour), as
- * while the pool was idle, where the moment is past the tip, or where the
- * archive can't be read.
+ * any. Null until the archive's tip has passed the moment, as a restake may
+ * still come before it; where no restake is found in the 800 blocks before
+ * the moment's (about two hours, where Sozu restakes every hour), as while
+ * the pool was idle; or where the archive can't be read. With `cache`, a
+ * `Map` of text does, what it found is kept for good once the tip is ten
+ * minutes past the moment, past the blocks at a tip that may still change.
  */
 export declare function sozuPointAt(options: {
   archive: Pick<Archive, "query">;
