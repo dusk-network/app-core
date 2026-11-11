@@ -1,6 +1,6 @@
 {
   "name": "@dusk-network/app-core",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Shared logic for the Dusk apps: amounts, text a person must trust, payment links and requests, names that look alike, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, and DuskEVM withdrawals.",
   "license": "MPL-2.0",
   "type": "module",
