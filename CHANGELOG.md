@@ -20,6 +20,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/payment-links`: a link that says a field twice in two cases, as `To=` beside `to=` or `Amount=` beside `amount=`, is refused
 - `/payment-links`: a `dusk:shielded-` link to a public account, or a `dusk:public-` link to a shielded address, is refused, saying which it asks for
 - `/payment-links`: a `dusk:` link with a `#` in it is refused, rather than reading what follows into a field
+- `/export`: `rewardsByYear` shows no rounding remainder as a reward: Sozu's at stDUSK's own rates, the pool's rounding aside, and each year in whole lux
 
 ## [0.11.0]
 

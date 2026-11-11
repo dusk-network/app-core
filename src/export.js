@@ -738,13 +738,28 @@ export async function accountingCsv({ approvals, bom = false, contactName, curre
 // ---------------------------------------------------------------------------
 
 /**
- * What an amount of stDUSK was worth at a pool's figures, in lux, rounded
- * down: one for one in a pool of none, as it mints its first.
+ * A lux in parts fine enough that what a pool's rates leave below a lux
+ * adds up to none: rewards are summed in them, and a year's come to whole
+ * lux, toward nothing.
+ */
+const FINE = 10n ** 18n;
+
+/**
+ * What an amount of stDUSK was worth at a pool's figures, in `FINE` parts of
+ * a lux: one for one in a pool of none, as it mints its first.
  *
  * @param {bigint} stDusk
  * @param {{ stake: bigint, supply: bigint }} pool
  */
-const heldWorth = (stDusk, { stake, supply }) => (supply > 0n ? (stDusk * stake) / supply : stDusk);
+const fineWorth = (stDusk, { stake, supply }) => (supply > 0n ? (stDusk * stake * FINE) / supply : stDusk * FINE);
+
+/**
+ * A fact's pool figures, which say its rate: null where it has none.
+ *
+ * @param {SozuFact | undefined} fact
+ * @returns {{ stake: bigint, supply: bigint } | null}
+ */
+const poolOf = (fact) => (typeof fact?.pool?.stake === "bigint" && typeof fact.pool.supply === "bigint" ? fact.pool : null);
 
 /**
  * @param {{ rows: Iterable<ActivityRow>, facts?: ReadonlyMap<string, SozuFact>, price?: ExportOptions["price"], timeZone?: string, complete?: boolean, status?: (SozuStatusLike & { contracts?: { pool?: string | null } | null }) | null, archive?: Pick<Archive, "query">, cache?: FactCache, now?: number }} options
@@ -755,11 +770,11 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
   /** @param {number} at */
   const yearAt = (at) => Number(yearOf.format(at));
   const priceAt = pricesOf(price);
-  /** @typedef {{ at: number, lux: bigint }} Reward */
+  /** @typedef {{ at: number, fine: bigint }} Reward */
   /** @typedef {{ stake: bigint, supply: bigint }} Pool */
   /** @type {Map<number, { claimed: Reward[], sozu: Reward[] | null }>} */
   const years = new Map();
-  // Sozu's stDUSK held and what it cost, deposit fees aside, while every stake and unstake before is known.
+  // Sozu's stDUSK held and what it cost, in FINE parts of a lux, while every stake and unstake before is known.
   let held = 0n;
   let cost = 0n;
   let known = complete;
@@ -789,30 +804,34 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
     years.set(year, rewards);
 
     if (!row.sozu) {
-      rewards.claimed.push({ at, lux: row.value });
+      rewards.claimed.push({ at, fine: row.value * FINE });
       continue;
     }
 
     const fact = facts?.get(row.hash);
+    const pool = poolOf(fact);
 
     if (row.sozu === "stake") {
       known &&= fact !== undefined;
       held += fact?.stDusk ?? 0n;
-      cost += row.value - (fact?.fee ?? 0n);
+      // What its stDUSK was worth at the rate it was minted at, the deposit fee and the pool's rounding aside;
+      // what went in less the fee, where the fact has no rate.
+      cost += fact && pool ? fineWorth(fact.stDusk, pool) : (row.value - (fact?.fee ?? 0n)) * FINE;
     } else if (!known || !fact || fact.stDusk > held || held === 0n) {
       known = false;
       rewards.sozu = null;
     } else {
-      // An unstake: what it gave back beyond what its stDUSK cost, at what stDUSK cost on average.
+      // An unstake: what its stDUSK was worth at its own rate, as the pool rounds it aside, or what came back where
+      // the fact has no rate, beyond what that stDUSK cost on average.
       const spent = (cost * fact.stDusk) / held;
 
-      rewards.sozu?.push({ at, lux: row.value - spent });
+      rewards.sozu?.push({ at, fine: (pool ? fineWorth(fact.stDusk, pool) : row.value * FINE) - spent });
       held -= fact.stDusk;
       cost -= spent;
     }
 
     // One without the pool's figures says nothing of the rate.
-    if (known && typeof fact?.pool?.stake === "bigint" && typeof fact.pool.supply === "bigint") moves.push({ at, held, pool: fact.pool });
+    if (known && pool) moves.push({ at, held, pool });
     else unknownFrom ??= at;
   }
 
@@ -867,28 +886,41 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
       if (from.held === 0n || parts === null) continue;
 
       // Each part at its end's price: a year's own last moment, where a new year ends it.
-      grown.set(year, then && after ? [...parts, { at: to.yearEnd ? to.at - 1 : to.at, lux: heldWorth(from.held, after) - heldWorth(from.held, then) }] : null);
+      grown.set(year, then && after ? [...parts, { at: to.yearEnd ? to.at - 1 : to.at, fine: fineWorth(from.held, after) - fineWorth(from.held, then) }] : null);
     }
 
     for (const year of grown.keys()) if (!years.has(year)) years.set(year, { claimed: [], sozu: [] });
   }
 
   /**
+   * A year's rewards in whole lux, toward nothing: what's under a lux is no reward, as the pool's rounding in a
+   * stake or an unstake is none. Each part brings the lux it takes the year's to, and is worth those at its price.
+   *
    * @param {Reward[]} list
    * @returns {Promise<import("./export.js").RewardsSum>}
    */
   const sumOf = async (list) => {
+    let fine = 0n;
+    let lux = 0n;
     let units = 0n;
     let unpriced = 0;
 
-    for (const { at, lux } of list) {
-      const unit = price ? await priceAt(at) : null;
+    for (const part of list) {
+      fine += part.fine;
 
-      if (unit) units += lux < 0n ? -worthUnits(-lux, unit) : worthUnits(lux, unit);
+      const brings = fine / FINE - lux;
+
+      lux += brings;
+
+      if (brings === 0n) continue;
+
+      const unit = price ? await priceAt(part.at) : null;
+
+      if (unit) units += brings < 0n ? -worthUnits(-brings, unit) : worthUnits(brings, unit);
       else if (price) unpriced += 1;
     }
 
-    return { lux: list.reduce((sum, each) => sum + each.lux, 0n), unpriced, worth: price ? worthText(units) : null };
+    return { lux, unpriced, worth: price ? worthText(units) : null };
   };
   // From the year what's held isn't known on, what it grew isn't either.
   const lost = unknownFrom === null ? Infinity : yearAt(unknownFrom);
