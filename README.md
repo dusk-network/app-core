@@ -51,13 +51,13 @@ import { amountExample, formatAmount, formatDusk, readAmount } from "@dusk-netwo
 formatDusk(1_853_542n, { round: "nearest" }); // { text: "0.0019", exact: "0.001853542" }
 formatAmount(90_082_082_000_000_000n, { decimals: 18, round: "down" }); // { text: "0.09", exact: "0.090082082" }
 readAmount("1 000,5", "fr-FR"); // { lux: 1_000_500_000_000n, problem: null }
-readAmount("1.234", "es-ES"); // { lux: null, problem: "Is that 1234 or 1,234? Write the one you mean." }
+readAmount("1.000", "es-ES"); // { lux: null, problem: "Is that 1 or 1000? Write the one you mean." }
 `Enter an amount such as 10 or ${amountExample("10.5", "fr-FR")}.`; // "…10 or 10,5."
 ```
 
 - The one rule for an amount, of DUSK or an EVM token: a row and a balance line show `text`, its detail shows `exact`. `text` has at most 4 decimals, 2 significant digits under 0.01, and is never 0 for an amount that isn't. It rounds down for an amount or a balance, to the nearest for a fee paid, and up for the most a fee can be.
 - `defaultCurrency` is the fiat currency a wallet starts on: the one the browser's region pays in, where the apps' price source (CoinGecko) gives DUSK's price in it, as "SGD" in Singapore, "INR" in India, "CHF" in Switzerland and "EUR" in the euro's regions (the euro area, Bulgaria in it since 2026; Andorra, Monaco, San Marino, the Vatican, Montenegro, Kosovo; France's overseas regions and the collectivities that use it; Åland, the Canary Islands, Ceuta and Melilla); "USD" anywhere else, as in Romania or Kenya. A language without a region takes the one it's most spoken in: "de" and "fr" are EUR, "pt" (Brazil) BRL, "en" USD. `PRICE_CURRENCIES` are the 45 currencies the price source gives, as its list said in November 2026, for a wallet to offer.
-- An amount reads back as itself or is refused, never as another. A language's own groups are read: `1 000` with any of its spaces in French, `1'000` in Swiss German, `12,34,567` in Hindi. A lone point or comma before three digits that could mean two things stays unclear (`unclearAmount`): `1.000` where the language writes decimals with a comma, `1,000` where it writes them with a point. A space where the language doesn't group with one, as `1 234,5` in Spanish, is refused saying so: "Leave out the space: 1234,5."
+- An amount reads back as itself or is refused, never as another. A language's own groups are read: `1 000` with any of its spaces in French, `1'000` in Swiss German, `12,34,567` in Hindi. A lone point or comma before three digits that could mean two things stays unclear (`unclearAmount`): `1.000` where the language writes decimals with a comma, `1,000` where it writes them with a point. `readAmount` asks which is meant in numbers no reader takes for the other: "Is that 1 or 1000?", and "Is that about 1.23 or 1234?" for `1,234`, never `1.000` for one. A space where the language doesn't group with one, as `1 234,5` in Spanish, is refused saying so: "Leave out the space: 1234,5."
 - `amountsMeant` is what a search typed can mean as amounts of DUSK, as ranges of lux: what a row shows starts with what's typed, so `"120"` is from 120 up to 121 DUSK. It reads either decimal mark, so `"0.2"` finds 0,2 in German as `"0,2"` does, and looks for both amounts where a mark could mean either, as `"1.000"` in German.
 
 ## Text
@@ -84,7 +84,7 @@ import { makePaymentLink, networkMismatch, parsePaymentLink } from "@dusk-networ
 const made = makePaymentLink({ to: account, amount: typed, memo, network: chainId, language });
 // { ok: true, lux: 150000000n, problems: {}, dusk: "dusk:public-…@dusk:1?amount=0.15&memo=…",
 //   https: "https://apps.dusk.network/wallet/dashboard/send?to=…&amount=0.15&memo=…&network=mainnet" }
-// Or { ok: false, problems: { amount: "Is that 1234 or 1,234? Write the one you mean." }, dusk: "", https: null, lux: null }
+// Or { ok: false, problems: { amount: "Is that about 1,23 or 1234? Write the one you mean." }, dusk: "", https: null, lux: null }
 
 const link = parsePaymentLink(pastedOrScanned); // { form: "https", kind: "public", to, amountDusk: "0.15", lux, memo, label, chainId: "dusk:1", raw }
 networkMismatch(link.chainId, walletChain); // "This request is for Mainnet. You are on Testnet."

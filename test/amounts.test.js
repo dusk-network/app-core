@@ -325,8 +325,6 @@ describe("reading amounts", () => {
     assert.deepEqual(readAmount("", "fr-FR"), { lux: null, problem: null });
     assert.deepEqual(readAmount("  ", "fr-FR"), { lux: null, problem: null });
     assert.deepEqual(readAmount("1 000,5", "fr-FR"), { lux: 1000n * DUSK + DUSK / 2n, problem: null });
-    assert.deepEqual(readAmount("1.234", "fr-FR"), { lux: null, problem: "Is that 1234 or 1,234? Write the one you mean." });
-    assert.deepEqual(readAmount("1,234", "en-US"), { lux: null, problem: "Is that 1234 or 1.234? Write the one you mean." });
     assert.deepEqual(readAmount("abc", "es-ES"), { lux: null, problem: "Enter an amount such as 10 or 10,5." });
     assert.deepEqual(readAmount("abc", "en-GB"), { lux: null, problem: "Enter an amount such as 10 or 10.5." });
     assert.deepEqual(readAmount("0", "en-GB"), { lux: null, problem: "Enter an amount greater than 0." });
@@ -342,6 +340,30 @@ describe("reading amounts", () => {
     // Where the language groups with a space, it's read; where that isn't all that's wrong, nothing is said of it.
     assert.deepEqual(readAmount("1 234,5", "fr-FR"), { lux: 1_234_500_000_000n, problem: null });
     assert.deepEqual(readAmount("1 .000", "de-DE"), { lux: null, problem: "Enter an amount such as 10 or 10,5." });
+  });
+
+  it("asks which of two amounts is meant in numbers no reader takes for the other", () => {
+    // Lena's: "1,000" in English could be one or a thousand, and "1.000" for one reads as a thousand to her.
+    assert.deepEqual(readAmount("1,000", "en-GB"), { lux: null, problem: "Is that 1 or 1000? Write the one you mean." });
+    assert.deepEqual(readAmount("1.000", "de-DE"), { lux: null, problem: "Is that 1 or 1000? Write the one you mean." });
+    assert.deepEqual(readAmount("250.000", "nl-NL"), { lux: null, problem: "Is that 250 or 250000? Write the one you mean." });
+    // Fewer than three decimals can't be a group: they're said as they are.
+    assert.deepEqual(readAmount("1,500", "en-US"), { lux: null, problem: "Is that 1.5 or 1500? Write the one you mean." });
+    assert.deepEqual(readAmount("12.050", "fr-FR"), { lux: null, problem: "Is that 12,05 or 12050? Write the one you mean." });
+    // Three would read as a group again: about two of them.
+    assert.deepEqual(readAmount("1,234", "en-US"), { lux: null, problem: "Is that about 1.23 or 1234? Write the one you mean." });
+    assert.deepEqual(readAmount("1.234", "fr-FR"), { lux: null, problem: "Is that about 1,23 or 1234? Write the one you mean." });
+    assert.deepEqual(readAmount("1.001", "nl-NL"), { lux: null, problem: "Is that about 1 or 1001? Write the one you mean." });
+    assert.deepEqual(readAmount("999,995", "en-US"), { lux: null, problem: "Is that about 1000 or 999995? Write the one you mean." });
+
+    // Neither number in a question has a separator before three digits.
+    for (const [language, mark] of [["en-US", ","], ["de-DE", "."]]) {
+      for (let digits = 1; digits < 1000; digits += 7) {
+        const { problem } = readAmount(`${digits}${mark}${String((digits * 37) % 1000).padStart(3, "0")}`, language);
+
+        assert.doesNotMatch(String(problem), /\d[.,]\d{3}(?!\d)/, `${language}: ${problem}`);
+      }
+    }
   });
 
   it("writes and reads in the same language, unless told otherwise", () => {

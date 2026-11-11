@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `/amounts`: `readAmount` asks which of two amounts is meant in numbers no reader takes for the other: "Is that 1 or 1000?", never "1.000" for one
+
 ## [0.10.0]
 
 ### Added

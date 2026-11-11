@@ -410,6 +410,27 @@ export function unclearAmount(text, decimal = decimalSeparator()) {
 }
 
 /**
+ * What an unclear amount is with its separator as a decimal mark, as the
+ * question says it: with no three digits after the mark, which would read as
+ * a group again. Its trailing zeros go, so "1,000" is 1, and three decimals
+ * that stay are rounded to two, as about that much.
+ *
+ * @param {{ decimal: string }} either `unclearAmount`'s
+ * @param {string} decimal
+ */
+function decimalMeant(either, decimal) {
+  const [whole, three] = either.decimal.split(decimal);
+  const fraction = three.replace(/0+$/, "");
+
+  if (fraction.length < 3) return fraction ? `${whole}${decimal}${fraction}` : whole;
+
+  const hundredths = BigInt(whole) * 100n + BigInt(Math.round(Number(three) / 10));
+  const shown = String(hundredths % 100n).padStart(2, "0").replace(/0+$/, "");
+
+  return `about ${hundredths / 100n}${shown ? `${decimal}${shown}` : ""}`;
+}
+
+/**
  * A plain amount of DUSK in lux: digits, with up to nine decimals after a
  * point. Null when it isn't one.
  *
@@ -464,7 +485,8 @@ export function readAmount(text, language) {
   const decimal = decimalSeparator(language);
   const either = unclearAmount(typed, decimal);
 
-  if (either) return { lux: null, problem: `Is that ${either.grouped} or ${either.decimal}? Write the one you mean.` };
+  // Each as no reader takes for the other: "1 or 1000", never "1.000" for one, which reads as a thousand to a German.
+  if (either) return { lux: null, problem: `Is that ${decimalMeant(either, decimal)} or ${either.grouped}? Write the one you mean.` };
 
   const plain = normalizeAmount(typed, decimal, language);
   const lux = parseDusk(plain);

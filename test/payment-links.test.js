@@ -321,7 +321,7 @@ describe("a request a payer can use", () => {
   });
 
   it("says 1.234 is unclear, not that it has too many decimals", () => {
-    assert.equal(makePaymentLink({ amount: "1.234", language: "es-ES", network: 1, to: A }).problems.amount, "Is that 1234 or 1,234? Write the one you mean.");
+    assert.equal(makePaymentLink({ amount: "1.234", language: "es-ES", network: 1, to: A }).problems.amount, "Is that about 1,23 or 1234? Write the one you mean.");
     assert.equal(makePaymentLink({ amount: "abc", language: "es-ES", network: 1, to: A }).problems.amount, "Enter an amount such as 10 or 10,5.");
     // And reads what each language writes.
     assert.equal(makePaymentLink({ amount: "1 000,5", language: "fr-FR", network: 1, to: A }).lux, 1_000_500_000_000n);
