@@ -39,7 +39,7 @@
 
 import { formatDuskPlain } from "./amounts.js";
 import { memoTextOf } from "./moved.js";
-import { stDuskWorth } from "./sozu.js";
+import { sozuPointAt, sozuPosition, stDuskWorth } from "./sozu.js";
 import { displayText } from "./text.js";
 
 /** @typedef {import("./activity.js").ActivityRow} ActivityRow */
@@ -47,6 +47,9 @@ import { displayText } from "./text.js";
 /** @typedef {import("./export.js").ExportPeriod} ExportPeriod */
 /** @typedef {import("./export.js").ExportResult} ExportResult */
 /** @typedef {import("./sozu.js").SozuFact} SozuFact */
+/** @typedef {import("./sozu.js").SozuStatusLike} SozuStatusLike */
+/** @typedef {import("./history.js").Archive} Archive */
+/** @typedef {import("./bridge.js").FactCache} FactCache */
 /** @typedef {import("./bridge.js").MigrationEvm} MigrationEvm */
 /** @typedef {import("./bridge.js").MigrationApproval} MigrationApproval */
 
@@ -735,21 +738,39 @@ export async function accountingCsv({ approvals, bom = false, contactName, curre
 // ---------------------------------------------------------------------------
 
 /**
- * @param {{ rows: Iterable<ActivityRow>, facts?: ReadonlyMap<string, SozuFact>, price?: ExportOptions["price"], timeZone?: string, complete?: boolean }} options
+ * What an amount of stDUSK was worth at a pool's figures, in lux, rounded
+ * down: one for one in a pool of none, as it mints its first.
+ *
+ * @param {bigint} stDusk
+ * @param {{ stake: bigint, supply: bigint }} pool
+ */
+const heldWorth = (stDusk, { stake, supply }) => (supply > 0n ? (stDusk * stake) / supply : stDusk);
+
+/**
+ * @param {{ rows: Iterable<ActivityRow>, facts?: ReadonlyMap<string, SozuFact>, price?: ExportOptions["price"], timeZone?: string, complete?: boolean, status?: (SozuStatusLike & { contracts?: { pool?: string | null } | null }) | null, archive?: Pick<Archive, "query">, cache?: FactCache, now?: number }} options
  * @returns {Promise<import("./export.js").YearRewards[]>}
  */
-export async function rewardsByYear({ complete = true, facts, price, rows, timeZone }) {
+export async function rewardsByYear({ archive, cache, complete = true, facts, now = Date.now(), price, rows, status, timeZone }) {
   const yearOf = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" });
+  /** @param {number} at */
+  const yearAt = (at) => Number(yearOf.format(at));
   const priceAt = pricesOf(price);
   /** @typedef {{ at: number, lux: bigint }} Reward */
+  /** @typedef {{ stake: bigint, supply: bigint }} Pool */
   /** @type {Map<number, { claimed: Reward[], sozu: Reward[] | null }>} */
   const years = new Map();
   // Sozu's stDUSK held and what it cost, deposit fees aside, while every stake and unstake before is known.
   let held = 0n;
   let cost = 0n;
   let known = complete;
-
-  const went = [...(rows ?? [])].filter((row) => row.status === "executed" && !row.dropped && typeof row.time === "number" && (row.kind === "withdraw_reward" || row.sozu));
+  // What's held after each stake and unstake, at the pool's figures as it went through, while all before it is
+  // known; and from when what's held isn't, as from the first of them where the history isn't whole.
+  /** @type {{ at: number, held: bigint, pool: Pool }[]} */
+  const moves = [];
+  /** @type {number | null} */
+  let unknownFrom = null;
+  const all = [...(rows ?? [])];
+  const went = all.filter((row) => row.status === "executed" && !row.dropped && typeof row.time === "number" && (row.kind === "withdraw_reward" || row.sozu));
   // In the chain's order, as far as the rows say it: by block, and within one a stake before an unstake, as the rows don't say which
   // went first and an unstake can't give back stDUSK its own block's stake hadn't minted yet.
   /** @param {ActivityRow} row */
@@ -762,7 +783,7 @@ export async function rewardsByYear({ complete = true, facts, price, rows, timeZ
 
   for (const row of inOrder) {
     const at = /** @type {number} */ (row.time);
-    const year = Number(yearOf.format(at));
+    const year = yearAt(at);
     const rewards = years.get(year) ?? { claimed: [], sozu: [] };
 
     years.set(year, rewards);
@@ -778,21 +799,78 @@ export async function rewardsByYear({ complete = true, facts, price, rows, timeZ
       known &&= fact !== undefined;
       held += fact?.stDusk ?? 0n;
       cost += row.value - (fact?.fee ?? 0n);
-      continue;
-    }
-
-    // An unstake: what it gave back beyond what its stDUSK cost, at what stDUSK cost on average.
-    if (!known || !fact || fact.stDusk > held || held === 0n) {
+    } else if (!known || !fact || fact.stDusk > held || held === 0n) {
       known = false;
       rewards.sozu = null;
-      continue;
+    } else {
+      // An unstake: what it gave back beyond what its stDUSK cost, at what stDUSK cost on average.
+      const spent = (cost * fact.stDusk) / held;
+
+      rewards.sozu?.push({ at, lux: row.value - spent });
+      held -= fact.stDusk;
+      cost -= spent;
     }
 
-    const spent = (cost * fact.stDusk) / held;
+    // One without the pool's figures says nothing of the rate.
+    if (known && typeof fact?.pool?.stake === "bigint" && typeof fact.pool.supply === "bigint") moves.push({ at, held, pool: fact.pool });
+    else unknownFrom ??= at;
+  }
 
-    rewards.sozu?.push({ at, lux: row.value - spent });
-    held -= fact.stDusk;
-    cost -= spent;
+  // What the stDUSK held grew, in each year: between each two moments its rate is known, its stakes and
+  // unstakes, each new year, read from the chain, and now, at what the status says it's worth.
+  /** @type {Map<number, Reward[] | null>} */
+  const grown = new Map();
+  /** @param {number} year */
+  const grownIn = (year) => {
+    const parts = grown.get(year);
+
+    return parts === undefined ? [] : parts;
+  };
+  const last = moves.at(-1);
+
+  if (last) {
+    const until = unknownFrom ?? (last.held > 0n ? Math.max(now, last.at) : last.at);
+    const anchors = all.flatMap((row) => (row.status === "executed" && typeof row.time === "number" && typeof row.blockHeight === "number" ? [{ at: row.time, height: row.blockHeight }] : []));
+    // The pool the status names, else the one the last stake or unstake called.
+    const pool = String(status?.contracts?.pool ?? [...inOrder].reverse().find((row) => row.sozu)?.contractId ?? "");
+    const { stDusk: stDuskNow, worthNow } = sozuPosition({ status });
+    /** @type {{ at: number, held: bigint, pool: Pool | null | Promise<Pool | null>, yearEnd: boolean }[]} */
+    const marks = [];
+    let holding = 0n;
+    let next = dayStart(yearAt(moves[0].at) + 1, 1, 1, timeZone);
+
+    for (const move of [...moves, null]) {
+      // Each new year before it while something is held, at the pool's last restake by then.
+      for (; next <= (move?.at ?? until); next = dayStart(yearAt(next) + 1, 1, 1, timeZone)) {
+        if (holding > 0n) marks.push({ at: next, held: holding, pool: archive && pool ? sozuPointAt({ anchors, archive, at: next, cache, pool }) : null, yearEnd: true });
+      }
+
+      if (move) {
+        marks.push({ at: move.at, held: move.held, pool: move.pool, yearEnd: false });
+        holding = move.held;
+      }
+    }
+
+    // Still held, all of it known: now, at what one stDUSK held is worth as the status says.
+    if (holding > 0n && unknownFrom === null) {
+      marks.push({ at: until, held: 0n, pool: worthNow !== null && stDuskNow ? { stake: worthNow, supply: stDuskNow } : null, yearEnd: false });
+    }
+
+    const pools = await Promise.all(marks.map((mark) => mark.pool));
+
+    for (let i = 0; i + 1 < marks.length; i += 1) {
+      const [from, to] = [marks[i], marks[i + 1]];
+      const [then, after] = [pools[i], pools[i + 1]];
+      const year = yearAt(from.at);
+      const parts = grownIn(year);
+
+      if (from.held === 0n || parts === null) continue;
+
+      // Each part at its end's price: a year's own last moment, where a new year ends it.
+      grown.set(year, then && after ? [...parts, { at: to.yearEnd ? to.at - 1 : to.at, lux: heldWorth(from.held, after) - heldWorth(from.held, then) }] : null);
+    }
+
+    for (const year of grown.keys()) if (!years.has(year)) years.set(year, { claimed: [], sozu: [] });
   }
 
   /**
@@ -812,8 +890,16 @@ export async function rewardsByYear({ complete = true, facts, price, rows, timeZ
 
     return { lux: list.reduce((sum, each) => sum + each.lux, 0n), unpriced, worth: price ? worthText(units) : null };
   };
+  // From the year what's held isn't known on, what it grew isn't either.
+  const lost = unknownFrom === null ? Infinity : yearAt(unknownFrom);
 
   return Promise.all(
-    [...years.entries()].sort(([a], [b]) => a - b).map(async ([year, { claimed, sozu }]) => ({ claimed: await sumOf(claimed), sozu: sozu && (await sumOf(sozu)), year }))
+    [...years.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(async ([year, { claimed, sozu }]) => {
+        const parts = year >= lost ? null : grownIn(year);
+
+        return { claimed: await sumOf(claimed), sozu: sozu && (await sumOf(sozu)), sozuGrown: parts && (await sumOf(parts)), year };
+      })
   );
 }

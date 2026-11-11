@@ -662,6 +662,11 @@ const growthLine = growthRead.then((growth) => [sozuRateLine({ growth, locale: "
 const growthEnd = growthRead.then((growth): SozuPoint | undefined => growth?.to);
 void [growthLine, growthEnd];
 
+import { sozuPointAt } from "@dusk-network/app-core/sozu";
+
+const newYearPoint: Promise<SozuPoint | null> = sozuPointAt({ anchors: [{ at: 1, height: 1 }], archive, at: Date.UTC(2025, 11, 31, 23), cache: new Map(), pool: "a" });
+void newYearPoint.then((point) => stDuskWorth(point));
+
 // /export
 import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear, type ExportOptions, type ExportPeriod, type ExportResult, type RewardsSum, type YearRewards } from "@dusk-network/app-core/export";
 
@@ -686,7 +691,10 @@ void [dates, exportText, CSV_COLUMNS];
 
 const yearly: Promise<YearRewards[]> = rewardsByYear({ complete: true, facts: new Map<string, SozuFact>(), price: () => "0.06", rows: readRows, timeZone: "Europe/Berlin" });
 const taxYear = yearly.then(([first]): [number | undefined, RewardsSum | undefined, bigint | undefined, string | null | undefined] => [first?.year, first?.claimed, first?.sozu?.lux, first?.sozu?.worth]);
-void taxYear;
+// With what Sozu's stDUSK grew while held: the status read now, and the archive for each new year's rate.
+const grownYearly: Promise<YearRewards[]> = rewardsByYear({ archive, cache: new Map(), now: 1, rows: readRows, status: { ...extensionStatus, contracts: { pool: "a" } } });
+const grownYear = grownYearly.then(([first]): [bigint | undefined, string | null | undefined, number | undefined] => [first?.sozuGrown?.lux, first?.sozuGrown?.worth, first?.sozuGrown?.unpriced]);
+void [taxYear, grownYear, rewardsByYear({ rows: readRows, status: sozuStatus })];
 
 // /bridge's ledger
 import { transferLedger, type LedgerInput, type LedgerLine, type TransferLedger } from "@dusk-network/app-core/bridge";

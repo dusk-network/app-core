@@ -35,8 +35,8 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
-| `@dusk-network/app-core/export` | An account's activity as the file an accountant or a tax tool reads, for a quarter or any dates: Koinly's universal CSV (`accountingCsv`, `quarterPeriod`, `datesPeriod`); and staking's rewards by calendar year (`rewardsByYear`) |
-| `@dusk-network/app-core/sozu` | A stake with Sozu: put in, taken out, worth now and earned (`sozuPosition`), what an amount earns in a year (`sozuYear`, `sozuRate`), how stDUSK grew, from the chain (`sozuGrowth`), what native staking paid, from the chain (`nativeRewards`), what the rate is made of (`sozuRateLine`), what each stake and unstake did (`sozuFacts`), and what one stDUSK was worth then (`stDuskWorth`) |
+| `@dusk-network/app-core/export` | An account's activity as the file an accountant or a tax tool reads, for a quarter or any dates: Koinly's universal CSV (`accountingCsv`, `quarterPeriod`, `datesPeriod`); and staking's rewards by calendar year, as they reached the account and as Sozu's stDUSK grew while held (`rewardsByYear`) |
+| `@dusk-network/app-core/sozu` | A stake with Sozu: put in, taken out, worth now and earned (`sozuPosition`), what an amount earns in a year (`sozuYear`, `sozuRate`), how stDUSK grew, from the chain (`sozuGrowth`), what native staking paid, from the chain (`nativeRewards`), what the rate is made of (`sozuRateLine`), what each stake and unstake did (`sozuFacts`), and what one stDUSK was worth then (`stDuskWorth`), or at any moment, from the chain (`sozuPointAt`) |
 | `@dusk-network/app-core/bridge` | The other side of the bridge's routes: where a deposit to DuskEVM arrived (`depositArrivals`), a migration's payout on Dusk (`migrationPayouts`), and where a transfer out to BNB Smart Chain arrived (`serviceArrivals`); the history's entries as those transfers (`depositOf`, `migrationPayoutOf`, `serviceTransferOf`); the arrivals as `/activity` takes them (`arrivalsOf`); a migration's side on its own chain, its gas and the approval it spent (`migrationFacts`, `migrationsOf`), and the gas of every approval and revoke of a migration's contract (`migrationApprovals`); a transfer's exact amounts (`transferLedger`); and how a route is doing (`bridgeStatus`) |
 | `@dusk-network/app-core/bridge-explorer` | Where a deposit to DuskEVM arrived, on DuskEVM's explorer alone (`depositArrivalsFromExplorer`): `/bridge`'s explorer path, for an app that reads nothing else, without the RPC path and `/history` |
 | `@dusk-network/app-core/duskevm-withdrawals` | A DuskEVM withdrawal's life, signing aside: its start on DuskEVM (`withdrawalCall`), finding an address's withdrawals (`syncWithdrawals`, `explorerWithdrawals`, `withdrawalsByNonce`), and on Dusk where each is, its proof and its claim, ready for the app's wallet to sign (`createWithdrawals`) |
@@ -51,13 +51,13 @@ import { amountExample, formatAmount, formatDusk, readAmount } from "@dusk-netwo
 formatDusk(1_853_542n, { round: "nearest" }); // { text: "0.0019", exact: "0.001853542" }
 formatAmount(90_082_082_000_000_000n, { decimals: 18, round: "down" }); // { text: "0.09", exact: "0.090082082" }
 readAmount("1 000,5", "fr-FR"); // { lux: 1_000_500_000_000n, problem: null }
-readAmount("1.234", "es-ES"); // { lux: null, problem: "Is that 1234 or 1,234? Write the one you mean." }
+readAmount("1.000", "es-ES"); // { lux: null, problem: "Is that 1 or 1000? Write the one you mean." }
 `Enter an amount such as 10 or ${amountExample("10.5", "fr-FR")}.`; // "…10 or 10,5."
 ```
 
 - The one rule for an amount, of DUSK or an EVM token: a row and a balance line show `text`, its detail shows `exact`. `text` has at most 4 decimals, 2 significant digits under 0.01, and is never 0 for an amount that isn't. It rounds down for an amount or a balance, to the nearest for a fee paid, and up for the most a fee can be.
 - `defaultCurrency` is the fiat currency a wallet starts on: the one the browser's region pays in, where the apps' price source (CoinGecko) gives DUSK's price in it, as "SGD" in Singapore, "INR" in India, "CHF" in Switzerland and "EUR" in the euro's regions (the euro area, Bulgaria in it since 2026; Andorra, Monaco, San Marino, the Vatican, Montenegro, Kosovo; France's overseas regions and the collectivities that use it; Åland, the Canary Islands, Ceuta and Melilla); "USD" anywhere else, as in Romania or Kenya. A language without a region takes the one it's most spoken in: "de" and "fr" are EUR, "pt" (Brazil) BRL, "en" USD. `PRICE_CURRENCIES` are the 45 currencies the price source gives, as its list said in November 2026, for a wallet to offer.
-- An amount reads back as itself or is refused, never as another. A language's own groups are read: `1 000` with any of its spaces in French, `1'000` in Swiss German, `12,34,567` in Hindi. A lone point or comma before three digits that could mean two things stays unclear (`unclearAmount`): `1.000` where the language writes decimals with a comma, `1,000` where it writes them with a point. A space where the language doesn't group with one, as `1 234,5` in Spanish, is refused saying so: "Leave out the space: 1234,5."
+- An amount reads back as itself or is refused, never as another. A language's own groups are read: `1 000` with any of its spaces in French, `1'000` in Swiss German, `12,34,567` in Hindi. A lone point or comma before three digits that could mean two things stays unclear (`unclearAmount`): `1.000` where the language writes decimals with a comma, `1,000` where it writes them with a point. `readAmount` asks which is meant in numbers no reader takes for the other: "Is that 1 or 1000?", and "Is that about 1.23 or 1234?" for `1,234`, never `1.000` for one. A space where the language doesn't group with one, as `1 234,5` in Spanish, is refused saying so: "Leave out the space: 1234,5."
 - `amountsMeant` is what a search typed can mean as amounts of DUSK, as ranges of lux: what a row shows starts with what's typed, so `"120"` is from 120 up to 121 DUSK. It reads either decimal mark, so `"0.2"` finds 0,2 in German as `"0,2"` does, and looks for both amounts where a mark could mean either, as `"1.000"` in German.
 
 ## Text
@@ -84,7 +84,7 @@ import { makePaymentLink, networkMismatch, parsePaymentLink } from "@dusk-networ
 const made = makePaymentLink({ to: account, amount: typed, memo, network: chainId, language });
 // { ok: true, lux: 150000000n, problems: {}, dusk: "dusk:public-…@dusk:1?amount=0.15&memo=…",
 //   https: "https://apps.dusk.network/wallet/dashboard/send?to=…&amount=0.15&memo=…&network=mainnet" }
-// Or { ok: false, problems: { amount: "Is that 1234 or 1,234? Write the one you mean." }, dusk: "", https: null, lux: null }
+// Or { ok: false, problems: { amount: "Is that about 1,23 or 1234? Write the one you mean." }, dusk: "", https: null, lux: null }
 
 const link = parsePaymentLink(pastedOrScanned); // { form: "https", kind: "public", to, amountDusk: "0.15", lux, memo, label, chainId: "dusk:1", raw }
 networkMismatch(link.chainId, walletChain); // "This request is for Mainnet. You are on Testnet."
@@ -327,16 +327,17 @@ The file is [Koinly's universal CSV](https://support.koinly.io/en/articles/94899
 ```js
 import { rewardsByYear } from "@dusk-network/app-core/export";
 
-await rewardsByYear({ rows, facts, price, timeZone, complete });
-// [{ year: 2026, claimed: { lux: 301288041449337n, worth: "18077.28248696", unpriced: 0 }, sozu: { lux: 112500000000n, worth: "6.75000000", unpriced: 0 } }]
+await rewardsByYear({ rows, facts, price, timeZone, complete, status, archive, cache });
+// [{ year: 2026, claimed: { lux: 301288041449337n, worth: "18077.28248696", unpriced: 0 },
+//    sozu: { lux: 8155553283n, worth: "0.48933320", unpriced: 0 }, sozuGrown: { lux: 118858069243n, worth: "7.13148415", unpriced: 0 } }]
 ```
 
-`rewardsByYear` is staking's rewards by calendar year on the person's clock, as they reached the account, from what the file has: native staking's rewards claimed (the file's `reward` lines), and what Sozu earned that its unstakes took out, beyond what their stDUSK cost at its average, deposit fees aside. Each is worth what `price` says at its own time, to 8 decimals, and `unpriced` counts those without one. What's still staked has earned more, which isn't the account's yet: `sozuPosition` says Sozu's so far. Without every stake and unstake's facts, or the whole history (`complete`), Sozu's are null.
+`rewardsByYear` is staking's rewards by calendar year on the person's clock, from what the file has: native staking's rewards claimed (the file's `reward` lines) and what Sozu's unstakes took out, beyond what their stDUSK cost at its average, deposit fees aside (`sozu`), as they reached the account; and what Sozu's stDUSK grew while held (`sozuGrown`). That growth is the stDUSK held times how much one stDUSK's worth rose: from each stake and unstake at its own rate, and across each new year at the pool's rate after its last restake by then, read from the chain (`sozuPointAt`, a few requests a year, kept in `cache` for good), to now at what `status` says it's worth. Every year's together are what `sozuPosition` says the stake earned so far, but for a lux or so of the pool's rounding in each stake and unstake. Each is worth what `price` says at its own time, a part of the growth at its end, to 8 decimals, and `unpriced` counts those without one. Without every stake and unstake's facts, or the whole history (`complete`), Sozu's are null; so is a year's growth where a new year's rate can't be read (no `archive`), or this year's without `status`.
 
 ## Sozu
 
 ```js
-import { nativeRewards, sozuFacts, sozuGrowth, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
+import { nativeRewards, sozuFacts, sozuGrowth, sozuPointAt, sozuPosition, sozuRate, sozuRateLine, sozuYear, stDuskWorth } from "@dusk-network/app-core/sozu";
 
 const facts = await sozuFacts({ archive, account, rows, cache }); // optional: each one's own deposit fee and stDUSK
 sozuPosition({ rows, status, facts, complete });
@@ -349,6 +350,9 @@ const growth = await sozuGrowth({ archive, pool: status.contracts.pool, status, 
 sozuRate(nativeRate, status, growth); // 0.204: the rate, once it's read
 sozuRateLine({ growth }); // "stDUSK went from 1.2740 to 1.2953 DUSK over the last 30 days, after Sozu's share."
 
+const point = await sozuPointAt({ archive, pool: status.contracts.pool, at: Date.UTC(2025, 11, 31, 23), anchors, cache }); // the 2026 new year in Berlin
+stDuskWorth(point); // 1056231313n: one stDUSK was worth 1.056231313 DUSK
+
 const native = await nativeRewards({ archive, provisioners, tipHeight, network: "mainnet", cache }); // what native staking paid, from the chain
 // { days: 30, perBlock: 15276211075n, staked: 207258170780379280n, rate: 0.232, from, to, blocks: 6 }
 sozuRateLine({ native, status }); // "15.3 DUSK a block to stakers over the last 30 days, 207.3M DUSK staked now: about 23% a year. Less Sozu's 15%: …"
@@ -358,6 +362,7 @@ sozuRateLine({ native, status }); // "15.3 DUSK a block to stakers over the last
 - `sozuFacts` reads the pool's own event in each transaction, and the stDUSK an unstake burned from the token's transfer in it, a request for each 25, without a data driver. With `cache`, a `Map` of text does, each is read once. `stDuskWorth(fact.pool)` is what one stDUSK was worth then, in lux, for a stake's or an unstake's details to say as the export does: "1 stDUSK = 1.840349526 DUSK".
 - `sozuRate` is Sozu's rate as both wallets work it out: from native staking's as it's shown, to the percent. `sozuRateLine` takes the node's provisioners for what a block pays and what's staked, or `nativeRate` alone for the rate.
 - `nativeRewards` measures what native staking paid over the last 30 days (`days`), from the chain: what a block paid stakers, every reward in the stake contract's event but Dusk's own tenth, over six blocks across the period, at the period's own pace, shared with what's staked now as consensus counts it. Its `rate` goes where `nativeRateEstimate`'s did, and `days` says the period it's of; `sozuRateLine` takes it (`native`) to say the same. One or two requests, about 110 kB on mainnet, kept in `cache` for an hour (`network` keeps networks apart in one cache); null where it can't be read: then the rate is estimated as before. The provisioners' own `reward` grows by Dusk's tenth too: what a block pays stakers is the rest.
+- `sozuPointAt` reads what one stDUSK was worth at a moment as `sozuGrowth` does: the pool's figures after its last restake by then, among the transactions calling it around that moment's block. The block is found by its time, from blocks whose height and time the app knows (`anchors`, as `{ height, at }` of an account's rows) and the tip: three requests where rows are on both sides of the moment, about six where none are. It's null until the archive's tip has passed the moment, as a restake may still come before it, where no restake is found in the two hours or so before the moment, as while a pool was idle, or where the archive can't be read. What it finds is kept in `cache` for good once the tip is ten minutes past the moment.
 - `sozuGrowth` reads how stDUSK grew over the last 30 days (`days`), from the chain: the pool's hourly restake near the tip and near the period's start, among the transactions calling it, and what one stDUSK was worth after each, as the pool's reward event says. That growth is what a holder earned, Sozu's share off. Given it, `sozuRate`, `sozuYear` and `sozuRateLine` go by it, so the rate shown, what an amount earns and the line agree. Two or three requests, about 120 kB on mainnet, kept in `cache` for an hour; null where it can't be read, or where the latest restake isn't the pool's rate `status` read: then the rate is worked out as before.
 
 ## Bridge

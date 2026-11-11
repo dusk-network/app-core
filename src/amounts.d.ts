@@ -16,7 +16,7 @@
  * formatDusk(1_853_542n, { round: "up" }); // { text: "0.0019", exact: "0.001853542" }
  * formatAmount(90_082_082_000_000_000n, { decimals: 18, round: "down" }); // { text: "0.09", exact: "0.090082082" }
  * readAmount("1 000,5", "fr-FR"); // { lux: 1_000_500_000_000n, problem: null }
- * readAmount("1.001", "nl-NL"); // { lux: null, problem: "Is that 1001 or 1,001? Write the one you mean." }
+ * readAmount("1.000", "nl-NL"); // { lux: null, problem: "Is that 1 or 1000? Write the one you mean." }
  * unclearAmount("1.001", ","); // { grouped: "1001", decimal: "1,001" }
  * amountExample("10.5", "fr-FR"); // "10,5"
  * ```
@@ -128,7 +128,9 @@ export declare function parseDusk(plain: string): bigint | null;
 /**
  * An amount of DUSK as a person typed it, in the language's reading (the
  * browser's, unless given): the lux it is, or what's wrong with it in plain
- * words: that it could be two amounts, that a space the language doesn't
+ * words: that it could be two amounts, each said as no reader takes it for
+ * the other ("Is that 1 or 1000?", "Is that about 1.23 or 1234?"; never
+ * "1.000" for one), that a space the language doesn't
  * group with is in it ("Leave out the space: 1234,5."), that it has too many
  * decimals, or what an amount looks like. Nothing typed is neither.
  */

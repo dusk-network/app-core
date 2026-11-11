@@ -8,7 +8,7 @@
  *
  * @example
  * ```js
- * import { sozuFacts, sozuPosition, sozuRateLine, sozuYear } from "@dusk/app-core/sozu";
+ * import { sozuFacts, sozuPointAt, sozuPosition, sozuRateLine, sozuYear, stDuskWorth } from "@dusk/app-core/sozu";
  *
  * const facts = await sozuFacts({ archive, account, rows, cache }); // optional: each stake's own deposit fee and stDUSK
  * sozuPosition({ rows, status, facts, complete });
@@ -24,6 +24,10 @@
  * const growth = await sozuGrowth({ archive, pool: status.contracts.pool, status, cache });
  * sozuRate(nativeRate, status, growth); // 0.204
  * sozuRateLine({ growth }); // "stDUSK went from 1.2740 to 1.2953 DUSK over the last 30 days, after Sozu's share."
+ *
+ * // What one stDUSK was worth at a moment, from the chain: the 2026 new year in Berlin.
+ * const point = await sozuPointAt({ archive, pool: status.contracts.pool, at: Date.UTC(2025, 11, 31, 23), anchors, cache });
+ * stDuskWorth(point); // 1056231313n
  * ```
  *
  * @module
@@ -167,6 +171,29 @@ export declare function sozuGrowth(options: {
   maxAgeMs?: number;
   now?: number;
 }): Promise<SozuGrowth | null>;
+
+/**
+ * What one stDUSK was worth at a moment, read from the chain as `sozuGrowth`
+ * reads it: the pool's figures after its last restake by then, among the
+ * transactions calling it around the block of that moment, as its reward
+ * event says them. That block is found by its time, between blocks whose
+ * height and time are known (`anchors`, as an account's rows) and the tip:
+ * three requests with rows on both sides of the moment, about six without
+ * any. Null until the archive's tip has passed the moment, as a restake may
+ * still come before it; where no restake is found in the 800 blocks before
+ * the moment's (about two hours, where Sozu restakes every hour), as while
+ * the pool was idle; or where the archive can't be read. With `cache`, a
+ * `Map` of text does, what it found is kept for good once the tip is ten
+ * minutes past the moment, past the blocks at a tip that may still change.
+ */
+export declare function sozuPointAt(options: {
+  archive: Pick<Archive, "query">;
+  pool: string;
+  /** The moment, in milliseconds. */
+  at: number;
+  anchors?: Iterable<{ height: number; at: number }>;
+  cache?: FactCache;
+}): Promise<SozuPoint | null>;
 
 /**
  * What native staking paid over a period, from the chain: what a block paid

@@ -65,6 +65,16 @@ const YEAR_MS = 365.25 * DAY_MS;
 const RATE_TOLERANCE = 0.005;
 /** A reward event's stake and stDUSK: the last u64s but one, from the end of its data. */
 const REWARD_STAKE_FROM_END = 24;
+/** How near a moment the block found for it is: ten minutes, where Sozu restakes every hour. */
+const NEAR_MS = 10 * 60_000;
+/** How far the archive's tip is past a moment before what was read of it is kept: ten minutes, past the blocks at a tip that may still change. */
+const KEEP_AFTER_MS = 10 * 60_000;
+/** The most blocks whose time is read to find one near a moment. */
+const PROBES = 16;
+/** A block every 10 seconds, for a first guess of a height from a time. */
+const BLOCK_MS = 10_000;
+/** Windows read for a moment's restake, by how far each ends from its block: 800 blocks up to it, where Sozu restakes every 360, and 200 after, as that block may be a little early. */
+const POINT_WINDOW_ENDS = [TXS_BLOCKS, 0, -TXS_BLOCKS, -2 * TXS_BLOCKS, -3 * TXS_BLOCKS];
 /** Digits a growth's ratio is worked out to. */
 const GROWTH_SCALE = 1_000_000_000_000n;
 /** @type {WeakMap<object, Map<string, Promise<SozuGrowth | null>>>} */
@@ -386,9 +396,12 @@ function pointOf(list, restake, pool) {
  */
 const grownBy = (a, b) => (a.supply > 0n && b.stake > 0n ? Number((a.stake * b.supply * GROWTH_SCALE) / (a.supply * b.stake) - GROWTH_SCALE) / Number(GROWTH_SCALE) : null);
 
-/** @param {SozuGrowth} growth */
-const growthKept = (growth) =>
-  JSON.stringify(growth, (_, value) => (typeof value === "bigint" ? `${value}` : value));
+/**
+ * What's kept of a growth or a point, as text: its bigints in digits.
+ *
+ * @param {SozuGrowth | SozuPoint} read
+ */
+const keptText = (read) => JSON.stringify(read, (_, value) => (typeof value === "bigint" ? `${value}` : value));
 
 /**
  * @param {string | null | undefined} text
@@ -446,7 +459,7 @@ export async function sozuGrowth({ archive, cache, days = GROWTH_DAYS, maxAgeMs 
     const growth = await answer;
 
     // Kept where this caller's status agrees with it, or it has none to say.
-    if (growth && ofCaller(growth)) cache?.set(key, JSON.stringify({ growth: JSON.parse(growthKept(growth)), readAt: now }));
+    if (growth && ofCaller(growth)) cache?.set(key, JSON.stringify({ growth: JSON.parse(keptText(growth)), readAt: now }));
 
     return ofCaller(growth);
   } finally {
@@ -496,6 +509,162 @@ async function readGrowth(archive, id, days, tipHeight) {
     return grown === null ? null : { days: Math.round(span / DAY_MS), from, rate: (grown * YEAR_MS) / span, to };
   } catch {
     // What can't be read says nothing: the rate as it's worked out stands.
+    return null;
+  }
+}
+
+/**
+ * A block's height and time, in milliseconds, as the archive gives it: null
+ * for none.
+ *
+ * @param {any} block
+ * @returns {{ height: number, at: number } | null}
+ */
+function headerOf(block) {
+  const height = Number(block?.header?.height);
+  const at = Number(block?.header?.timestamp) * 1000;
+
+  return Number.isSafeInteger(height) && height >= 0 && Number.isFinite(at) && at > 0 ? { at, height } : null;
+}
+
+/**
+ * The height of a block within NEAR_MS of a moment, found by blocks' times:
+ * between the nearest known on either side of it (`anchors`, and the tip
+ * where none is after it, read with the first guess), each guess where the
+ * time between them puts the moment, and every fourth halfway, as a halt of
+ * the chain stretches that time. Null where none is found, or the archive's
+ * tip hasn't passed the moment.
+ *
+ * @param {Pick<Archive, "query">} archive
+ * @param {number} at
+ * @param {Iterable<{ height: number, at: number }>} anchors
+ * @returns {Promise<number | null>}
+ */
+async function heightNear(archive, at, anchors) {
+  /** @typedef {{ height: number, at: number }} Block */
+  /** @type {{ below: Block | null, above: Block | null }} */
+  const nearest = { above: null, below: null };
+  /** @param {Block} block */
+  const place = (block) => {
+    if (block.at <= at) {
+      if (!nearest.below || block.height > nearest.below.height) nearest.below = block;
+    } else if (!nearest.above || block.height < nearest.above.height) {
+      nearest.above = block;
+    }
+  };
+
+  for (const anchor of anchors) {
+    if (Number.isSafeInteger(anchor?.height) && anchor.height >= 0 && Number.isFinite(anchor?.at)) place({ at: anchor.at, height: anchor.height });
+  }
+
+  // Guesses between two blocks, every fourth of which is halfway.
+  let between = 0;
+
+  for (let probe = 0; probe < PROBES; probe += 1) {
+    const { above: after, below: before } = nearest;
+
+    if (before && at - before.at <= NEAR_MS) return before.height;
+    if (after && after.at - at <= NEAR_MS) return after.height;
+    if (before && after && after.height - before.height <= 1) return before.height;
+
+    /** @type {number | null} */
+    let guess = null;
+
+    if (before && after) {
+      between += 1;
+      guess =
+        between % 4 === 0
+          ? before.height + Math.floor((after.height - before.height) / 2)
+          : before.height + Math.round(((at - before.at) * (after.height - before.height)) / (after.at - before.at));
+    } else if (before) {
+      guess = before.height + Math.ceil((at - before.at) / BLOCK_MS);
+    } else if (after) {
+      guess = after.height - Math.ceil((after.at - at) / BLOCK_MS);
+    }
+
+    const height = guess === null ? null : Math.min(after ? after.height - 1 : Infinity, Math.max(before ? before.height + 1 : 0, guess));
+    const read = await archive.query(
+      `query { ${height === null ? "" : `b: block(height: ${height}) { header { height timestamp } } `}${after ? "" : "tip: block(height: -1) { header { height timestamp } } "}}`
+    );
+
+    if (!after) {
+      const tip = headerOf(read?.tip);
+
+      // A moment the archive hasn't passed: a restake may still come before it.
+      if (!tip || tip.at <= at) return null;
+
+      place(tip);
+    }
+
+    const block = height === null ? null : headerOf(read?.b);
+
+    // A guess past the tip has no block: the tip read with it is the next one's end.
+    if (block) place(block);
+    else if (height !== null && after) return null;
+  }
+
+  return null;
+}
+
+/**
+ * @param {string | null | undefined} text
+ * @returns {SozuPoint | null}
+ */
+function pointRead(text) {
+  try {
+    const { at, height, stake, supply } = JSON.parse(String(text));
+
+    return { at: Number(at), height: Number(height), stake: BigInt(stake), supply: BigInt(supply) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {{ archive: Pick<Archive, "query">, pool: string, at: number, anchors?: Iterable<{ height: number, at: number }>, cache?: FactCache }} options
+ * @returns {Promise<SozuPoint | null>}
+ */
+export async function sozuPointAt({ anchors = [], archive, at, cache, pool }) {
+  const id = String(pool ?? "").toLowerCase();
+
+  if (!CONTRACT_ID.test(id) || !Number.isFinite(at)) return null;
+
+  const key = `sozu-point:${id}:${at}`;
+  const kept = pointRead(cache?.get(key));
+
+  if (kept) return kept;
+
+  try {
+    const near = await heightNear(archive, at, anchors);
+
+    if (near === null) return null;
+
+    // The pool's last restake by the moment, among the transactions calling it around the block found, and the
+    // archive's tip with them: until it's past the moment, a restake may still come before it.
+    const ends = POINT_WINDOW_ENDS.map((end) => near + end).filter((end) => end >= 0);
+    const listed = await archive.query(
+      `query { tip: block(height: -1) { header { height timestamp } } ${ends.map((end, i) => `w${i}: blockTxs(range: [${Math.max(0, end - TXS_BLOCKS + 1)}, ${end}], contract: ${JSON.stringify(id)}) { id blockHeight blockTimestamp err tx { json } }`).join(" ")} }`
+    );
+    const tip = headerOf(listed?.tip);
+
+    if (!tip || tip.at <= at) return null;
+    const [restake] = ends
+      .flatMap((_, i) => (Array.isArray(listed?.[`w${i}`]) ? listed[`w${i}`] : []))
+      .map((each) => restakeOf(each, id))
+      .filter((each) => each !== null)
+      .filter((each) => each.at <= at)
+      .sort((a, b) => b.height - a.height);
+
+    if (!restake) return null;
+
+    const point = pointOf((await archive.query(`query { e: contractEvents(height: ${restake.height}) { json } }`))?.e?.json, restake, id);
+
+    // What the chain says of a moment well past doesn't change: kept for good.
+    if (point && tip.at - at >= KEEP_AFTER_MS) cache?.set(key, keptText(point));
+
+    return point;
+  } catch {
+    // What can't be read says nothing.
     return null;
   }
 }

@@ -2,6 +2,17 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.11.0]
+
+### Added
+
+- `/export`: `rewardsByYear` gives what Sozu's stDUSK grew while held each year (`sozuGrown`), beside what unstaking took out, with `status` and `archive` for stDUSK's rate now and at each new year
+- `/sozu`: `sozuPointAt`, what one stDUSK was worth at a moment, read from the chain
+
+### Changed
+
+- `/amounts`: `readAmount` asks which of two amounts is meant in numbers no reader takes for the other: "Is that 1 or 1000?", never "1.000" for one
+
 ## [0.10.0]
 
 ### Added

@@ -56,8 +56,9 @@
  */
 
 import type { ActivityRow } from "./activity.js";
-import type { MigrationApproval, MigrationEvm } from "./bridge.js";
-import type { SozuFact } from "./sozu.js";
+import type { FactCache, MigrationApproval, MigrationEvm } from "./bridge.js";
+import type { Archive } from "./history.js";
+import type { SozuFact, SozuStatusLike } from "./sozu.js";
 
 /** The file's columns: Koinly's universal twelve, then what it ignores. */
 export declare const CSV_COLUMNS: ReadonlyArray<string>;
@@ -167,33 +168,48 @@ export declare function accountingCsv(options: ExportOptions): Promise<ExportRes
  */
 export type RewardsSum = { lux: bigint; worth: string | null; unpriced: number };
 
-/** A calendar year's staking rewards, as they reached the account. */
+/** A calendar year's staking rewards: as they reached the account, and what Sozu's stDUSK grew while held. */
 export type YearRewards = {
   year: number;
   /** Native staking's rewards claimed that year, as the file's `reward` lines. */
   claimed: RewardsSum;
   /**
-   * What Sozu's unstakes that year gave back beyond what their stDUSK cost,
-   * deposit fees aside, at what the stDUSK held had cost on average: what
-   * Sozu earned that was taken out. Null where a stake or an unstake before
-   * one of them isn't known (`facts` lacks it, or the history isn't
-   * `complete`).
+   * Taken out by unstaking: what Sozu's unstakes that year gave back beyond
+   * what their stDUSK cost, deposit fees aside, at what the stDUSK held had
+   * cost on average. Null where a stake or an unstake before one of them
+   * isn't known (`facts` lacks it, or the history isn't `complete`).
    */
   sozu: RewardsSum | null;
+  /**
+   * Grown while held: what the stDUSK held that year grew by, as one
+   * stDUSK's worth in DUSK rose, from the year's start, or its first stake,
+   * to its end, or now: at each stake and unstake at its own rate, and at
+   * each new year at the pool's after its last restake by then, read from
+   * the chain (`sozuPointAt` of `/sozu`); now at what the status says it's
+   * worth. Each part between two of those is worth what `price` says at its
+   * end: a new year's at the year's last moment. Every year's together are
+   * what the stake earned so far (`earned` of `sozuPosition`), but for a lux
+   * or so of the pool's rounding in each stake and unstake. Null where a new
+   * year's rate can't be read, this year's worth isn't known (no `status`),
+   * or a stake or an unstake in it or before isn't known.
+   */
+  sozuGrown: RewardsSum | null;
 };
 
 /**
  * Staking rewards by calendar year, on the clock of `timeZone` (the
  * device's, unless given), from what the file has: the rewards native
- * staking claimed, and what Sozu earned that its unstakes took out, as they
- * reached the account, each worth what `price` says at its own time. What's
- * still staked has earned more, which isn't the account's yet: `sozuPosition`
- * of `/sozu` says Sozu's so far. `rows` are `/activity`'s, all of them, with
- * `facts` (`sozuFacts` of `/sozu`); `complete` is `read()`'s, without which
- * Sozu's are null. The rows don't say the order within a block: a stake there
- * counts before an unstake, so an unstake never comes before the stake that
- * minted what it gives back. A year is there where a reward was claimed, or a
- * stake or an unstake with Sozu went through, oldest first.
+ * staking claimed and what Sozu's unstakes took out, as they reached the
+ * account, and what Sozu's stDUSK grew while held, each worth what `price`
+ * says at its own time. `rows` are `/activity`'s, all of them, with `facts`
+ * (`sozuFacts` of `/sozu`); `complete` is `read()`'s, without which Sozu's
+ * are null. What it grew needs `status`, Sozu's as read now, for what it's
+ * worth now and the pool, and `archive` for the rate at each new year
+ * something was held across: a few requests each, kept in `cache` for good.
+ * The rows don't say the order within a block: a stake there counts before
+ * an unstake, so an unstake never comes before the stake that minted what it
+ * gives back. A year is there where a reward was claimed, a stake or an
+ * unstake with Sozu went through, or stDUSK was held, oldest first.
  */
 export declare function rewardsByYear(options: {
   rows: Iterable<ActivityRow>;
@@ -201,4 +217,12 @@ export declare function rewardsByYear(options: {
   price?: ExportOptions["price"];
   timeZone?: string;
   complete?: boolean;
+  /** Sozu's status as read now (`readSozuStatus` of `@dusk-network/networks/sozu`, or the extension's): what the stDUSK held is worth now, and the pool (`contracts.pool`), else the one the rows called. */
+  status?: (SozuStatusLike & { contracts?: { pool?: string | null } | null }) | null;
+  /** The archive the rate at each new year is read from. */
+  archive?: Pick<Archive, "query">;
+  /** A `Map` of text does: each new year's rate, once read. */
+  cache?: FactCache;
+  /** The clock, in milliseconds: when what's held is worth what the status says. */
+  now?: number;
 }): Promise<YearRewards[]>;
