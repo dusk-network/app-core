@@ -5,9 +5,10 @@ import { nativeRateEstimate, sozuRateEstimate } from "@dusk-network/networks/rat
 import { sozuFee, sozuStake } from "@dusk-network/networks/sozu";
 
 import { activityRows } from "../src/activity.js";
-import { GROWTH_MAX_AGE_MS, nativeRewards, stDuskWorth, sozuFacts, sozuGrowth, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
+import { GROWTH_MAX_AGE_MS, nativeRewards, stDuskWorth, sozuFacts, sozuGrowth, sozuPointAt, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
 import { DUSK, POOL, entryFrom, entryOf, hash } from "./fixtures/activity.js";
 import { readFixture } from "./fixtures/helpers.js";
+import { chainArchive, newYear } from "./fixtures/sozu.js";
 
 // Recorded on Testnet: an account's two stakes, and its status read after them;
 // another account's unstake and the stake after it; and a third account's two
@@ -572,5 +573,48 @@ describe("what native staking paid", () => {
     const half = archiveOf((answer) => ({ ...answer, e0: { json: [] }, e1: { json: [] }, e2: { json: [] } }));
 
     assert.equal((await nativeRewards({ archive: half, provisioners: recorded.provisioners }))?.blocks, 3);
+  });
+});
+
+describe("what one stDUSK was worth at a moment", () => {
+  // Mainnet around the 2026 new year: Sozu restaked at 22:52:09 and 23:52:16 UTC on 31 December.
+  const BERLIN = Date.UTC(2025, 11, 31, 23);
+  const UTC = Date.UTC(2026, 0, 1);
+  // The blocks of a stake before it and an unstake after it, as an account's rows know them.
+  const anchors = [newYear.stake, newYear.unstake].map(({ height, timestamp }) => ({ at: timestamp * 1000, height }));
+
+  it("is the pool's rate after its last restake by then, read from the chain: the new year in Berlin, and in UTC an hour on", async () => {
+    const archive = chainArchive(newYear);
+    const berlin = await sozuPointAt({ archive, at: BERLIN, pool: newYear.pool });
+    const utc = await sozuPointAt({ anchors, archive, at: UTC, pool: newYear.pool });
+
+    assert.deepEqual(berlin, { at: Date.UTC(2025, 11, 31, 22, 52, 9), height: 3_059_632, stake: 13_780_497_247_081_399n, supply: 13_046_855_426_301_906n });
+    assert.equal(stDuskWorth(berlin), 1_056_231_313n);
+    assert.equal(utc?.height, 3_059_992);
+    assert.equal(stDuskWorth(utc), 1_056_254_364n);
+  });
+
+  it("finds the moment's block in a few requests, fewer from blocks the account's rows know, and keeps what it found for good", async () => {
+    const bare = chainArchive(newYear);
+
+    await sozuPointAt({ archive: bare, at: BERLIN, pool: newYear.pool });
+    assert.ok(bare.queries.length <= 6, `${bare.queries.length} requests`);
+
+    const told = chainArchive(newYear);
+    const cache = new Map();
+    const point = await sozuPointAt({ anchors, archive: told, at: BERLIN, cache, pool: newYear.pool });
+
+    assert.equal(told.queries.length, 3);
+    assert.deepEqual(await sozuPointAt({ anchors, archive: told, at: BERLIN, cache, pool: newYear.pool }), point);
+    assert.equal(told.queries.length, 3);
+  });
+
+  it("is nothing where no restake is found before the moment, the archive can't be read, or the moment is past the tip", async () => {
+    const idle = { ...newYear, txs: newYear.txs.filter((/** @type {any} */ tx) => tx.blockHeight > 3_060_000) };
+
+    assert.equal(await sozuPointAt({ anchors, archive: chainArchive(idle), at: BERLIN, pool: newYear.pool }), null);
+    assert.equal(await sozuPointAt({ anchors, archive: { query: async () => Promise.reject(new Error("The archive answers with HTTP 502")) }, at: BERLIN, pool: newYear.pool }), null);
+    assert.equal(await sozuPointAt({ archive: chainArchive(newYear), at: newYear.tip.timestamp * 1000 + 86_400_000, pool: newYear.pool }), null);
+    assert.equal(await sozuPointAt({ archive: chainArchive(newYear), at: BERLIN, pool: "not a pool" }), null);
   });
 });
