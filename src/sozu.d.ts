@@ -202,16 +202,20 @@ export declare function sozuPointAt(options: {
  * to in a year at the period's pace, shared with what's staked now.
  */
 export type NativeRewards = {
-  /** The period's first block and the tip read, with their times in milliseconds. */
+  /** The period's first block and its last, on the last whole day of blocks (8,640) an hour or more below the tip, with their times in milliseconds. */
   from: { height: number; at: number };
   to: { height: number; at: number };
   /** The days between the two, rounded: the period the figure is of. */
   days: number;
-  /** What a block paid stakers, in lux, on average over the blocks read. */
+  /** What a block paid stakers, in lux, on average over the blocks read, the most and the least of them left out. */
   perBlock: bigint;
-  /** The blocks read across the period: one in the middle of each sixth of it. */
+  /** The blocks read across the period, at fixed heights: one in each sixth of it. */
   blocks: number;
-  /** The stake consensus counts now, in lux, as `nativeRateEstimate` counts it: at the app's `tipHeight`, or else at the tip read. */
+  /**
+   * What's staked now, in lux: every provisioner's stake of at least the minimum, eligible yet or not. One
+   * suspended for a fault, or waiting for its first epoch, shares the pay again within days, so the rate doesn't
+   * jump by points at an epoch's start, as it did counted only while eligible.
+   */
   staked: bigint;
   /** What a year of such blocks pays, at the period's pace, over `staked`, simply, as a fraction: 0.87 is 87%. */
   rate: number;
@@ -220,15 +224,23 @@ export type NativeRewards = {
 /**
  * What native staking paid over the last `days` (30 unless asked), measured
  * from the chain: the stake contract's reward event in six blocks across the
- * period, Dusk's own tenth left out, and the period's two ends for its pace;
- * shared with what's staked now, from the node's provisioners. Two requests
- * of the archive, or one with the app's `tipHeight`: about 110 kB on
- * mainnet. With `cache`, a `Map` of text does, what it read is kept for
- * `maxAgeMs`, an hour unless asked, under `network`'s name for an app that
- * keeps one cache for more than one network, and two reads at once make one.
- * Null where it can't be read, or nothing is staked: then the rate is
- * estimated as before (`nativeRateEstimate` of `@dusk-network/networks/rates`).
- * Its `rate` goes where that one did, as `nativeRate`; `days` says over what.
+ * period, Dusk's own tenth left out, the most and the least of them aside,
+ * and the period's two ends for its pace; shared with what's staked now,
+ * from the node's provisioners, eligible yet or not. The period is fixed to
+ * whole days of blocks:
+ * it ends on the last day's line (a multiple of 8,640 blocks) an hour or more
+ * below the tip, and its six blocks are at fixed heights, so every app that
+ * reads it in the same day reads the same blocks and says the same rate, and
+ * a day on, one of the six is another at most. Two requests of the archive,
+ * or one with the app's `tipHeight`: about 110 kB on mainnet. With `cache`,
+ * a `Map` of text does, what it read is kept under `network`'s name, for an
+ * app that keeps one cache for more than one network: with `tipHeight`,
+ * while the tip is in the same day of blocks, as reading again would read
+ * the same; without, for `maxAgeMs`, an hour unless asked. Two reads at once
+ * make one. Null where it can't be read, or nothing is staked: then the rate
+ * is estimated as before (`nativeRateEstimate` of
+ * `@dusk-network/networks/rates`). Its `rate` goes where that one did, as
+ * `nativeRate`; `days` says over what.
  */
 export declare function nativeRewards(options: {
   archive: Pick<Archive, "query">;

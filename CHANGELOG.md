@@ -21,6 +21,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/payment-links`: a `dusk:shielded-` link to a public account, or a `dusk:public-` link to a shielded address, is refused, saying which it asks for
 - `/payment-links`: a `dusk:` link with a `#` in it is refused, rather than reading what follows into a field
 - `/export`: `rewardsByYear` shows no rounding remainder as a reward: Sozu's at stDUSK's own rates, the pool's rounding aside, and each year in whole lux
+- `/sozu`: `nativeRewards` is the same for every app that reads it in the same day of blocks: its 30 days end on a whole day of blocks, its six blocks are at fixed heights, the most and the least of them are left out, and what's staked counts every stake, eligible yet or not
 
 ## [0.11.0]
 
