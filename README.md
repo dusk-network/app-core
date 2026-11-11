@@ -30,7 +30,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/amounts` | Amounts as the apps write and read them, in the browser's language: `formatDusk`, `formatAmount`, `formatDuskPlain`, `readAmount`, `normalizeAmount`, `unclearAmount`, `parseDusk`, `amountExample`, `decimalSeparator`, `amountLocale`, `amountForField`, `groupDigits`; the amounts a search can mean (`amountsMeant`); and the currency a wallet starts on, by the browser's region (`defaultCurrency`), of those the price source gives (`PRICE_CURRENCIES`) |
 | `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) and what its numbers ask a person to check (`numbersNote`); and text as a search compares it, without accents or case (`searchKey`) |
 | `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), as Send reads them on the wallet's network (`readPaymentLink`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
-| `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; whether one holds what can't be seen, to refuse it (`nameHides`, `NAME_HIDES`); the name a contact's takes (`nameClash`), or a profile's (`profileNameClash`); and which in a list to show with their address (`lookAlikes`) |
+| `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; whether one holds what can't be seen, to refuse it (`nameHides`, `NAME_HIDES`); the name a contact's takes (`nameClash`), or a profile's (`profileNameClash`), a profile's .dusk name among them; the name one starts as, to ask about (`nameStarts`); and which in a list to show with their address (`lookAlikes`) |
 | `@dusk-network/app-core/requests` | Payment requests: what came in for each request a wallet made (`matchRequests`), a payment that paid one again, sent back (`refundOf`), and the payment a send would make again (`sentAlready`) |
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
@@ -102,21 +102,26 @@ readPaymentLink(pastedOrScanned, { network: walletChain });
 ## Names
 
 ```js
-import { lookAlikes, looksAlike, nameClash, nameHides, profileNameClash } from "@dusk-network/app-core/names";
+import { lookAlikes, looksAlike, nameClash, nameHides, nameStarts, profileNameClash } from "@dusk-network/app-core/names";
 
 nameHides("\u202eecilA"); // true: it reads as "Alice", so it's refused, saying NAME_HIDES
 looksAlike("Bob", "Bօb"); // true: an Armenian օ
 nameClash("Profile 2", { profiles, contacts, except: editedId });
-// { kind: "profile", same: true, entry: profiles[1] }: a contact named like a profile, to refuse
-nameClash("Estudio Mаrta", { profiles, contacts }); // { kind: "contact", same: false, entry }: another's, in other letters
-profileNameClash("Alice", { profiles, contacts, self: account }); // { kind: "contact", same: true, entry }: a profile named like a contact, to refuse
+// { kind: "profile", same: true, entry: profiles[1], name: "Profile 2" }: a contact named like a profile, to refuse
+nameClash("Estudio Mаrta", { profiles, contacts }); // { kind: "contact", same: false, entry, name: "Estudio Marta" }: another's, in other letters
+profileNameClash("Alice", { profiles, contacts, self: account }); // { kind: "contact", same: true, entry, name: "Alice" }: a profile named like a contact, to refuse
+// Each profile with its verified .dusk name, where it has one:
+profileNameClash("sоfiadesign.dusk", { profiles: [{ account, address, name: "Profile 1", duskName: "sofiadesign.dusk" }, …], contacts, self: other });
+// { kind: "profile", same: false, entry, name: "sofiadesign.dusk" }: the other profile's .dusk name in other letters, to refuse
+nameStarts("Lucas (petit-fils)", { profiles }); // { kind: "profile", entry, name: "Lucas" }: to ask whether it's someone else
 lookAlikes([...profiles, ...contacts]); // the entries to show with their address
 ```
 
 - `nameHides` says a name holds what can't be seen as it's shown, which can make it read as another: a control that turns text around (U+202E makes "\u202eecilA" read as "Alice"), a character that renders as nothing, as a zero-width space, a joiner between emoji or a variation selector on what isn't an emoji (U+FE0F after "Alice"), a line break or another control. A wallet refuses such a name for a contact or a profile, saying `NAME_HIDES`, and shows one kept from before with `displayText` of `/text`, its hidden characters as codes.
 - Names look alike when they read as the same name, whatever their case, accents, spaces and punctuation, and without what can't be seen (`sameName`), or have the same skeleton by Unicode's confusables (UTS #39), as written or in lower case: Cyrillic, Greek, Armenian and Cherokee letters that look like Latin ones, a capital I that looks like a small l, rn that looks like m. The table is Unicode's, version 18.0.0, kept in the package as data: `npm run generate:confusables` makes `src/confusables.js` again from the pinned file, once its hash is checked.
-- `nameClash` says whose name a new or changed contact's takes: one of the person's profiles first, as a contact named like a profile would read as that profile on Review; then another contact's. `same` says it reads as that name, rather than looking like it.
-- `profileNameClash` says the same of a profile's new name, the other way round: another of the person's profiles first, then a contact's, both to refuse, as History and Review would read the profile as that one. `self` is the account or address of the profile named: it, and a contact saved with its address, take nothing from it.
+- `nameClash` says whose name a new or changed contact's takes: one of the person's profiles first, by the name it was given or its verified .dusk name (`duskName`), as a contact named like a profile would read as that profile on Review; then another contact's. `name` is the name taken, and `same` says it reads as that name, rather than looking like it.
+- `profileNameClash` says the same of a profile's new name, the other way round: another of the person's profiles first, by its name or its .dusk name, then a contact's, both to refuse, as History and Review would read the profile as that one: a client's payments as from "sofiadesign.dusk". `self` is the account or address of the profile named: it, its own .dusk name, and a contact saved with its address, take nothing from it.
+- `nameStarts` says which profile, then contact, has a name that starts with this one's, word for word, or is the start of it, as the look-alike rules read names: "Lucas" and "Lucas (petit-fils)", not "Ann" and "Anna". It's for a question, not a refusal: the two read differently, but Send's "From Lucas … To Lucas (petit-fils)" can be taken one for the other at a glance. Give it what to check against: a contact's name against `profiles`, a profile's against `contacts`, with `self`.
 - `lookAlikes` gives the entries whose name looks like another's of another address, for a list or a picker to show each with its address.
 - For what a person reads only: a payment goes to an address, and a name never stands for one.
 

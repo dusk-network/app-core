@@ -7,6 +7,8 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/payment-links`: `LINK_BAD_ADDRESS`, what `readPaymentLink` says of a link whose recipient Send can't pay: "This link's address isn't valid. Ask for a new one."
+- `/names`: `profileNameClash` and `nameClash` take each profile's verified .dusk name (`duskName`), look-alikes too, and say the name taken (`name`)
+- `/names`: `nameStarts`, the profile or contact whose name starts with a name word for word, or is its start, as "Lucas" and "Lucas (petit-fils)", to ask about
 
 ### Changed
 

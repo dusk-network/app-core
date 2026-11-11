@@ -105,41 +105,124 @@ export function sameName(a, b) {
 export const looksAlike = (a, b) => alike(keysOf(a), keysOf(b));
 
 /**
- * @template {{ name?: unknown }} P
+ * The names an entry goes by: its own, and a profile's verified .dusk name.
+ *
+ * @param {{ name?: unknown, duskName?: unknown } | undefined} entry
+ * @param {"profile" | "contact"} kind
+ * @returns {unknown[]}
+ */
+const namesOf = (entry, kind) => (kind === "profile" ? [entry?.name, entry?.duskName] : [entry?.name]).filter((each) => each !== undefined && each !== null && each !== "");
+
+/**
+ * @template {{ name?: unknown, duskName?: unknown }} P
  * @template {{ name?: unknown, id?: unknown }} C
  * @param {unknown} name
  * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, except?: unknown }} [among]
- * @returns {{ kind: "profile", same: boolean, entry: P } | { kind: "contact", same: boolean, entry: C } | null}
+ * @returns {{ kind: "profile", same: boolean, entry: P, name: string } | { kind: "contact", same: boolean, entry: C, name: string } | null}
  */
 export function nameClash(name, { contacts = [], except, profiles = [] } = {}) {
   const keys = keysOf(name);
   const others = contacts.filter((contact) => except === undefined || except === null || contact?.id !== except);
 
   for (const [kind, list] of /** @type {const} */ ([["profile", profiles], ["contact", others]])) {
-    const same = list.find((entry) => sameName(name, entry?.name));
-    const entry = same ?? list.find((each) => alike(keys, keysOf(each?.name)));
+    // Each by every name it goes by, a profile by its .dusk name too.
+    const named = list.flatMap((entry) => namesOf(entry, kind).map((each) => ({ entry, name: each })));
+    const same = named.find((each) => sameName(name, each.name));
+    const hit = same ?? named.find((each) => alike(keys, keysOf(each.name)));
 
-    if (entry) return /** @type {any} */ ({ entry, kind, same: Boolean(same) });
+    if (hit) return /** @type {any} */ ({ entry: hit.entry, kind, name: String(hit.name), same: Boolean(same) });
   }
 
   return null;
 }
 
 /**
- * @template {{ name?: unknown, account?: unknown, address?: unknown }} P
- * @template {{ name?: unknown, address?: unknown }} C
- * @param {unknown} name
- * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, self?: unknown }} [among]
- * @returns {{ kind: "profile", same: boolean, entry: P } | { kind: "contact", same: boolean, entry: C } | null}
+ * The profiles and contacts that aren't the profile named: it, and a
+ * contact saved with either of its addresses, are its own.
+ *
+ * @template {{ account?: unknown, address?: unknown }} P
+ * @template {{ account?: unknown, address?: unknown }} C
+ * @param {{ profiles: ReadonlyArray<P>, contacts: ReadonlyArray<C>, self?: unknown }} among
  */
-export function profileNameClash(name, { contacts = [], profiles = [], self } = {}) {
+function othersThan({ contacts, profiles, self }) {
   const named = profiles.find((profile) => self !== undefined && self !== null && self !== "" && (profile?.account === self || profile?.address === self));
-  // The profile named, and a contact saved with either of its addresses: its own name is no other's.
   const own = new Set([self, named?.account, named?.address].filter((id) => id !== undefined && id !== null && id !== ""));
   /** @param {{ account?: unknown, address?: unknown } | undefined} entry */
   const itself = (entry) => own.has(entry?.account) || own.has(entry?.address);
 
-  return nameClash(name, { contacts: contacts.filter((contact) => !itself(contact)), profiles: profiles.filter((profile) => profile !== named && !itself(profile)) });
+  return { contacts: contacts.filter((contact) => !itself(contact)), profiles: profiles.filter((profile) => profile !== named && !itself(profile)) };
+}
+
+/**
+ * @template {{ name?: unknown, duskName?: unknown, account?: unknown, address?: unknown }} P
+ * @template {{ name?: unknown, address?: unknown }} C
+ * @param {unknown} name
+ * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, self?: unknown }} [among]
+ * @returns {{ kind: "profile", same: boolean, entry: P, name: string } | { kind: "contact", same: boolean, entry: C, name: string } | null}
+ */
+export function profileNameClash(name, { contacts = [], profiles = [], self } = {}) {
+  return nameClash(name, othersThan({ contacts, profiles, self }));
+}
+
+/**
+ * A name's words, as the look-alike rules read a name: without its case,
+ * accents and what can't be seen, split at its spaces and punctuation.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+const wordsOf = (text) =>
+  text
+    .normalize("NFD")
+    .replace(UNSEEN, "")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+
+/**
+ * A name's words as a person reads them, and by what they look like, as
+ * written and in lower case, as `keysOf` reads the whole name.
+ *
+ * @param {unknown} name
+ * @returns {string[][]}
+ */
+function wordKeys(name) {
+  const text = String(name ?? "");
+
+  return [wordsOf(text), wordsOf(nameSkeleton(text)), wordsOf(nameSkeleton(text.toLowerCase()))];
+}
+
+/**
+ * Whether the words of one are the first words of the other, which has more.
+ *
+ * @param {string[]} short
+ * @param {string[]} long
+ */
+const begins = (short, long) => short.length > 0 && short.length < long.length && short.every((word, i) => word === long[i]);
+
+/**
+ * @template {{ name?: unknown, duskName?: unknown, account?: unknown, address?: unknown }} P
+ * @template {{ name?: unknown, address?: unknown }} C
+ * @param {unknown} name
+ * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, self?: unknown }} [among]
+ * @returns {{ kind: "profile", entry: P, name: string } | { kind: "contact", entry: C, name: string } | null}
+ */
+export function nameStarts(name, { contacts = [], profiles = [], self } = {}) {
+  const keys = wordKeys(name);
+  const others = othersThan({ contacts, profiles, self });
+
+  for (const [kind, list] of /** @type {const} */ ([["profile", others.profiles], ["contact", others.contacts]])) {
+    for (const entry of list) {
+      for (const each of namesOf(entry, kind)) {
+        const theirs = wordKeys(each);
+
+        if (keys.some((words, i) => begins(words, theirs[i]) || begins(theirs[i], words))) return /** @type {any} */ ({ entry, kind, name: String(each) });
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
