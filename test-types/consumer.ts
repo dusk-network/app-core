@@ -602,7 +602,7 @@ const memoBreak: "This link's memo has a line break. Ask for a new one." = LINK_
 void [sendReason, sendFills, sendWords, badAddress, badAmount, memoBreak];
 
 // /names
-import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameClash, sameName } from "@dusk-network/app-core/names";
+import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ProfileNameCheck } from "@dusk-network/app-core/names";
 
 const contactsHere = [{ address: "q", id: "c1", name: "Estudio Marta" }];
 const profilesHere = [{ account: "p", name: "Profile 2" }];
@@ -620,6 +620,12 @@ const ownNames = [{ account: "p", duskName: "sofiadesign.dusk", name: "Profile 1
 const ownNameClash = profileNameClash("sofiadesign.dusk", { profiles: ownNames, self: "q" });
 const ownNameTaken: string | undefined = ownNameClash?.kind === "profile" ? `${ownNameClash.entry.duskName} ${ownNameClash.name}` : undefined;
 const starts = nameStarts("Lucas (petit-fils)", { contacts: contactsHere, profiles: ownNames, self: "q" });
+const atSave: ProfileNameCheck<{ account: string; name: string; duskName?: string }, { name: string; duskName?: string; address: string }> | null = profileNameCheck("alice.dusk", { contacts: [{ address: "w", duskName: "alice.dusk", name: "Wendy" }], profiles: [{ account: "p", name: "Profile 1", duskName: "sofiadesign.dusk" }], self: "q" });
+const saveWords: string | undefined = atSave?.words;
+const saveRefused: boolean | undefined = atSave?.refused;
+const saveDusk: boolean | undefined = atSave?.dusk;
+const saveEntry: string | undefined = atSave?.kind === "contact" ? atSave.entry.address : atSave?.kind === "profile" ? atSave.entry.account : undefined;
+void [saveWords, saveRefused, saveDusk, saveEntry];
 const startsName: string | undefined = starts?.name;
 const startsAccount: string | undefined = starts?.kind === "profile" ? starts.entry.account : starts?.entry.address;
 // @ts-expect-error a name that starts as another is asked about, never said to be the same

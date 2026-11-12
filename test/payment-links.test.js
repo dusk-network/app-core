@@ -355,6 +355,7 @@ describe("a link as Send reads it, pasted, scanned or opened", () => {
       `to=${A}&amount=5&amountIux=1000000`,
       `to=${A}&Iabel=Alice&amount=0.001`,
       `to=${A}&arnount=5&amount=0.001`,
+      `to=${A}&amount=1000&netvvork=mainnet`,
       `to=${A}&t0=${B}`,
       `to=${A}&memo_=x`,
     ]) {

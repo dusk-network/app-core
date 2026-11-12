@@ -11,7 +11,7 @@
 import { CONFUSABLES } from "./confusables.js";
 import { displayText } from "./text.js";
 
-/** @typedef {{ same: string, written: string, lower: string }} NameKeys */
+/** @typedef {{ same: string, written: string, paired: string, lower: string }} NameKeys */
 
 /** @type {Map<number, string> | null} */
 let looksLike = null;
@@ -37,6 +37,10 @@ const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 const UNSEEN = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}]/gu;
 // What a name is read by: its letters and digits.
 const NOT_LETTER_OR_DIGIT = /[^\p{L}\p{N}]/gu;
+// The letters two others look like in most fonts, as Unicode's table has an m as rn: a w as vv, a d as cl.
+const PAIRS = /[wWd]/g;
+/** @type {Readonly<Record<string, string>>} */
+const PAIRED = Object.freeze({ W: "VV", d: "cl", w: "vv" });
 
 /** What an app says of a name it refuses for what can't be seen in it. */
 export const NAME_HIDES = "This name has hidden characters. Type it again without them.";
@@ -69,24 +73,39 @@ export function nameSkeleton(name) {
 const folded = (text) => text.normalize("NFD").replace(UNSEEN, "").replace(NOT_LETTER_OR_DIGIT, "").toLowerCase();
 
 /**
- * A name's three keys: as a person reads it, and by what it looks like, as
- * written and in lower case, where a capital that looks like another letter
- * is the small one.
+ * A skeleton with each letter that two others look like as those two, as
+ * the name is written: "Wendy" as "VVendy" and "David" as "Davicl", as
+ * Unicode's own table has "Emma" as "Ernrna". As written only: "Dara" in
+ * lower case looks like "clara", but "Dara" doesn't look like "Clara".
+ *
+ * @param {string} shape A skeleton
+ */
+const paired = (shape) => shape.replace(PAIRS, (char) => PAIRED[char]);
+
+/**
+ * A name's four keys: as a person reads it, and by what it looks like, as
+ * written, as written with its letter pairs, and in lower case, where a
+ * capital that looks like another letter is the small one. The pairs are a
+ * key of their own beside the written one, never in its place: "daIe" with
+ * a capital I looks like "Dale" as written, though its d makes a pair the
+ * capital D doesn't.
  *
  * @param {unknown} name
  * @returns {NameKeys}
  */
 function keysOf(name) {
   const text = String(name ?? "");
+  const written = nameSkeleton(text);
 
-  return { lower: folded(nameSkeleton(text.toLowerCase())), same: folded(text), written: folded(nameSkeleton(text)) };
+  return { lower: folded(nameSkeleton(text.toLowerCase())), paired: folded(paired(written)), same: folded(text), written: folded(written) };
 }
 
 /**
  * @param {NameKeys} a
  * @param {NameKeys} b
  */
-const alike = (a, b) => (a.same !== "" && a.same === b.same) || (a.written !== "" && a.written === b.written) || (a.lower !== "" && a.lower === b.lower);
+const alike = (a, b) =>
+  (a.same !== "" && a.same === b.same) || (a.written !== "" && a.written === b.written) || (a.paired !== "" && a.paired === b.paired) || (a.lower !== "" && a.lower === b.lower);
 
 /**
  * @param {unknown} a
@@ -182,15 +201,17 @@ const wordsOf = (text) =>
 
 /**
  * A name's words as a person reads them, and by what they look like, as
- * written and in lower case, as `keysOf` reads the whole name.
+ * written, as written with its letter pairs, and in lower case, as `keysOf`
+ * reads the whole name.
  *
  * @param {unknown} name
  * @returns {string[][]}
  */
 function wordKeys(name) {
   const text = String(name ?? "");
+  const written = nameSkeleton(text);
 
-  return [wordsOf(text), wordsOf(nameSkeleton(text)), wordsOf(nameSkeleton(text.toLowerCase()))];
+  return [wordsOf(text), wordsOf(written), wordsOf(paired(written)), wordsOf(nameSkeleton(text.toLowerCase()))];
 }
 
 /**
@@ -223,6 +244,81 @@ export function nameStarts(name, { contacts = [], profiles = [], self } = {}) {
   }
 
   return null;
+}
+
+/**
+ * A name as the words of a check show it: what can't be seen in it as its
+ * codes, so one kept from before can't read as another.
+ *
+ * @param {unknown} name
+ */
+const shown = (name) => (nameHides(name) ? displayText(name).text : String(name ?? ""));
+
+/**
+ * Whether one name's words are the first words of the other's, either way,
+ * as the look-alike rules read them.
+ *
+ * @param {string[][]} keys `wordKeys` of one
+ * @param {unknown} other
+ */
+const startsAs = (keys, other) => {
+  const theirs = wordKeys(other);
+
+  return keys.some((words, i) => begins(words, theirs[i]) || begins(theirs[i], words));
+};
+
+/**
+ * @template {{ name?: unknown, duskName?: unknown, account?: unknown, address?: unknown }} P
+ * @template {{ name?: unknown, duskName?: unknown, address?: unknown }} C
+ * @param {unknown} name
+ * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, self?: unknown }} [among]
+ * @returns {import("./names.js").ProfileNameCheck<P, C> | null}
+ */
+export function profileNameCheck(name, { contacts = [], profiles = [], self } = {}) {
+  if (nameHides(name)) return { dusk: false, entry: null, kind: "hides", name: "", refused: true, words: NAME_HIDES };
+
+  const clash = profileNameClash(name, { contacts, profiles, self });
+
+  if (clash) {
+    const other = shown(clash.name);
+    const words =
+      clash.kind === "profile"
+        ? clash.same
+          ? `Your other profile is called ${other}. Choose another name.`
+          : `That looks like ${other}, one of your other profiles. Choose another name.`
+        : clash.same
+          ? `You have a contact called ${other}. Choose another name.`
+          : `That looks like your contact ${other}. Choose another name.`;
+
+    return /** @type {any} */ ({ dusk: clash.kind === "profile" && clash.name === String(clash.entry?.duskName ?? ""), entry: clash.entry, kind: clash.kind, name: clash.name, refused: true, words });
+  }
+
+  const others = othersThan({ contacts, profiles, self });
+  const keys = keysOf(name);
+  const words = wordKeys(name);
+  /** @param {C} contact */
+  const duskOf = (contact) => (contact?.duskName === undefined || contact.duskName === null || contact.duskName === "" ? "" : String(contact.duskName));
+  /** @param {C} contact @param {string} dusk */
+  const contactAt = (contact, dusk) => /** @type {any} */ ({ dusk: true, entry: contact, kind: "contact", name: dusk, refused: false, words: `You have a contact called ${shown(contact.name)}, at ${shown(dusk)}. Is this someone else?` });
+
+  // A contact's .dusk name it is, or looks like: the contact it is, by name, as History shows that name for them.
+  const named = others.contacts.find((contact) => duskOf(contact) !== "" && alike(keys, keysOf(duskOf(contact))));
+
+  if (named) return contactAt(named, duskOf(named));
+
+  // A .dusk name it starts as, or that starts as it, word for word: another profile's, then a contact's.
+  const profile = others.profiles.find((each) => each?.duskName && startsAs(words, each.duskName));
+
+  if (profile) return /** @type {any} */ ({ dusk: true, entry: profile, kind: "profile", name: String(profile.duskName), refused: false, words: `Your other profile is called ${shown(profile.duskName)}. Is this someone else?` });
+
+  const at = others.contacts.find((contact) => duskOf(contact) !== "" && startsAs(words, duskOf(contact)));
+
+  if (at) return contactAt(at, duskOf(at));
+
+  // Then a contact's own name, as before.
+  const contact = others.contacts.find((each) => namesOf(each, "contact").some((each) => startsAs(words, each)));
+
+  return contact ? /** @type {any} */ ({ dusk: false, entry: contact, kind: "contact", name: String(contact.name), refused: false, words: `You have a contact called ${shown(contact.name)}. Is this someone else?` }) : null;
 }
 
 /**

@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/payment-links`: `LINK_BAD_AMOUNT` and `LINK_MEMO_LINE_BREAK`, what `readPaymentLink` says of a link whose amount can't be read or whose memo has a line break
+- `/names`: `profileNameCheck`, what a profile's name says at Save in both wallets' words: refused, or asked about a contact's .dusk name it is, naming that contact, or a .dusk name of the wallet's it starts as
 
 ### Changed
 
@@ -14,6 +15,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/amounts`: `readAmount`'s question says the decimal amount exactly, as it reads back: "Is that 2.1250 or 2125?", never "about 2.13"
 - `/amounts`: `amountForField` gives an amount a wallet writes with three decimals a fourth, a zero, so its field reads it back as it is: "1.2340"
 - `/payment-links`: `readPaymentLink` refuses a link whose memo has a line break, the same in every wallet, and `makePaymentLink` makes none
+- `/names`: names look alike by the letter pairs that look like one letter, as written: "VVendy" like "Wendy", "Davicl" like "David"
 
 ### Fixed
 
