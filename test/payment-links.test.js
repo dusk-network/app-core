@@ -432,11 +432,13 @@ describe("a request a payer can use", () => {
   });
 
   it("says 1.234 is unclear, not that it has too many decimals", () => {
-    assert.equal(makePaymentLink({ amount: "1.234", language: "es-ES", network: 1, to: A }).problems.amount, "Is that about 1,23 or 1234? Write the one you mean.");
+    assert.equal(makePaymentLink({ amount: "1.234", language: "es-ES", network: 1, to: A }).problems.amount, "Is that 1,2340 or 1234? Write the one you mean.");
     assert.equal(makePaymentLink({ amount: "abc", language: "es-ES", network: 1, to: A }).problems.amount, "Enter an amount such as 10 or 10,5.");
+    // In English too: a point before three digits could be a thousands' group.
+    assert.equal(makePaymentLink({ amount: "1.234", language: "en-GB", network: 1, to: A }).problems.amount, "Is that 1.2340 or 1234? Write the one you mean.");
     // And reads what each language writes.
     assert.equal(makePaymentLink({ amount: "1 000,5", language: "fr-FR", network: 1, to: A }).lux, 1_000_500_000_000n);
-    assert.equal(makePaymentLink({ amount: "1.234", language: "en-GB", network: 1, to: A }).lux, 1_234_000_000n);
+    assert.equal(makePaymentLink({ amount: "1.25", language: "en-GB", network: 1, to: A }).lux, 1_250_000_000n);
   });
 
   it("refuses more than 9 decimals, and more than a u64 of lux", () => {

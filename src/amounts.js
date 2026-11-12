@@ -306,16 +306,27 @@ export function defaultCurrency(language = globalThis.navigator?.language || "en
 export const groupDigits = (whole, language) =>
   localeParts(amountLocale(language)).whole.format(BigInt(whole));
 
+// A plain amount as `formatDuskPlain` writes one: no zero before its whole part, none after its decimals.
+const WRITTEN_PLAIN = /^(0|[1-9]\d*)(\.\d*[1-9])?$/;
+
 /**
  * A plain amount, such as `formatDuskPlain` gives, for an amount field: in
- * the decimal separator the field reads back.
+ * the decimal separator the field reads back. One as `formatDuskPlain` writes
+ * it, with three decimals that would read as a group of thousands, has a
+ * fourth, a zero, so the field reads it as it is: "1.234" is "1.2340". One
+ * written otherwise, as "1.000" in a link, stays as it's written, for the
+ * field to ask which is meant.
  *
  * @param {string} plain
  * @param {string} [decimal] `decimalSeparator()`, unless given
  * @returns {string}
  */
-export const amountForField = (plain, decimal = decimalSeparator()) =>
-  String(plain ?? "").replace(".", decimal);
+export function amountForField(plain, decimal = decimalSeparator()) {
+  const text = String(plain ?? "");
+  const field = text.replace(".", decimal);
+
+  return WRITTEN_PLAIN.test(text) && unclearAmount(field, decimal) ? `${field}0` : field;
+}
 
 /**
  * A plain amount, such as "10.5", written with the language's separators, for
@@ -367,10 +378,11 @@ function languageGrouped(value, decimal, language) {
  * made a point, and digit grouping left out where it can't be decimals. "1,5"
  * is 1.5, "1.000,5" and "1,000.5" are 1000.5, and "1,000,000" is a million;
  * so are the language's own groups: "1 000" in French, "1'000" in Swiss
- * German, "12,34,567" in Hindi. One separator before three digits is a
- * decimal where the language writes decimals with it. Otherwise it could mean
- * either (`unclearAmount`), so it isn't made plain and `parseDusk` refuses
- * it, as it does what isn't an amount.
+ * German, "12,34,567" in Hindi. A lone point or comma before three digits,
+ * after a whole part that isn't 0, could mean either in any language
+ * (`unclearAmount`): "1.000" is one to an English reader and a thousand to a
+ * German one, and "1,000" the other way round. So it isn't made plain, and
+ * `parseDusk` refuses it, as it does what isn't an amount.
  *
  * @param {string} text
  * @param {string} [decimal] The language's, unless given
@@ -388,32 +400,44 @@ export function normalizeAmount(text, decimal, language) {
   if (/^[1-9]\d{0,2}(,\d{3}){2,}$/.test(value)) return value.replaceAll(",", "");
   if (commaDecimals && /^[1-9]\d{0,2}(\.\d{3}){2,}$/.test(value)) return value.replaceAll(".", "");
 
-  if (unclearAmount(value, separator)) return commaDecimals ? value.replace(".", ",") : value;
+  // Written with a comma, which `parseDusk` refuses.
+  if (unclearAmount(value, separator)) return value.replace(".", ",");
 
   return languageGrouped(value, separator, language) ?? (/^\d*,\d*$/.test(value) ? value.replace(",", ".") : value);
 }
 
 /**
- * The two amounts a text could mean, where the language's other separator
- * stands before three digits, or null. In Dutch "1.001" could be a thousand
- * and one or, as a point is often typed for decimals, just over one.
+ * A lone point or comma before three digits, after a whole part of one to
+ * three digits that doesn't start with a zero: its whole part and the three.
+ *
+ * @param {unknown} text
+ */
+const unclearParts = (text) => /^([1-9]\d{0,2})[.,](\d{3})$/.exec(String(text ?? "").trim());
+
+/**
+ * The two amounts a text could mean, where a lone point or comma stands
+ * before three digits, after a whole part that isn't 0, or null: in any
+ * language, as a point is often typed for decimals where a comma is the
+ * language's, and the other way round. "1.001" could be a thousand and one
+ * or just over one, in Dutch or in English.
  *
  * @param {string} text
  * @param {string} [decimal] `decimalSeparator()`, unless given
  * @returns {{ grouped: string, decimal: string } | null} As the language writes each
  */
 export function unclearAmount(text, decimal = decimalSeparator()) {
-  const value = String(text ?? "").trim();
-  const either = (decimal === "," ? /^([1-9]\d{0,2})\.(\d{3})$/ : /^([1-9]\d{0,2}),(\d{3})$/).exec(value);
+  const either = unclearParts(text);
 
   return either ? { decimal: `${either[1]}${decimal}${either[2]}`, grouped: `${either[1]}${either[2]}` } : null;
 }
 
 /**
  * What an unclear amount is with its separator as a decimal mark, as the
- * question says it: with no three digits after the mark, which would read as
- * a group again. Its trailing zeros go, so "1,000" is 1, and three decimals
- * that stay are rounded to two, as about that much.
+ * question says it: exactly, and as it reads back without the question, as
+ * the person can write it: its trailing zeros go, so "1,000" is 1 and
+ * "1,500" is 1,5, and three decimals that stay have a fourth, a zero, so
+ * "2.125" is 2.1250, never three after the mark, which would read as a group
+ * again.
  *
  * @param {{ decimal: string }} either `unclearAmount`'s
  * @param {string} decimal
@@ -424,10 +448,7 @@ function decimalMeant(either, decimal) {
 
   if (fraction.length < 3) return fraction ? `${whole}${decimal}${fraction}` : whole;
 
-  const hundredths = BigInt(whole) * 100n + BigInt(Math.round(Number(three) / 10));
-  const shown = String(hundredths % 100n).padStart(2, "0").replace(/0+$/, "");
-
-  return `about ${hundredths / 100n}${shown ? `${decimal}${shown}` : ""}`;
+  return `${whole}${decimal}${fraction}0`;
 }
 
 /**
@@ -457,10 +478,10 @@ export function parseDusk(plain) {
 export function amountsMeant(query, language) {
   const decimal = decimalSeparator(language);
   const typed = String(query ?? "").trim();
-  const either = unclearAmount(typed, decimal);
+  const either = unclearParts(typed);
 
-  return (either ? [either.grouped, either.decimal] : [typed]).flatMap((text) => {
-    const plain = normalizeAmount(text, decimal, language);
+  // Where a mark could mean either, both: the plain forms, as nothing else reads them.
+  return (either ? [`${either[1]}${either[2]}`, `${either[1]}.${either[2]}`] : [normalizeAmount(typed, decimal, language)]).flatMap((plain) => {
     const lux = parseDusk(plain);
     const decimals = plain.split(".")[1]?.length ?? 0;
 
@@ -485,7 +506,8 @@ export function readAmount(text, language) {
   const decimal = decimalSeparator(language);
   const either = unclearAmount(typed, decimal);
 
-  // Each as no reader takes for the other: "1 or 1000", never "1.000" for one, which reads as a thousand to a German.
+  // Each as no reader takes for the other, and as it's written to be meant: "1 or 1000", never "1.000" for one, which
+  // reads as a thousand to a German, and "2.1250 or 2125", exact, for 2.125.
   if (either) return { lux: null, problem: `Is that ${decimalMeant(either, decimal)} or ${either.grouped}? Write the one you mean.` };
 
   const plain = normalizeAmount(typed, decimal, language);

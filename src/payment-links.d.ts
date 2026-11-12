@@ -14,7 +14,7 @@
  * // { ok: true, lux: 150000000n, dusk: "dusk:public-…@dusk:1?amount=0.15&memo=Factura+33",
  * //   https: "https://apps.dusk.network/wallet/dashboard/send?to=…&amount=0.15&memo=Factura+33&network=mainnet", problems: {} }
  * makePaymentLink({ to: account, amount: "1.234", network: 1, language: "es-ES" }).problems;
- * // { amount: "Is that about 1,23 or 1234? Write the one you mean." }
+ * // { amount: "Is that 1,2340 or 1234? Write the one you mean." }
  *
  * const link = parsePaymentLink(made.https); // { form: "https", kind: "public", to, amountDusk: "0.15", memo: "Factura 33", chainId: "dusk:1", … }
  * networkMismatch(link.chainId, 2); // "This request is for Mainnet. You are on Testnet."

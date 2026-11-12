@@ -2,6 +2,14 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `/amounts`: `readAmount` asks which is meant of a lone point or comma before three digits in every language: "1.000" on an English phone asks "Is that 1 or 1000?", as "1,000" does
+- `/amounts`: `readAmount`'s question says the decimal amount exactly, as it reads back: "Is that 2.1250 or 2125?", never "about 2.13"
+- `/amounts`: `amountForField` gives an amount a wallet writes with three decimals a fourth, a zero, so its field reads it back as it is: "1.2340"
+
 ## [0.12.0]
 
 ### Added
