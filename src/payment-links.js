@@ -12,6 +12,7 @@ import { blockedReason, networkFor, networks } from "@dusk-network/networks";
 import { decodeBase58, isAccount } from "@dusk-network/networks/account";
 
 import { formatDuskPlain, parseDusk, readAmount } from "./amounts.js";
+import { looksAlike } from "./names.js";
 
 /** @typedef {import("./payment-links.js").PaymentLink} PaymentLink */
 /** @typedef {import("./payment-links.js").PaymentRequest} PaymentRequest */
@@ -38,10 +39,22 @@ const SAID_ONCE = Object.freeze(["to", "amount", "amountLux", "memo", "label", "
 /** Each field by its name in lower case: a field is read by its name in any case, as a reader that ignores case reads it. */
 const FIELD_NAMED = new Map(SAID_ONCE.map((name) => [name.toLowerCase(), name]));
 
+// A field's name as links write it, every field's among them: printable ASCII, no space.
+const PLAIN_NAME = /^[\x21-\x7e]*$/;
+
+// An amount as a link writes it, after its percent-encoding: digits, with decimals after one point or comma.
+const PLAIN_AMOUNT = /^(\d+([.,]\d*)?|[.,]\d+)$/;
+// An amount in lux: digits alone.
+const PLAIN_LUX = /^\d+$/;
+// A line break of any kind.
+const LINE_BREAK = /[\n\v\f\r\u0085\u2028\u2029]/;
+
 /** Why a link fills in nothing, in the words both wallets use. */
 export const LINK_UNREADABLE = "That link can't be read. Ask for a new one.";
 export const LINK_TWO_AMOUNTS = "This link asks for two different amounts. Ask for a new one.";
 export const LINK_BAD_ADDRESS = "This link's address isn't valid. Ask for a new one.";
+export const LINK_BAD_AMOUNT = "This link's amount can't be read. Ask for a new one.";
+export const LINK_MEMO_LINE_BREAK = "This link's memo has a line break. Ask for a new one.";
 const LINK_NO_RECIPIENT = "This link doesn't say who to pay. Ask for a new one.";
 const LINK_USER_PART = "This link has something before the site's address. Ask for a new one.";
 const LINK_NETWORK_UNREAD = "This link's network can't be read. Ask for a new one.";
@@ -146,6 +159,29 @@ function fieldsOf(params) {
 }
 
 /**
+ * Whether a query's names say what a reader won't read them as: one that
+ * isn't printable ASCII, as every field's name is (what can't be seen, a
+ * space or a control, which one reader reads past and another drops, as
+ * `am\u200bount`, `to\u0000` or `to `, and letters of another script or
+ * form, as fullwidth `\uff54\uff4f`, a small capital in `\u0274etwork` or a
+ * Cyrillic `\u0442o`), and one in ASCII that looks like a field's name but
+ * isn't one, as `amountIux` with a capital I for the l of `amountLux`, or
+ * `Iabel`. A person reading the link would take either for a field no
+ * reader reads as one.
+ *
+ * @param {URLSearchParams} params As given, before `fieldsOf`
+ */
+function namesHide(params) {
+  let hides = false;
+
+  params.forEach((_, name) => {
+    hides ||= !PLAIN_NAME.test(name) || (!FIELD_NAMED.has(name.toLowerCase()) && SAID_ONCE.some((field) => looksAlike(name, field)));
+  });
+
+  return hides;
+}
+
+/**
  * Whether a link's recipient is one Send can pay, or says more of: an
  * account, a shielded address, a `.dusk` name or an EVM address. Anything
  * else is no one to pay, as two addresses in one, or one with a line break
@@ -214,7 +250,8 @@ function duskForm(raw) {
 
   const rest = raw.replace(/^dusk:/i, "").replace(/^\/+/, "");
   const q = rest.indexOf("?");
-  const params = fieldsOf(new URLSearchParams(q >= 0 ? rest.slice(q + 1) : ""));
+  const given = new URLSearchParams(q >= 0 ? rest.slice(q + 1) : "");
+  const params = fieldsOf(given);
   let head = (q >= 0 ? rest.slice(0, q) : rest).trim();
   let atChain = "";
   const at = head.lastIndexOf("@");
@@ -237,6 +274,7 @@ function duskForm(raw) {
   const queryChain = chainIdOf(network);
 
   if (twice) return { problem: twice };
+  if (namesHide(given)) return { problem: LINK_UNREADABLE };
   if ((atChain && !referenceOf(atChain)) || (network && !queryChain)) return { problem: LINK_NETWORK_UNREAD };
   if (atChain && queryChain && referenceOf(atChain) !== referenceOf(queryChain)) return { problem: twoNetworks(atChain, queryChain) };
 
@@ -303,6 +341,7 @@ function walletForm(raw, walletUrl) {
 
   if (url.username || url.password) return { problem: LINK_USER_PART };
   if (twice) return { problem: twice };
+  if (namesHide(url.searchParams)) return { problem: LINK_UNREADABLE };
   if (said && !chainId) return { problem: LINK_NETWORK_UNREAD };
   // A link that says one network, on another network's wallet.
   if (ours && chainId && referenceOf(chainId) !== String(ours.chainId)) return { problem: twoNetworks(`dusk:${ours.chainId}`, chainId) };
@@ -391,6 +430,16 @@ function amountsDiffer(params) {
 }
 
 /**
+ * Whether a link's amount, as its percent-encoding gives it, is no plain
+ * number: anything in it or around it but digits and one point or comma,
+ * as a `#` it encodes (`%23`), what can't be seen or a space. A field that
+ * drops what's in the way would show an amount the link doesn't say.
+ *
+ * @param {URLSearchParams} params
+ */
+const amountUnread = (params) => params.getAll("amount").some((text) => text !== "" && !PLAIN_AMOUNT.test(text)) || params.getAll("amountLux").some((text) => text !== "" && !PLAIN_LUX.test(text));
+
+/**
  * A link read, with the name of the network it's for.
  *
  * @param {Omit<LinkRead, "network">} read
@@ -411,11 +460,15 @@ export function readPaymentLink(input, { network, walletUrl } = {}) {
   if (!raw || link?.form === "raw") return null;
 
   const chainId = link?.chainId ?? "";
+  const query = queryOf(raw);
 
-  if (amountsDiffer(queryOf(raw))) return said({ chainId, link: null, problem: LINK_TWO_AMOUNTS, reason: "two-amounts" });
+  if (amountUnread(query)) return said({ chainId, link: null, problem: LINK_BAD_AMOUNT, reason: "unreadable" });
+  if (amountsDiffer(query)) return said({ chainId, link: null, problem: LINK_TWO_AMOUNTS, reason: "two-amounts" });
   if (!link) return said({ chainId, link: null, problem: (read && "problem" in read && read.problem) || LINK_UNREADABLE, reason: "unreadable" });
   // A recipient that can't be paid on any network, before which network the link is for.
   if (!payable(link.to)) return said({ chainId, link: null, problem: LINK_BAD_ADDRESS, reason: "unreadable" });
+  // A memo is one line, as both wallets' requests write it: one with a line break would be read one way by one and another by the other.
+  if (LINE_BREAK.test(link.memo)) return said({ chainId, link: null, problem: LINK_MEMO_LINE_BREAK, reason: "unreadable" });
 
   const otherNetwork = networkMismatch(chainId, network);
 
@@ -477,6 +530,8 @@ export function makePaymentLink({ amount, amountLux, label, language, memo, netw
   if (toProblem) problems.to = toProblem;
   if (read.problem) problems.amount = read.problem;
   if (new TextEncoder().encode(message).length > MAX_MEMO_BYTES) problems.memo = `That memo is too long: ${MAX_MEMO_BYTES} bytes at most.`;
+  // A link's memo is one line, as Send reads one (`readPaymentLink`).
+  else if (LINE_BREAK.test(message)) problems.memo = "Write the memo on one line.";
 
   if (Object.keys(problems).length) return { dusk: "", https: null, lux: read.lux, ok: false, problems };
 

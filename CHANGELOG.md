@@ -4,11 +4,21 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+
+- `/payment-links`: `LINK_BAD_AMOUNT` and `LINK_MEMO_LINE_BREAK`, what `readPaymentLink` says of a link whose amount can't be read or whose memo has a line break
+
 ### Changed
 
 - `/amounts`: `readAmount` asks which is meant of a lone point or comma before three digits in every language: "1.000" on an English phone asks "Is that 1 or 1000?", as "1,000" does
 - `/amounts`: `readAmount`'s question says the decimal amount exactly, as it reads back: "Is that 2.1250 or 2125?", never "about 2.13"
 - `/amounts`: `amountForField` gives an amount a wallet writes with three decimals a fourth, a zero, so its field reads it back as it is: "1.2340"
+- `/payment-links`: `readPaymentLink` refuses a link whose memo has a line break, the same in every wallet, and `makePaymentLink` makes none
+
+### Fixed
+
+- `/payment-links`: `readPaymentLink` refuses an amount that isn't a plain number once decoded, as one with a `%23` or a hidden character in it
+- `/payment-links`: a link whose field names aren't printable ASCII, as with a hidden character, a space, a small capital or a Cyrillic letter, or look like a field's, as `amountIux`, is refused rather than read without them
 
 ## [0.12.0]
 
