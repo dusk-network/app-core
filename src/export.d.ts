@@ -18,6 +18,9 @@
  *   way, once `facts` says its stDUSK (`sozuFacts` of `/sozu`), with its deposit
  *   fee and what a stDUSK was worth in its description. Until then, it's what
  *   moved under the staking tags.
+ * - A transfer out to another chain sends what reached the other side, and
+ *   its bridge fee is a fee, in `Fee Amount` with the network's, so a tax
+ *   tool matches it with what came in there.
  * - A token's transfer is what it moved, with its amount, currency and recipient in
  *   the same columns, from the wallet's record of it (`sent.asset` of `/activity`),
  *   with no value in fiat. An allowance is its fee, saying what it allows and to
@@ -56,7 +59,7 @@
  */
 
 import type { ActivityRow } from "./activity.js";
-import type { FactCache, MigrationApproval, MigrationEvm } from "./bridge.js";
+import type { BridgeNetwork, FactCache, FetchLike, MigrationApproval, MigrationEvm } from "./bridge.js";
 import type { Archive } from "./history.js";
 import type { SozuFact, SozuStatusLike } from "./sozu.js";
 
@@ -87,7 +90,9 @@ export type ExportOptions = {
    * `/activity`'s rows of the account, all of them for the period; with
    * `evm`, every migration's payout from the period's start on too, as a
    * migration's fees go in the period of their own time, which may be before
-   * their payout's.
+   * their payout's; with `approvals` or `bridge`, its whole history, as an
+   * approval or a revoke in the period can go with a migration before it,
+   * and the addresses it bridged to are the person's.
    */
   rows: Iterable<ActivityRow>;
   /** The profile the file is of. */
@@ -116,19 +121,62 @@ export type ExportOptions = {
   evm?: ReadonlyMap<string, MigrationEvm>;
   /**
    * The EVM addresses the app knows as the person's own, as those it
-   * connected, in any case: given, a migration's gas is in the file only where
-   * one of them sent it, none for an empty list, as anyone can migrate to an
-   * account, as a customer to a shop's. Without it, every migration's is.
+   * connected, in any case, beside those the profile's rows say it bridged
+   * DUSK to (`bridgedTo` of `/bridge`), which are the person's too: given, a
+   * migration's gas is in the file only where one of them sent it, as anyone
+   * can migrate to an account, as a customer to a shop's. Without it, and
+   * without `bridge`, every migration's is.
    */
   evmAddresses?: Iterable<string>;
   /**
    * The approvals and revokes the person sent on a migration's own chain
    * (`migrationApprovals` of `/bridge`): each that no migration's lines here
-   * have (one never used, a revoke, or one whose migration's lines aren't in
-   * the file) is a line of its own, a cost of its gas there, at its own time;
-   * with `evmAddresses`, only one sent from one of them.
+   * have (one never used, a revoke, or one whose migration's lines don't say
+   * it) is a line of its own, a cost of its gas there, at its own time, in
+   * the file of the profile whose rows have the payout of the migration it
+   * went with (its `migration`), so each is in one profile's file, once.
+   * One of an owner who sent no migration is in the file of the person's
+   * profile that bridged DUSK to that owner first, as the archive's memo
+   * index lists the transfers out naming it (with `bridge.archive`); where
+   * none of their profiles did, as an address only connected, in their first
+   * profile's file, by its public account, of `profile` and `profiles`; and
+   * without the archive, in that first profile's file too. Where the profile
+   * it goes to may not read that owner, as the first profile for an address
+   * only another profile's rows know (a deposit to DuskEVM, which the index
+   * doesn't list, or a transfer out without the archive) or the app gives
+   * only that other, the profile that knows of it says so in
+   * `evm.approvalsUnread` ("error"): whose file it is can't be told. One the
+   * index says another profile bridged to first is that profile's, which
+   * reads it, and needs no word. The same profile, whichever of theirs is
+   * exported: give `profiles` all of their others. With none given, this file is their only one, and has every
+   * approval and revoke, the profile with a public account or not. With
+   * `evmAddresses`, only one sent from one of them.
    */
   approvals?: Iterable<MigrationApproval>;
+  /**
+   * Where each migration's side on its own chain is read, as both wallets
+   * make the file: given, the file reads it itself (`migrationFacts` of
+   * `/bridge`, for the payouts from the period's start on) and the
+   * approvals and revokes the person's EVM addresses sent
+   * (`migrationApprovals`), where `evm` and `approvals` aren't given; the
+   * person's EVM addresses are those the rows say they bridged to, and
+   * `evmAddresses` beside them. `network` is the bridge's network, as
+   * `/bridge` takes it; `cache` keeps what's final of both reads (a `Map`
+   * of text does); `approvalOf` gives the approval a migration spent where
+   * the app sent it, by the migration's hash, for when the chain's logs no
+   * longer say; `archive`, the Dusk archive, is where the memo index says
+   * which profile bridged to an owner that never migrated
+   * (`bridgeSenders` of `/bridge`), one request for all of them. Nothing is
+   * read where the person has no EVM address.
+   */
+  bridge?: {
+    network: BridgeNetwork;
+    fetch?: FetchLike;
+    rpcUrl?: string;
+    cache?: FactCache;
+    approvalOf?: (migration: string) => string | null | undefined;
+    archive?: Pick<Archive, "query">;
+  };
   /**
    * The person's own name for a counterparty, only when they asked for their
    * contact names to be in the file: it goes before a verified `.dusk` name
@@ -155,6 +203,26 @@ export type ExportResult = {
   left: { pending: number; notRead: number; outOfPeriod: number };
   /** The lines whose price `price` didn't say; 0 without a `price`. */
   unpriced: number;
+  /**
+   * The EVM addresses whose gas lines are in the file, in lower case
+   * (`booked`), for the app to say whose network fees it has; the
+   * migrations from the period's start on whose side on their own chain
+   * couldn't be read (`unread`), by their hash and their chain's name, whose
+   * fees there aren't in it: an export a little later adds them; and the
+   * owners whose approvals and revokes there couldn't all be read
+   * (`approvalsUnread`), by their chain's name: "error", none of them, as
+   * where the RPC failed, for an export a little later, or whose file it
+   * is, as where the archive failed or wasn't given, or the profile they go
+   * to may not read them (`approvals`); "beyond" and "unread", none before block
+   * `from`, as the reads stop there or the RPC keeps nothing older, so older
+   * ones aren't in the file. With `bridge` only: `evm` and `approvals` an app
+   * gives say nothing of it.
+   */
+  evm: {
+    booked: string[];
+    unread: { hash: string; chain: string }[];
+    approvalsUnread: { owner: string; chain: string; state: "error" | "beyond" | "unread"; from: number | null }[];
+  };
 };
 
 /** The profile's activity in the period, as a file. */

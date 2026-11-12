@@ -9,6 +9,10 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/payment-links`: `LINK_BAD_AMOUNT` and `LINK_MEMO_LINE_BREAK`, what `readPaymentLink` says of a link whose amount can't be read or whose memo has a line break
 - `/names`: `profileNameCheck`, what a profile's name says at Save in both wallets' words: refused, or asked about a contact's .dusk name it is, naming that contact, or a .dusk name of the wallet's it starts as
 - `/export`: `REWARD_WORDS` and `REWARDS_COUNTED`, the words both wallets show for rewards by year: that what unstaking took out is part of what grew while held, at the stDUSK's average price, deposit fees not counted
+- `/export`: `accountingCsv` takes `bridge` and reads each migration's side on its own chain and the person's approvals and revokes there itself, so both wallets make the same file, and says whose network fees there the file has and what it couldn't read (`evm`)
+- `/bridge`: `bridgedTo`, the EVM addresses a profile bridged DUSK to, as its rows say: the person's own
+- `/bridge`: `bridgeSenders`, who bridged DUSK out to each of some EVM addresses, as the archive's memo index lists the transfers naming them
+- `/bridge`: `migrationApprovals` says the migration each approval and revoke goes with (`migration`)
 
 ### Changed
 
@@ -18,11 +22,15 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/payment-links`: `readPaymentLink` refuses a link whose memo has a line break, the same in every wallet, and `makePaymentLink` makes none
 - `/names`: names look alike by the letter pairs that look like one letter, as written: "VVendy" like "Wendy", "Davicl" like "David"
 - `/export`: `rewardsByYear` keeps a year's figures as they were while the facts of a stake or an unstake just made are read, saying so (`reading`), rather than none
+- `/export`: `accountingCsv` books a transfer out to another chain as what reached the other side, with its bridge fee in the fee column beside the network's
+- `/export`: `accountingCsv` takes the EVM addresses a profile bridged to as the person's, beside those the app gives, so a migration from one of them has its gas in the file
 
 ### Fixed
 
 - `/payment-links`: `readPaymentLink` refuses an amount that isn't a plain number once decoded, as one with a `%23` or a hidden character in it
 - `/payment-links`: a link whose field names aren't printable ASCII, as with a hidden character, a space, a small capital or a Cyrillic letter, or look like a field's, as `amountIux`, is refused rather than read without them
+- `/export`: `accountingCsv` books each approval and revoke on a migration's chain in one profile's file, that of the migration it went with, rather than in every profile's that lacks that migration
+- `/export`: one of an address that never migrated is in one profile's file too: the one that bridged to it first, else the first profile
 
 ## [0.12.0]
 

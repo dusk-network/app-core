@@ -740,10 +740,22 @@ const wayBackGas = wayBack.then((facts) => {
 const wayBackFile: Promise<ExportResult> = wayBack.then((evm) => accountingCsv({ evm, profile: { account: "a", name: "Lena" }, rows: readRows }));
 void [wayBackGas, wayBackFile];
 
-import { migrationApprovals, type ApprovalsRead, type MigrationApproval } from "@dusk-network/app-core/bridge";
+import { bridgeSenders, bridgedTo, migrationApprovals, type ApprovalsRead, type MigrationApproval } from "@dusk-network/app-core/bridge";
 
 const approvalsRead: Promise<{ approvals: MigrationApproval[]; reads: ApprovalsRead[] }> = migrationApprovals({ cache: new Map(), fetch, network: 2, owners: ["0x"], rpcUrl: "https://rpc", timeoutMs: 1 });
 const approvalsFile: Promise<ExportResult> = approvalsRead.then(({ approvals }) => accountingCsv({ approvals, evmAddresses: ["0x"], profile: { name: "Nandini" }, rows: readRows }));
+const approvalGoesWith: Promise<(string | null)[]> = approvalsRead.then(({ approvals }) => approvals.map((approval) => approval.migration));
+// Both wallets' file: the migrations' side and the approvals read here, from the addresses the rows say were bridged to.
+const bothWallets: Promise<ExportResult> = accountingCsv({ bridge: { approvalOf: () => null, cache: new Map(), fetch, network: 2, rpcUrl: "https://rpc" }, evmAddresses: ["0x"], profile: { name: "Nandini" }, rows: readRows });
+const fileGas: Promise<[string[], string[]]> = bothWallets.then(({ evm }) => [evm.booked, evm.unread.map(({ chain, hash }) => `${chain} ${hash}`)]);
+const approvalsShort: Promise<string[]> = bothWallets.then(({ evm }) => evm.approvalsUnread.map(({ chain, from, owner, state }) => `${chain} ${owner} ${state} ${from ?? ""}`));
+const bridgedHere: string[] = bridgedTo(readRows);
+const sentThere: Promise<Map<string, { sender: string; block: number; hash: string }[]>> = bridgeSenders({ addresses: ["0x"], archive, network: 2 });
+const withArchive: Promise<ExportResult> = accountingCsv({ bridge: { archive, network: 2 }, profile: { account: "a", name: "Nandini" }, profiles: [{ account: "b", name: "Profile 2" }], rows: readRows });
+void [approvalsShort, sentThere, withArchive];
+// @ts-expect-error the bridge's network is where its sides are read
+void accountingCsv({ bridge: { cache: new Map() }, profile: { name: "Nandini" }, rows: readRows });
+void [approvalGoesWith, fileGas, bridgedHere];
 const approvalStates = approvalsRead.then(({ approvals, reads }): [MigrationApproval["state"] | undefined, bigint | null | undefined, ApprovalsRead["state"] | undefined] => [approvals[0]?.state, approvals[0]?.gasWei, reads[0]?.state]);
 void [approvalsFile, approvalStates];
 
