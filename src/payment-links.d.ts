@@ -4,7 +4,7 @@
  * Send, which survives email and chat and says which network it's for. One
  * function reads both. A link is only made for what Send will take: a
  * recipient that is one, an amount above 0 with 9 decimals at most, and a memo
- * of 512 bytes at most, and what's wrong is said in plain words.
+ * of 512 bytes at most, on one line, and what's wrong is said in plain words.
  *
  * @example
  * ```js
@@ -14,7 +14,7 @@
  * // { ok: true, lux: 150000000n, dusk: "dusk:public-…@dusk:1?amount=0.15&memo=Factura+33",
  * //   https: "https://apps.dusk.network/wallet/dashboard/send?to=…&amount=0.15&memo=Factura+33&network=mainnet", problems: {} }
  * makePaymentLink({ to: account, amount: "1.234", network: 1, language: "es-ES" }).problems;
- * // { amount: "Is that about 1,23 or 1234? Write the one you mean." }
+ * // { amount: "Is that 1,2340 or 1234? Write the one you mean." }
  *
  * const link = parsePaymentLink(made.https); // { form: "https", kind: "public", to, amountDusk: "0.15", memo: "Factura 33", chainId: "dusk:1", … }
  * networkMismatch(link.chainId, 2); // "This request is for Mainnet. You are on Testnet."
@@ -64,6 +64,13 @@ export type PaymentLink = {
  * that isn't one of those, for a link that says one of its fields (`to`,
  * `amount`, `amountLux`, `memo`, `label`, `network`) more than once, in any
  * case, or a `dusk:` link that names a recipient in its query too, for one
+ * whose field names hide something or read as a field they aren't: a name
+ * that isn't printable ASCII, as every field's is (what can't be seen or a
+ * space, as `am\u200bount=` or `to =`, or letters of another script or form,
+ * as fullwidth `ｔｏ=`, a small capital in `ɴetwork=` or a Cyrillic т in
+ * `тo=`), or one in ASCII that looks like a field's name but isn't one, as
+ * `amountIux=` with a capital I or `Iabel=`, which a person reading the link
+ * takes for a field no reader reads, for one
  * without a recipient, for one that names a network that can't be read (as
  * "dusk:02", a number with a zero before it), for one that names two (a
  * `dusk:` link's `@` and query, or a network on another network's wallet),
@@ -89,6 +96,12 @@ export declare const LINK_TWO_AMOUNTS: "This link asks for two different amounts
 /** "This link's address isn't valid. Ask for a new one.": a link whose recipient Send can't pay, as `readPaymentLink` refuses it. */
 export declare const LINK_BAD_ADDRESS: "This link's address isn't valid. Ask for a new one.";
 
+/** "This link's amount can't be read. Ask for a new one.": a link whose amount isn't a plain number once decoded, as `readPaymentLink` refuses it. */
+export declare const LINK_BAD_AMOUNT: "This link's amount can't be read. Ask for a new one.";
+
+/** "This link's memo has a line break. Ask for a new one.": a link whose memo is on more than one line, as `readPaymentLink` refuses it. */
+export declare const LINK_MEMO_LINE_BREAK: "This link's memo has a line break. Ask for a new one.";
+
 /**
  * A link as Send reads it on the wallet's network: what it fills in, or why it
  * fills in nothing, and the network it's for either way.
@@ -105,9 +118,12 @@ export type LinkRead = {
    * link's network can't be read. Ask for a new one.", "This link doesn't say
    * who to pay. Ask for a new one.", "This link asks for a shielded payment to
    * a public account. Ask for a new one." (or a public one to a shielded
-   * address), `LINK_BAD_ADDRESS` for a recipient Send can't pay, or
+   * address), `LINK_BAD_ADDRESS` for a recipient Send can't pay,
+   * `LINK_BAD_AMOUNT` for an amount that isn't a plain number,
+   * `LINK_MEMO_LINE_BREAK` for a memo on more than one line, or
    * `LINK_UNREADABLE` for what has no form a payment link's has, as a `dusk:`
-   * link with a `#`; "" when it fills in `link`.
+   * link with a `#`, or field names that hide something; "" when it fills in
+   * `link`.
    */
   problem: string;
   /**
@@ -131,13 +147,21 @@ export type LinkRead = {
  * Send reads that as a recipient. `network` is the wallet's (a network, its
  * chain ID, "dusk:2" or its name), and `walletUrl` the app's own address, as
  * `parsePaymentLink` takes it; without `network`, a link for any network
- * fills in. Refused, in this order: amounts that differ (in DUSK and in lux,
- * or one of them twice, in any case); what `parsePaymentLink` can't read,
- * saying why; a recipient Send can't pay (`LINK_BAD_ADDRESS`): one that isn't
+ * fills in. Refused, in this order: an amount that isn't a plain number once
+ * decoded (`LINK_BAD_AMOUNT`): anything in it or around it but digits and one
+ * point or comma, as a `#` it encodes (`%23`), a hidden character or a space,
+ * which a field that drops them would show as an amount the link doesn't say;
+ * amounts that differ (in DUSK and in lux, or one of them twice, in any case);
+ * what `parsePaymentLink` can't read, saying why, field names that hide
+ * something among it; a recipient Send can't pay (`LINK_BAD_ADDRESS`): one that isn't
  * an account, a shielded address, a `.dusk` name or an EVM address, as two
  * addresses in one, or one with a line break or a hidden character in it,
- * which a field that drops them would make an address to pay; and a link for
- * another network, a `dusk:` link's by its `@` or its query alike.
+ * which a field that drops them would make an address to pay; a memo with a
+ * line break of any kind in it (`LINK_MEMO_LINE_BREAK`), as both wallets'
+ * requests write a memo on one line, the line breaks at its ends aside; and a
+ * link for another network, a `dusk:` link's by its `@` or its query alike.
+ * A link refused gives nothing to fill in or show (`link` is null): a
+ * preview of it, as before a wallet opens, says why and nothing else.
  */
 export declare function readPaymentLink(input: unknown, options?: { network?: unknown; walletUrl?: string }): LinkRead | null;
 

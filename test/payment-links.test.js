@@ -117,8 +117,8 @@ describe("a link to the web wallet's Send", () => {
     assert.equal(parseDusk(normalizeAmount("0,15", ",")), 150_000_000n);
   });
 
-  it("carries a memo through email and chat, whatever's in it", () => {
-    for (const memo of ["Factura 33, \"abril\" & mayo", "a+b=c?d#e%f", "Línea 1\nLínea 2", "€ 12,50 🧾", "ends with a dot.", "gnp.exe \u202E"]) {
+  it("carries a memo through email and chat, whatever's on its line", () => {
+    for (const memo of ["Factura 33, \"abril\" & mayo", "a+b=c?d#e%f", "Línea 1 · Línea 2", "€ 12,50 🧾", "ends with a dot.", "gnp.exe \u202E"]) {
       const made = makePaymentLink({ memo, network: 1, to: A });
       const link = /** @type {string} */ (made.https);
 
@@ -303,6 +303,110 @@ describe("a link as Send reads it, pasted, scanned or opened", () => {
     like(parsePaymentLink(`${testnetSend}?to=${A},${B}`), { form: "https", to: `${A},${B}` });
   });
 
+  it("refuses an amount that isn't a plain number once decoded: Marek's %23 and hidden characters, and anything else", () => {
+    // Marek's: '%23' inside amount= filled Amount with '0.001#to=…', a whole other address; a zero-width space
+    // in it made the page say 'Any amount' and the extension show '0.01' with a generic error.
+    const badAmount = { link: null, problem: "This link's amount can't be read. Ask for a new one.", reason: "unreadable" };
+
+    for (const amount of ["0.001%23to=" + B, "0.001%23", "0.0%E2%80%8B1", "0.01%E2%80%8B", "%E2%80%8F0.01", "0.01%00", "0.01%20", "%200.01", "0.01+", "0.01%0A", "0.01%EF%BB%BF", "1%C2%A0000", "1e3", "-1", "0x10", "1.2.3", "0,0,1", "١٢", "abc", ".", ","]) {
+      for (const link of [`${testnetSend}?to=${A}&amount=${amount}&network=testnet`, `dusk:public-${A}@dusk:2?amount=${amount}`, `dusk:${A}?amount=${amount}`]) {
+        like(readPaymentLink(link, { network: 2 }), badAmount, link);
+      }
+    }
+
+    for (const amountLux of ["10000000%E2%80%8B", "1.5", "%2010000000", "1e7"]) {
+      like(readPaymentLink(`${testnetSend}?to=${A}&amountLux=${amountLux}`, { network: 2 }), badAmount, amountLux);
+    }
+
+    // What a link writes, or a person: digits with one point or comma, and no amount at all, for Send to read as it reads a typed one.
+    for (const amount of ["0.001", "0,01", "1,000", "1.000", ".5", "5.", "12", ""]) {
+      like(readPaymentLink(`${testnetSend}?to=${A}&amount=${amount}`, { network: 2 }), { problem: "", reason: "" }, amount);
+      like(readPaymentLink(`dusk:${A}?amount=${amount}`, { network: 2 })?.link, { amountDusk: amount, to: A }, amount);
+    }
+  });
+
+  it("refuses a link whose field names hide something, or read as a field they aren't, rather than dropping them", () => {
+    // Marek's: am‏ount=0.15 beside amount=0.001 filled in 0.001; a person reading the link sees both.
+    for (const query of [
+      `to=${B}&am%E2%80%8Fount=0.15&amount=0.001`,
+      `to=${B}&amount%00=0.15&amount=0.001`,
+      `to%20=${A}&to=${B}`,
+      `%20to=${A}&to=${B}`,
+      `+to=${A}&to=${B}`,
+      `to=${B}&amount=0.001&memo%E2%80%8B=Order%201`,
+      `to=${B}&am%E2%80%8Bount=0.15`,
+      // Fullwidth ｔｏ, and a Cyrillic а in amount: they read as fields, and no reader reads them so.
+      `to=${B}&%EF%BD%94%EF%BD%8F=${A}`,
+      `to=${B}&%D0%B0mount=0.15&amount=0.001`,
+      `to=${B}&net%E2%80%8Bwork=mainnet`,
+      `to=${B}&ref%E2%80%8B=x`,
+      `to=${B}&utm%20source=x`,
+      // The review's: small capitals and Cyrillic letters Unicode's table takes for other small capitals, and marks
+      // on a field's name, none of them ASCII as every field's name is.
+      `to=${A}&${encodeURIComponent("ᴛo")}=${B}&amount=0.001`,
+      `to=${A}&${encodeURIComponent("тo")}=${B}&amount=0.001`,
+      `to=${A}&${encodeURIComponent("ᴀmount")}=5&amount=0.001`,
+      `to=${A}&amount=1000&${encodeURIComponent("ɴetwork")}=mainnet`,
+      `to=${A}&${encodeURIComponent("meмo")}=x`,
+      `to=${A}&amount%CC%85=5&amount=0.001`,
+      `to=${A}&amount%E2%81%84=5`,
+      `to=${A}&caf%C3%A9=1`,
+      // And names in ASCII that look like a field's: a capital I for the l of amountLux or label, rn, vv, a zero.
+      `to=${A}&amount=5&amountIux=1000000`,
+      `to=${A}&Iabel=Alice&amount=0.001`,
+      `to=${A}&arnount=5&amount=0.001`,
+      `to=${A}&amount=1000&netvvork=mainnet`,
+      `to=${A}&t0=${B}`,
+      `to=${A}&memo_=x`,
+    ]) {
+      const https = `${testnetSend}?${query}`;
+
+      assert.equal(parsePaymentLink(https), null, query);
+      like(readPaymentLink(https, { network: 2 }), { link: null, problem: LINK_UNREADABLE, reason: "unreadable" }, query);
+    }
+
+    like(readPaymentLink(`dusk:public-${A}@dusk:2?am%E2%80%8Fount=0.15&amount=0.001`, { network: 2 }), { link: null, problem: LINK_UNREADABLE, reason: "unreadable" });
+    like(readPaymentLink(`dusk:${A}?%EF%BD%8D%EF%BD%85%EF%BD%8D%EF%BD%8F=x`, { network: 2 }), { link: null, problem: LINK_UNREADABLE, reason: "unreadable" });
+    like(readPaymentLink(`dusk:${A}?amount=5&amountIux=1000000`, { network: 2 }), { link: null, problem: LINK_UNREADABLE, reason: "unreadable" });
+
+    // The review's: on mainnet's wallet, a network= in other letters would have filled 1000 DUSK on Mainnet; named as written, it's two networks.
+    const mainnetSend = `${networks.mainnet.apps.wallet.replace(/\/+$/, "")}/dashboard/send`;
+
+    like(readPaymentLink(`${mainnetSend}?to=${A}&amount=1000&${encodeURIComponent("ɴetwork")}=testnet`, { network: 1 }), { link: null, problem: LINK_UNREADABLE });
+    like(readPaymentLink(`${mainnetSend}?to=${A}&amount=1000&network=testnet`, { network: 1 }), { link: null, problem: "This link names two networks, Mainnet and Testnet. Ask for a new one." });
+
+    // Other fields than a link's are the browser's or a sender's: left out, as before. A field in another case is that field.
+    like(readPaymentLink(`${testnetSend}?to=${A}&amount=0.001&utm_source=chat&ref=abc&fbclid=x1&=5&%25=1`, { network: 2 })?.link, { amountDusk: "0.001", to: A });
+    like(readPaymentLink(`${testnetSend}?to=${A}&AMOUNT=0.001&Memo=x&LABEL=Shop&amountlux=1000000`, { network: 2 })?.link, { amountDusk: "0.001", amountLux: "1000000", label: "Shop", memo: "x", to: A });
+  });
+
+  it("refuses a link whose memo has a line break, as both wallets read it alike, and makes none", () => {
+    // Marek's: the web wallet filled in 'line one\nline two', the extension refused it.
+    const lineBreak = { link: null, problem: "This link's memo has a line break. Ask for a new one.", reason: "unreadable" };
+
+    for (const memo of ["line%20one%0Aline%20two", "a%0Db", "a%0D%0Ab", "a%E2%80%A8b", "a%E2%80%A9b", "a%C2%85b", "a%0Bb", "a%0Cb"]) {
+      like(readPaymentLink(`${testnetSend}?to=${A}&amount=0.001&memo=${memo}`, { network: 2 }), { ...lineBreak, chainId: "dusk:2" }, memo);
+      like(readPaymentLink(`dusk:${A}?amount=0.001&memo=${memo}`, { network: 2 }), lineBreak, memo);
+    }
+
+    // Spaces and line breaks at its ends aren't the memo's, as a field's aren't.
+    like(readPaymentLink(`${testnetSend}?to=${A}&memo=Order%201%0A`, { network: 2 })?.link, { memo: "Order 1" });
+    // And a request's memo goes on one line.
+    assert.deepEqual(makePaymentLink({ memo: "line one\nline two", network: 2, to: A }).problems, { memo: "Write the memo on one line." });
+    assert.equal(makePaymentLink({ memo: "line one\u2028line two", network: 2, to: A }).https, null);
+  });
+
+  it("gives nothing of a refused link to fill in or show: no recipient, no amount, only why and its network", () => {
+    // Marek's: the locked 'Payment request' preview of a refused link showed a To made of two addresses.
+    for (const link of [`${testnetSend}?to=${B},${A}&amount=0.001&network=testnet`, `${testnetSend}?to=${A}&amount=0.0%E2%80%8B1&network=testnet`, `${testnetSend}?to=${A}&am%E2%80%8Fount=0.15&amount=0.001&network=testnet`, `${testnetSend}?to=${A}&amount=0.001&memo=a%0Ab&network=testnet`]) {
+      const read = /** @type {any} */ (readPaymentLink(link, { network: 2 }));
+
+      assert.equal(read.link, null, link);
+      assert.notEqual(read.problem, "", link);
+      assert.deepEqual(Object.keys(read).sort(), ["chainId", "link", "network", "problem", "reason"], link);
+    }
+  });
+
   it("refuses a dusk: link that asks for a shielded payment to a public account, or a public one to a shielded address", () => {
     // Marek's: dusk:shielded- with his public account filled in a public send, without a word of what it asked.
     like(readPaymentLink(`dusk:shielded-${A}?amount=0.001`, { network: 2 }), {
@@ -432,11 +536,13 @@ describe("a request a payer can use", () => {
   });
 
   it("says 1.234 is unclear, not that it has too many decimals", () => {
-    assert.equal(makePaymentLink({ amount: "1.234", language: "es-ES", network: 1, to: A }).problems.amount, "Is that about 1,23 or 1234? Write the one you mean.");
+    assert.equal(makePaymentLink({ amount: "1.234", language: "es-ES", network: 1, to: A }).problems.amount, "Is that 1,2340 or 1234? Write the one you mean.");
     assert.equal(makePaymentLink({ amount: "abc", language: "es-ES", network: 1, to: A }).problems.amount, "Enter an amount such as 10 or 10,5.");
+    // In English too: a point before three digits could be a thousands' group.
+    assert.equal(makePaymentLink({ amount: "1.234", language: "en-GB", network: 1, to: A }).problems.amount, "Is that 1.2340 or 1234? Write the one you mean.");
     // And reads what each language writes.
     assert.equal(makePaymentLink({ amount: "1 000,5", language: "fr-FR", network: 1, to: A }).lux, 1_000_500_000_000n);
-    assert.equal(makePaymentLink({ amount: "1.234", language: "en-GB", network: 1, to: A }).lux, 1_234_000_000n);
+    assert.equal(makePaymentLink({ amount: "1.25", language: "en-GB", network: 1, to: A }).lux, 1_250_000_000n);
   });
 
   it("refuses more than 9 decimals, and more than a u64 of lux", () => {

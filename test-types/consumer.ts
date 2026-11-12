@@ -590,17 +590,19 @@ void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
 // @ts-expect-error a request needs its recipient
 void makePaymentLink({ amount: "1" });
 
-import { LINK_BAD_ADDRESS, LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
+import { LINK_BAD_ADDRESS, LINK_BAD_AMOUNT, LINK_MEMO_LINE_BREAK, LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
 
 const sendRead: LinkRead | null = readPaymentLink("dusk:public-x@dusk:1", { network: 2, walletUrl: "https://wallet.example" });
 const sendReason: "" | "unreadable" | "two-amounts" | "other-network" | undefined = sendRead?.reason;
 const sendFills: PaymentLink | null | undefined = sendRead?.link;
 const sendWords: string[] = [LINK_UNREADABLE, LINK_TWO_AMOUNTS, sendRead?.problem ?? "", sendRead?.network ?? "", sendRead?.chainId ?? ""];
 const badAddress: "This link's address isn't valid. Ask for a new one." = LINK_BAD_ADDRESS;
-void [sendReason, sendFills, sendWords, badAddress];
+const badAmount: "This link's amount can't be read. Ask for a new one." = LINK_BAD_AMOUNT;
+const memoBreak: "This link's memo has a line break. Ask for a new one." = LINK_MEMO_LINE_BREAK;
+void [sendReason, sendFills, sendWords, badAddress, badAmount, memoBreak];
 
 // /names
-import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameClash, sameName } from "@dusk-network/app-core/names";
+import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ProfileNameCheck } from "@dusk-network/app-core/names";
 
 const contactsHere = [{ address: "q", id: "c1", name: "Estudio Marta" }];
 const profilesHere = [{ account: "p", name: "Profile 2" }];
@@ -618,6 +620,12 @@ const ownNames = [{ account: "p", duskName: "sofiadesign.dusk", name: "Profile 1
 const ownNameClash = profileNameClash("sofiadesign.dusk", { profiles: ownNames, self: "q" });
 const ownNameTaken: string | undefined = ownNameClash?.kind === "profile" ? `${ownNameClash.entry.duskName} ${ownNameClash.name}` : undefined;
 const starts = nameStarts("Lucas (petit-fils)", { contacts: contactsHere, profiles: ownNames, self: "q" });
+const atSave: ProfileNameCheck<{ account: string; name: string; duskName?: string }, { name: string; duskName?: string; address: string }> | null = profileNameCheck("alice.dusk", { contacts: [{ address: "w", duskName: "alice.dusk", name: "Wendy" }], profiles: [{ account: "p", name: "Profile 1", duskName: "sofiadesign.dusk" }], self: "q" });
+const saveWords: string | undefined = atSave?.words;
+const saveRefused: boolean | undefined = atSave?.refused;
+const saveDusk: boolean | undefined = atSave?.dusk;
+const saveEntry: string | undefined = atSave?.kind === "contact" ? atSave.entry.address : atSave?.kind === "profile" ? atSave.entry.account : undefined;
+void [saveWords, saveRefused, saveDusk, saveEntry];
 const startsName: string | undefined = starts?.name;
 const startsAccount: string | undefined = starts?.kind === "profile" ? starts.entry.account : starts?.entry.address;
 // @ts-expect-error a name that starts as another is asked about, never said to be the same
@@ -678,7 +686,7 @@ const newYearPoint: Promise<SozuPoint | null> = sozuPointAt({ anchors: [{ at: 1,
 void newYearPoint.then((point) => stDuskWorth(point));
 
 // /export
-import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear, type ExportOptions, type ExportPeriod, type ExportResult, type RewardsSum, type YearRewards } from "@dusk-network/app-core/export";
+import { CSV_COLUMNS, FACTS_WAIT_MS, REWARDS_COUNTED, REWARD_WORDS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear, type ExportOptions, type ExportPeriod, type ExportResult, type RewardsSum, type YearRewards } from "@dusk-network/app-core/export";
 
 const quarter: ExportPeriod = quarterPeriod(2026, 4, { timeZone: "Europe/Madrid" });
 const dates: ExportPeriod = datesPeriod("2026-10-01", "2026-12-31");
@@ -705,6 +713,9 @@ const taxYear = yearly.then(([first]): [number | undefined, RewardsSum | undefin
 const grownYearly: Promise<YearRewards[]> = rewardsByYear({ archive, cache: new Map(), now: 1, rows: readRows, status: { ...extensionStatus, contracts: { pool: "a" } } });
 const grownYear = grownYearly.then(([first]): [bigint | undefined, string | null | undefined, number | undefined] => [first?.sozuGrown?.lux, first?.sozuGrown?.worth, first?.sozuGrown?.unpriced]);
 void [taxYear, grownYear, rewardsByYear({ rows: readRows, status: sozuStatus })];
+const yearReading: Promise<number[]> = yearly.then((years) => years.map((year) => year.reading));
+const yearWords: [string, string, string, string, number] = [REWARD_WORDS.claimed, REWARD_WORDS.sozuGrown, REWARD_WORDS.sozu, REWARDS_COUNTED, FACTS_WAIT_MS];
+void [yearReading, yearWords];
 
 // /bridge's ledger
 import { transferLedger, type LedgerInput, type LedgerLine, type TransferLedger } from "@dusk-network/app-core/bridge";
@@ -729,10 +740,22 @@ const wayBackGas = wayBack.then((facts) => {
 const wayBackFile: Promise<ExportResult> = wayBack.then((evm) => accountingCsv({ evm, profile: { account: "a", name: "Lena" }, rows: readRows }));
 void [wayBackGas, wayBackFile];
 
-import { migrationApprovals, type ApprovalsRead, type MigrationApproval } from "@dusk-network/app-core/bridge";
+import { bridgeSenders, bridgedTo, migrationApprovals, type ApprovalsRead, type MigrationApproval } from "@dusk-network/app-core/bridge";
 
 const approvalsRead: Promise<{ approvals: MigrationApproval[]; reads: ApprovalsRead[] }> = migrationApprovals({ cache: new Map(), fetch, network: 2, owners: ["0x"], rpcUrl: "https://rpc", timeoutMs: 1 });
 const approvalsFile: Promise<ExportResult> = approvalsRead.then(({ approvals }) => accountingCsv({ approvals, evmAddresses: ["0x"], profile: { name: "Nandini" }, rows: readRows }));
+const approvalGoesWith: Promise<(string | null)[]> = approvalsRead.then(({ approvals }) => approvals.map((approval) => approval.migration));
+// Both wallets' file: the migrations' side and the approvals read here, from the addresses the rows say were bridged to.
+const bothWallets: Promise<ExportResult> = accountingCsv({ bridge: { approvalOf: () => null, cache: new Map(), fetch, network: 2, rpcUrl: "https://rpc" }, evmAddresses: ["0x"], profile: { name: "Nandini" }, rows: readRows });
+const fileGas: Promise<[string[], string[]]> = bothWallets.then(({ evm }) => [evm.booked, evm.unread.map(({ chain, hash }) => `${chain} ${hash}`)]);
+const approvalsShort: Promise<string[]> = bothWallets.then(({ evm }) => evm.approvalsUnread.map(({ chain, from, owner, state }) => `${chain} ${owner} ${state} ${from ?? ""}`));
+const bridgedHere: string[] = bridgedTo(readRows);
+const sentThere: Promise<Map<string, { sender: string; block: number; hash: string }[]>> = bridgeSenders({ addresses: ["0x"], archive, network: 2 });
+const withArchive: Promise<ExportResult> = accountingCsv({ bridge: { archive, network: 2 }, profile: { account: "a", name: "Nandini" }, profiles: [{ account: "b", name: "Profile 2" }], rows: readRows });
+void [approvalsShort, sentThere, withArchive];
+// @ts-expect-error the bridge's network is where its sides are read
+void accountingCsv({ bridge: { cache: new Map() }, profile: { name: "Nandini" }, rows: readRows });
+void [approvalGoesWith, fileGas, bridgedHere];
 const approvalStates = approvalsRead.then(({ approvals, reads }): [MigrationApproval["state"] | undefined, bigint | null | undefined, ApprovalsRead["state"] | undefined] => [approvals[0]?.state, approvals[0]?.gasWei, reads[0]?.state]);
 void [approvalsFile, approvalStates];
 

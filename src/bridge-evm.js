@@ -6,7 +6,8 @@
  * @module
  */
 
-import { routes } from "@dusk-network/networks";
+import { networks, routes } from "@dusk-network/networks";
+import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { memoTextOf } from "./moved.js";
 import { EVM_HASH, RANGE_REFUSED, TIMEOUT_MS, TRANSFER_TOPIC, WEI_PER_LUX, addressOf, messageOf, networkOf, reader, urlOf } from "./bridge-common.js";
@@ -19,6 +20,7 @@ import { EVM_HASH, RANGE_REFUSED, TIMEOUT_MS, TRANSFER_TOPIC, WEI_PER_LUX, addre
 /** @typedef {import("./bridge.js").MigrationApproval} MigrationApproval */
 /** @typedef {import("./bridge.js").ApprovalsRead} ApprovalsRead */
 /** @typedef {import("./bridge-common.js").Reader} Reader */
+/** @typedef {import("./history.js").Archive} Archive */
 /** @typedef {import("@dusk-network/networks").Route} Route */
 
 /** An ERC-20 token's `Approval(owner, spender, value)`. */
@@ -93,6 +95,103 @@ export function migrationsOf(rows) {
 
     if (row?.route?.kind === "migration" && row.direction === "in" && row.status !== "failed" && EVM_HASH.test(memo)) found.push({ hash: memo, payout: row.hash, route: row.route.id });
   }
+
+  return found;
+}
+
+/**
+ * The EVM addresses a profile bridged DUSK to, as its rows say them: the
+ * address a transfer out to BNB Smart Chain or Ethereum pays (its memo, as
+ * text), and the one a deposit to DuskEVM pays, of any that didn't fail, in
+ * lower case, each once. The person's own, as the apps take them: what they
+ * bridged out to, they hold.
+ *
+ * @param {Iterable<ActivityRow>} rows
+ * @returns {string[]}
+ */
+export function bridgedTo(rows) {
+  /** @type {Set<string>} */
+  const found = new Set();
+
+  for (const row of rows ?? []) {
+    if (!row || row.dropped || row.status === "failed") continue;
+
+    const to = row.route?.kind === "service" && row.direction === "out" ? (memoTextOf(row) ?? "") : row.bridge?.step === "deposit" ? String(row.bridge.to ?? "") : "";
+    const address = addressOf(to);
+
+    if (address) found.add(address);
+  }
+
+  return [...found];
+}
+
+/** The transfer contract, whose moonlight event a public transfer writes. */
+const TRANSFER_CONTRACT = networks.mainnet.contracts.transfer;
+
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * A memo's bytes, given as hex, as UTF-8 text: "" for none, and for bytes
+ * that aren't UTF-8.
+ *
+ * @param {unknown} hex
+ */
+function memoText(hex) {
+  const text = String(hex ?? "").replace(/^0x/i, "");
+
+  if (!/^(?:[0-9a-fA-F]{2})+$/.test(text)) return "";
+
+  try {
+    return utf8.decode(Uint8Array.from(text.match(/../g) ?? [], (byte) => parseInt(byte, 16)));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * @param {{ archive: Pick<Archive, "query">, network: BridgeNetwork, addresses: Iterable<string> }} options
+ * @returns {Promise<Map<string, { sender: string, block: number, hash: string }[]>>}
+ */
+export async function bridgeSenders({ addresses, archive, network }) {
+  const net = networkOf(network);
+  // The accounts a transfer out to another chain pays.
+  const accounts = new Set(routes(net).flatMap((route) => (route.kind === "service" ? [route.account] : [])));
+  const wanted = [...new Set([...(addresses ?? [])].map(addressOf).filter(Boolean))];
+  /** @type {Map<string, { sender: string, block: number, hash: string }[]>} */
+  const found = new Map(wanted.map((address) => [address, []]));
+
+  if (!wanted.length || !accounts.size) return found;
+
+  // The index matches a memo exactly: each address as the wallets write it, its checksum, and in lower case.
+  const memos = wanted.flatMap((address) => [...new Set([formatEvmAddress(address), address])]);
+  const data = await archive.query(`query { ${memos.map((memo, i) => `m${i}: transactionsByMemo(memo: ${JSON.stringify(memo)}) { json }`).join(" ")} }`);
+  /** @type {Set<string>} */
+  const seen = new Set();
+
+  memos.forEach((_, i) => {
+    /** @type {any[]} */
+    const listed = Array.isArray(data?.[`m${i}`]?.json) ? data[`m${i}`].json : [];
+
+    for (const raw of listed) {
+      const hash = String(raw?.origin ?? "").toLowerCase();
+      const block = Number(raw?.block_height);
+
+      if (!hash || !Number.isSafeInteger(block)) continue;
+
+      for (const event of Array.isArray(raw?.events) ? raw.events : []) {
+        const paid = event?.data;
+        const to = addressOf(memoText(paid?.memo).trim());
+
+        if (!paid || event.reverted === true || event.topic !== "moonlight" || String(event.target ?? "").toLowerCase() !== TRANSFER_CONTRACT) continue;
+        if (!accounts.has(paid.receiver) || typeof paid.sender !== "string" || !found.has(to) || seen.has(`${to}:${hash}`)) continue;
+
+        seen.add(`${to}:${hash}`);
+        /** @type {{ sender: string, block: number, hash: string }[]} */ (found.get(to)).push({ block, hash, sender: paid.sender.trim() });
+      }
+    }
+  });
+
+  for (const list of found.values()) list.sort((a, b) => a.block - b.block || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
 
   return found;
 }
@@ -433,6 +532,17 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
 
           reads.push({ from, owner, route: route.id, state, to: head });
 
+          // The owner's migrations, as their draws on the contract say: what each approval and revoke goes with.
+          const draws = sent.filter((each) => drawn.get(txOf(each)) === true);
+          /** @param {any} log */
+          const drawAfter = (log) => draws.find((each) => before(placeOf(log), placeOf(each)));
+          /** @param {any} log */
+          const drawBefore = (log) => draws.filter((each) => before(placeOf(each), placeOf(log))).at(-1);
+          /** @param {any} draw */
+          const hashOf = (draw) => (draw ? txOf(draw) : null);
+          /** @type {string | null | undefined} The migration the owner's last approval or revoke went with. */
+          let previous;
+
           for (const [i, log] of own.entries()) {
             const hash = txOf(log);
             const key = `approval-evm:${net.chainId}:${route.id}:${hash}`;
@@ -454,8 +564,20 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
             const allowance = bigOf(log.data) ?? 0n;
             const next = own[i + 1];
             // What was drawn between it and the owner's next approval or revoke.
-            const between = sent.filter((each) => before(placeOf(log), placeOf(each)) && (!next || before(placeOf(each), placeOf(next)))).map((each) => drawn.get(txOf(each)));
+            const drawnOn = sent.filter((each) => before(placeOf(log), placeOf(each)) && (!next || before(placeOf(each), placeOf(next))));
+            const between = drawnOn.map((each) => drawn.get(txOf(each)));
             const spent = between.includes(true);
+            // The one that drew on it; a revoke, what the approval it took away went with; another, the next, else the last.
+            const migration =
+              allowance === 0n
+                ? previous !== undefined
+                  ? previous
+                  : hashOf(drawBefore(log) ?? drawAfter(log))
+                : spent
+                  ? hashOf(drawnOn.find((each) => drawn.get(txOf(each)) === true))
+                  : hashOf(drawAfter(log) ?? drawBefore(log));
+
+            previous = migration;
 
             approvals.push({
               allowance,
@@ -467,6 +589,7 @@ export async function migrationApprovals({ cache, fetch: fetchFn, network, owner
               decimals: Number(chain?.currency?.decimals ?? 18),
               gasWei: paid.gasWei,
               hash,
+              migration,
               owner,
               route: route.id,
               state: allowance === 0n ? "revoke" : spent ? "spent" : between.includes(null) ? "uncertain" : next ? "unused" : "open",

@@ -38,6 +38,10 @@
  */
 
 import { formatDuskPlain } from "./amounts.js";
+import { routes } from "@dusk-network/networks";
+
+import { bridgeSenders, bridgedTo, migrationApprovals, migrationFacts, migrationsOf } from "./bridge-evm.js";
+import { networkOf } from "./bridge-common.js";
 import { memoTextOf } from "./moved.js";
 import { sozuPointAt, sozuPosition, stDuskWorth } from "./sozu.js";
 import { displayText } from "./text.js";
@@ -250,7 +254,10 @@ function sozuLines(row, fact, fee) {
 }
 
 /**
- * The lines of a transfer with one of the bridge's accounts.
+ * The lines of a transfer with one of the bridge's accounts. One out to
+ * another chain sends what reached it there, and pays the bridge's fee as a
+ * fee, beside the network's: what's sent is what a tax tool matches with
+ * what came in on the other side.
  *
  * @param {ActivityRow} row
  * @param {NonNullable<ActivityRow["route"]>} route
@@ -259,9 +266,15 @@ function sozuLines(row, fact, fee) {
  */
 function routeLines(row, route, fee) {
   const chain = route.chain?.name ?? route.id;
-  const bridgeFee = route.kind === "service" ? `, bridge fee ${formatDuskPlain(route.feeLux)} DUSK` : "";
 
-  return [{ ...moved(row), fee, words: row.direction === "in" ? `From ${chain}` : `To ${chain}${bridgeFee}` }];
+  if (row.direction === "in") return [{ ...moved(row), fee, words: `From ${chain}` }];
+  if (route.kind !== "service") return [{ ...moved(row), fee, words: `To ${chain}` }];
+
+  // What the bridge keeps: its fee, or all of what was sent where that's less.
+  const kept = row.value < route.feeLux ? row.value : route.feeLux;
+  const sent = row.value - kept;
+
+  return [{ fee: fee === null ? kept : fee + kept, sent, sentCoin: DUSK, valued: sent, words: `To ${chain}, bridge fee ${formatDuskPlain(kept)} DUSK` }];
 }
 
 /**
@@ -608,10 +621,98 @@ function slugOf(name) {
  * @param {ExportOptions} options
  * @returns {Promise<ExportResult>}
  */
-export async function accountingCsv({ approvals, bom = false, contactName, currency = "EUR", evm, evmAddresses, facts, network, period, price, profile, profiles = [], rows }) {
+export async function accountingCsv({ approvals, bom = false, bridge, contactName, currency = "EUR", evm, evmAddresses, facts, network, period, price, profile, profiles = [], rows }) {
   const account = String(profile?.account ?? "");
-  // The EVM addresses the app knows as the person's, where it gives them: anyone can migrate to an account.
-  const ownEvm = evmAddresses === undefined || evmAddresses === null ? null : new Set([...evmAddresses].map((address) => String(address ?? "").toLowerCase()));
+  const all = [...(rows ?? [])];
+  // The EVM addresses this profile bridged DUSK to, as its rows say: the person's own.
+  const bridged = bridgedTo(all);
+  // And those the app knows as the person's, where it gives them, as both wallets do: anyone can migrate to an account.
+  const given = evmAddresses === undefined || evmAddresses === null ? (bridge ? [] : null) : [...evmAddresses];
+  const ownEvm = given === null ? null : new Set([...given.map((address) => String(address ?? "").toLowerCase()), ...bridged]);
+  // The migrations this profile's rows were paid for: an approval or a revoke that goes with one of them is this file's.
+  const paidHere = new Set(migrationsOf(all).map(({ hash }) => hash));
+  // Each migration's side on its own chain and the person's approvals and revokes there, read here where the app doesn't give them.
+  const reads = bridge && ownEvm?.size ? bridge : null;
+  const asked = migrationsOf(period ? all.filter(({ time }) => typeof time === "number" && time >= period.from) : all).map((migration) => ({ ...migration, approval: reads?.approvalOf?.(migration.hash) ?? null }));
+  // Whether each migration's side couldn't be read at all.
+  let factsFailed = false;
+  /** @type {{ owner: string, chain: string, state: "error" | "beyond" | "unread", from: number | null }[]} */
+  const approvalsUnread = [];
+  /** @param {string | null | undefined} id A route's */
+  const chainNamed = (id) => {
+    try {
+      return String(/** @type {any} */ (routes(networkOf(/** @type {any} */ (reads?.network))).find((route) => route.id === id))?.chain?.name ?? id ?? "");
+    } catch {
+      return String(id ?? "");
+    }
+  };
+  const evmFacts =
+    evm ??
+    (reads && asked.length
+      ? await migrationFacts({ cache: reads.cache, fetch: reads.fetch, migrations: asked, network: reads.network, rpcUrl: reads.rpcUrl }).catch(() => {
+          factsFailed = true;
+
+          return new Map();
+        })
+      : undefined);
+  // The approvals and revokes, and what of them couldn't be read: an owner's that failed, or that stop at a block, as
+  // their read windows did or the RPC keeps nothing older. None of theirs is left out without a word.
+  const approvalsRead =
+    approvals ??
+    (reads && ownEvm
+      ? await migrationApprovals({ cache: reads.cache, fetch: reads.fetch, network: reads.network, owners: ownEvm, rpcUrl: reads.rpcUrl }).then(
+          ({ approvals: found, reads: done }) => {
+            for (const read of done) if (read.state !== "read") approvalsUnread.push({ chain: chainNamed(read.route), from: read.from, owner: read.owner, state: read.state });
+
+            return found;
+          },
+          () => {
+            for (const owner of ownEvm) approvalsUnread.push({ chain: "", from: null, owner, state: "error" });
+
+            return [];
+          }
+        )
+      : undefined);
+  // The file of an approval or a revoke whose owner sent no migration: the profile of the person's that bridged DUSK to
+  // that owner first, as the archive's memo index lists the transfers naming it; where none did, as an address only
+  // connected, their first profile, by its public account. The same profile, whichever of theirs is exported. With no
+  // other profile of theirs given, this file is their only one, and has it, with a public account or not.
+  const others = profiles.some((each) => typeof each?.account === "string" && each.account !== "" && each.account !== account);
+  const people = [...new Set([profile?.account, ...profiles.map((each) => each?.account)].filter((id) => typeof id === "string" && id !== ""))].sort();
+  /** @type {MigrationApproval[]} */
+  const approvalList = [...(approvalsRead ?? [])];
+  const unmigrated = [...new Set(approvalList.filter((approval) => !approval.migration && (!ownEvm || ownEvm.has(approval.owner))).map((approval) => approval.owner))];
+  /** @param {string} owner */
+  const chainOf = (owner) => String(approvalList.find((approval) => approval.owner === owner)?.chain ?? "");
+  // The profile of the person's that bridged DUSK out to each such owner first, as the memo index lists it: that profile's
+  // rows say so, and it reads that owner. Null where the index couldn't be read.
+  /** @type {Map<string, string> | null} */
+  let bridgedFirst = new Map();
+
+  if (unmigrated.length && others && reads?.archive) {
+    const senders = await bridgeSenders({ addresses: unmigrated, archive: reads.archive, network: reads.network }).catch(() => null);
+
+    if (!senders) bridgedFirst = null;
+    else {
+      for (const [owner, list] of senders) {
+        const first = list.find((each) => people.includes(each.sender));
+
+        if (first) bridgedFirst.set(owner, first.sender);
+      }
+    }
+  }
+
+  /** @param {string} owner */
+  const homeOf = (owner) => (bridgedFirst ? (bridgedFirst.get(owner) ?? people[0]) : null);
+
+  // One booked here, or by the profile the index says bridged to it, which reads it, needs no word. Any other this profile
+  // knows of may be another's to book that never reads it, as the first profile, by an address only this one's rows or
+  // the app here give, or a deposit to DuskEVM the index doesn't list: whose file it is can't be told, and it's said.
+  if (others) {
+    for (const owner of unmigrated) {
+      if (homeOf(owner) !== account && !bridgedFirst?.has(owner)) approvalsUnread.push({ chain: chainOf(owner), from: null, owner, state: "error" });
+    }
+  }
   /** @type {ReadonlySet<string>} */
   const self = new Set([profile?.account, profile?.address].flatMap((id) => (typeof id === "string" && id !== "" ? [id] : [])));
   /** @type {Map<string, string>} */
@@ -624,7 +725,12 @@ export async function accountingCsv({ approvals, bom = false, contactName, curre
   const left = { notRead: 0, outOfPeriod: 0, pending: 0 };
   const priceAt = pricesOf(price);
   let unpriced = 0;
-  const chronological = [...(rows ?? [])].sort((a, b) => (a.time ?? 0) - (b.time ?? 0) || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+  const chronological = [...all].sort((a, b) => (a.time ?? 0) - (b.time ?? 0) || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+  // The EVM addresses whose gas the file has, and the migrations whose side on their own chain couldn't be read.
+  /** @type {Set<string>} */
+  const evmBooked = new Set();
+  /** @type {{ hash: string, chain: string }[]} */
+  const evmUnread = [];
   /** @type {{ at: number, text: string }[]} */
   const written = [];
   let count = 0;
@@ -644,6 +750,8 @@ export async function accountingCsv({ approvals, bom = false, contactName, curre
     const at = /** @type {number} */ (line.at ?? row?.time);
 
     if (!inPeriod(at)) return;
+    // A line of another chain's names its EVM address as its account.
+    if (line.account) evmBooked.add(line.account);
 
     // A token's own line says who it went to, or that it isn't known: never the contract called.
     const ownParty = "counterparty" in line;
@@ -698,8 +806,12 @@ export async function accountingCsv({ approvals, bom = false, contactName, curre
 
     // A migration's side on its own chain, with the payout it was paid with: named by its memo, as text,
     // and, where the app gives the person's EVM addresses, sent from one of them. Another's gas is no cost of theirs.
-    const fact = row.route?.kind === "migration" && row.direction === "in" ? evm?.get((memoTextOf(row) ?? "").toLowerCase()) : undefined;
+    const paidFor = row.route?.kind === "migration" && row.direction === "in" ? (memoTextOf(row) ?? "").toLowerCase() : "";
+    const fact = paidFor ? evmFacts?.get(paidFor) : undefined;
     const migration = !ownEvm || (fact?.from && ownEvm.has(fact.from.toLowerCase())) ? fact : undefined;
+    const unreadHere = fact?.state === "pending" || fact?.state === "error" || (factsFailed && !fact && paidHere.has(paidFor));
+
+    if (unreadHere && (!period || row.time >= period.from)) evmUnread.push({ chain: String(row.route?.chain?.name ?? row.route?.id ?? ""), hash: paidFor });
     const rowIn = inPeriod(row.time);
     const evmOwn = evmLines(row, migration);
 
@@ -715,9 +827,12 @@ export async function accountingCsv({ approvals, bom = false, contactName, curre
     for (const line of [...evmOwn, ...(rowIn ? linesOf(row, { address: Boolean(profile?.address), facts, own, self }) : [])]) await write(line, row);
   }
 
-  // The approvals and revokes on a migration's own chain that no migration's lines have, each once.
-  for (const approval of approvals ?? []) {
-    if (!booked.has(approval.hash) && approval.at !== null && approval.gasWei !== null && (!ownEvm || ownEvm.has(approval.owner))) await write(approvalLine(approval), null);
+  // The approvals and revokes on a migration's own chain that no migration's lines have, each once, in the file
+  // of the profile its migration paid: one of an owner who sent none, as above.
+  for (const approval of approvalList) {
+    const here = approval.migration ? paidHere.has(approval.migration) : !others || (account !== "" && homeOf(approval.owner) === account);
+
+    if (here && !booked.has(approval.hash) && approval.at !== null && approval.gasWei !== null && (!ownEvm || ownEvm.has(approval.owner))) await write(approvalLine(approval), null);
   }
 
   const slug = slugOf(profile?.name) || "profile";
@@ -727,6 +842,7 @@ export async function accountingCsv({ approvals, bom = false, contactName, curre
     count,
     // Oldest first, as a migration's lines on its own chain come before its payout.
     csv: `${bom ? BOM : ""}${[CSV_COLUMNS.map(field).join(","), ...written.sort((a, b) => a.at - b.at).map((line) => line.text)].join("\r\n")}\r\n`,
+    evm: { approvalsUnread, booked: [...evmBooked], unread: evmUnread },
     fileName: `dusk-${slug}${on}-${period?.label ?? "all"}.csv`,
     left,
     unpriced,
@@ -736,6 +852,19 @@ export async function accountingCsv({ approvals, bom = false, contactName, curre
 // ---------------------------------------------------------------------------
 // Rewards by year
 // ---------------------------------------------------------------------------
+
+/** What each of a year's rewards is called, in the words both wallets show. */
+export const REWARD_WORDS = Object.freeze({ claimed: "Native staking, claimed", sozu: "Sozu, taken out by unstaking", sozuGrown: "Sozu, grown while held" });
+
+/** The one line under them both wallets show: what taken out by unstaking is, and how it's counted. */
+export const REWARDS_COUNTED = "Taken out by unstaking is part of grown while held: what came back, less what that stDUSK cost at its average price, deposit fees not counted.";
+
+/**
+ * How long a stake or an unstake with Sozu waits for its facts before what
+ * it did counts as not known: the archive lists a transaction's events a
+ * little after its block, a minute or so.
+ */
+export const FACTS_WAIT_MS = 600_000;
 
 /**
  * A lux in parts fine enough that what a pool's rates leave below a lux
@@ -762,6 +891,35 @@ const fineWorth = (stDusk, { stake, supply }) => (supply > 0n ? (stDusk * stake 
 const poolOf = (fact) => (typeof fact?.pool?.stake === "bigint" && typeof fact.pool.supply === "bigint" ? fact.pool : null);
 
 /**
+ * Lux from a status' figure, as the apps' statuses write one: null for none.
+ *
+ * @param {unknown} value
+ */
+const luxIn = (value) => (typeof value === "bigint" ? value : /^\d+$/.test(String(value ?? "")) ? BigInt(String(value)) : null);
+
+/**
+ * What one stDUSK is worth now, as a status says it: by what's held. While
+ * a stake or an unstake is read (`reading`), what's held now isn't what the
+ * year's figures hold, as an unstake that took all of it, or all but a lux,
+ * whose worth is a rounding: then by the pool's own figures, where the
+ * status has them. Null where it says neither.
+ *
+ * @param {(SozuStatusLike & { contracts?: { pool?: string | null } | null }) | null | undefined} status
+ * @param {boolean} reading
+ * @returns {{ stake: bigint, supply: bigint } | null}
+ */
+function rateNow(status, reading) {
+  const { stDusk, worthNow } = sozuPosition({ status });
+  const pool = /** @type {Record<string, unknown>} */ (status?.pool ?? {});
+  const stake = luxIn(pool.stake ?? pool.totalStakeLux);
+  const supply = luxIn(pool.supply ?? pool.tokenTotalSupply);
+
+  if (reading && stake !== null && supply) return { stake, supply };
+
+  return worthNow !== null && stDusk ? { stake: worthNow, supply: stDusk } : null;
+}
+
+/**
  * @param {{ rows: Iterable<ActivityRow>, facts?: ReadonlyMap<string, SozuFact>, price?: ExportOptions["price"], timeZone?: string, complete?: boolean, status?: (SozuStatusLike & { contracts?: { pool?: string | null } | null }) | null, archive?: Pick<Archive, "query">, cache?: FactCache, now?: number }} options
  * @returns {Promise<import("./export.js").YearRewards[]>}
  */
@@ -772,7 +930,7 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
   const priceAt = pricesOf(price);
   /** @typedef {{ at: number, fine: bigint }} Reward */
   /** @typedef {{ stake: bigint, supply: bigint }} Pool */
-  /** @type {Map<number, { claimed: Reward[], sozu: Reward[] | null }>} */
+  /** @type {Map<number, { claimed: Reward[], sozu: Reward[] | null, reading: number }>} */
   const years = new Map();
   // Sozu's stDUSK held and what it cost, in FINE parts of a lux, while every stake and unstake before is known.
   let held = 0n;
@@ -795,16 +953,31 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
 
     return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0);
   });
+  // The newest stakes and unstakes with Sozu, of the last minutes, whose facts the archive doesn't list yet:
+  // left out until it does, as one on its way is, so what's said is what was said before them.
+  const sozuMoves = inOrder.filter((row) => row.sozu);
+  let firstUnread = sozuMoves.length;
+
+  while (complete && facts && firstUnread > 0 && !facts.has(sozuMoves[firstUnread - 1].hash) && now - /** @type {number} */ (sozuMoves[firstUnread - 1].time) <= FACTS_WAIT_MS) firstUnread -= 1;
+
+  const unread = new Set(sozuMoves.slice(firstUnread));
+  /** @type {number | null} */
+  const readingFrom = firstUnread < sozuMoves.length ? /** @type {number} */ (sozuMoves[firstUnread].time) : null;
 
   for (const row of inOrder) {
     const at = /** @type {number} */ (row.time);
     const year = yearAt(at);
-    const rewards = years.get(year) ?? { claimed: [], sozu: [] };
+    const rewards = years.get(year) ?? { claimed: [], reading: 0, sozu: [] };
 
     years.set(year, rewards);
 
     if (!row.sozu) {
       rewards.claimed.push({ at, fine: row.value * FINE });
+      continue;
+    }
+
+    if (unread.has(row)) {
+      rewards.reading += 1;
       continue;
     }
 
@@ -848,11 +1021,12 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
   const last = moves.at(-1);
 
   if (last) {
-    const until = unknownFrom ?? (last.held > 0n ? Math.max(now, last.at) : last.at);
+    // Up to now, or to the first stake or unstake still being read: what's held after it isn't known yet.
+    const until = unknownFrom ?? (last.held > 0n ? Math.max(readingFrom ?? now, last.at) : last.at);
     const anchors = all.flatMap((row) => (row.status === "executed" && typeof row.time === "number" && typeof row.blockHeight === "number" ? [{ at: row.time, height: row.blockHeight }] : []));
     // The pool the status names, else the one the last stake or unstake called.
     const pool = String(status?.contracts?.pool ?? [...inOrder].reverse().find((row) => row.sozu)?.contractId ?? "");
-    const { stDusk: stDuskNow, worthNow } = sozuPosition({ status });
+    const worthNowOf = rateNow(status, readingFrom !== null);
     /** @type {{ at: number, held: bigint, pool: Pool | null | Promise<Pool | null>, yearEnd: boolean }[]} */
     const marks = [];
     let holding = 0n;
@@ -870,9 +1044,9 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
       }
     }
 
-    // Still held, all of it known: now, at what one stDUSK held is worth as the status says.
+    // Still held, all of it known: now, at what one stDUSK is worth as the status says.
     if (holding > 0n && unknownFrom === null) {
-      marks.push({ at: until, held: 0n, pool: worthNow !== null && stDuskNow ? { stake: worthNow, supply: stDuskNow } : null, yearEnd: false });
+      marks.push({ at: until, held: 0n, pool: worthNowOf, yearEnd: false });
     }
 
     const pools = await Promise.all(marks.map((mark) => mark.pool));
@@ -889,7 +1063,7 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
       grown.set(year, then && after ? [...parts, { at: to.yearEnd ? to.at - 1 : to.at, fine: fineWorth(from.held, after) - fineWorth(from.held, then) }] : null);
     }
 
-    for (const year of grown.keys()) if (!years.has(year)) years.set(year, { claimed: [], sozu: [] });
+    for (const year of grown.keys()) if (!years.has(year)) years.set(year, { claimed: [], reading: 0, sozu: [] });
   }
 
   /**
@@ -928,10 +1102,10 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
   return Promise.all(
     [...years.entries()]
       .sort(([a], [b]) => a - b)
-      .map(async ([year, { claimed, sozu }]) => {
+      .map(async ([year, { claimed, reading, sozu }]) => {
         const parts = year >= lost ? null : grownIn(year);
 
-        return { claimed: await sumOf(claimed), sozu: sozu && (await sumOf(sozu)), sozuGrown: parts && (await sumOf(parts)), year };
+        return { claimed: await sumOf(claimed), reading, sozu: sozu && (await sumOf(sozu)), sozuGrown: parts && (await sumOf(parts)), year };
       })
   );
 }

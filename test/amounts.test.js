@@ -148,7 +148,8 @@ describe("reading amounts", () => {
 
   it("reads what a Dutch person writes", () => {
     assert.equal(read("1,5", ","), (15n * DUSK) / 10n);
-    assert.equal(read("1,001", ","), 1_001_000_000n);
+    assert.equal(read("1,25", ","), 1_250_000_000n);
+    assert.equal(read("1,0012", ","), 1_001_200_000n);
     assert.equal(read("1.001,5", ","), 1_001_500_000_000n);
     assert.equal(read("1.000.000", ","), 1_000_000n * DUSK);
     assert.equal(read(",5", ","), DUSK / 2n);
@@ -157,7 +158,8 @@ describe("reading amounts", () => {
 
   it("reads what an English person writes", () => {
     assert.equal(read("1.5", "."), (15n * DUSK) / 10n);
-    assert.equal(read("1.001", "."), 1_001_000_000n);
+    assert.equal(read("1.25", "."), 1_250_000_000n);
+    assert.equal(read("1.0012", "."), 1_001_200_000n);
     assert.equal(read("1,001.5", "."), 1_001_500_000_000n);
     assert.equal(read("1,000,000", "."), 1_000_000n * DUSK);
     assert.equal(read(".5", "."), DUSK / 2n);
@@ -173,14 +175,20 @@ describe("reading amounts", () => {
     assert.equal(read("1,000.5", ","), 1_000_500_000_000n);
   });
 
-  it("refuses what could mean a thousand or one, and says what it could mean", () => {
+  it("refuses what could mean a thousand or one, with either mark in any language, and says what it could mean", () => {
     assert.equal(read("1.001", ","), null);
     assert.deepEqual(unclearAmount("1.001", ","), { decimal: "1,001", grouped: "1001" });
     assert.equal(read("1,001", "."), null);
     assert.deepEqual(unclearAmount("1,001", "."), { decimal: "1.001", grouped: "1001" });
+    // Lena's: the language's own mark before three digits could be a group too, as a German reads "1.000" on an English phone.
+    assert.equal(read("1.001", "."), null);
+    assert.deepEqual(unclearAmount("1.001", "."), { decimal: "1.001", grouped: "1001" });
+    assert.equal(read("1,001", ","), null);
+    assert.deepEqual(unclearAmount("1,001", ","), { decimal: "1,001", grouped: "1001" });
 
-    for (const clear of ["1,001", "1.5", "1.25", "0.123", "1.0001", "1001", ""]) {
+    for (const clear of ["1.5", "1.25", "0.123", "0,500", "1.0001", "1234.567", "1001", ""]) {
       assert.equal(unclearAmount(clear, ","), null, clear);
+      assert.equal(unclearAmount(clear, "."), null, clear);
     }
   });
 
@@ -214,10 +222,15 @@ describe("reading amounts", () => {
       }
     }
 
-    // Nearly all read back. What doesn't is a thousand and one written with one
-    // separator that could be decimals, and the app says what it could mean.
-    assert.equal(readBack, 57);
-    assert.deepEqual(refused, ["en-US 1,001", "en-GB 1,001", "nl-NL 1.001", "de-DE 1.001", "hi-IN 1,001", "ar-EG 1,001"]);
+    // Nearly all read back. What doesn't is a thousand and one, or one and a
+    // thousandth, written with a lone separator before three digits, which
+    // could be either, and the app asks which is meant.
+    assert.equal(readBack, 48);
+    assert.deepEqual(refused, [
+      "en-US 1.001", "en-US 1,001", "en-GB 1.001", "en-GB 1,001", "nl-NL 1,001", "nl-NL 1.001", "de-DE 1,001", "de-DE 1.001",
+      "fr-FR 1,001", "es-ES 1,001", "de-CH 1.001", "hi-IN 1.001", "hi-IN 1,001", "ar-EG 1.001", "ar-EG 1,001",
+    ]);
+    for (const each of refused) assert.notEqual(unclearAmount(each.split(" ")[1]), null, each);
   });
 
   it("never reads what it shows as another amount, whatever the amount or the language", () => {
@@ -350,11 +363,11 @@ describe("reading amounts", () => {
     // Fewer than three decimals can't be a group: they're said as they are.
     assert.deepEqual(readAmount("1,500", "en-US"), { lux: null, problem: "Is that 1.5 or 1500? Write the one you mean." });
     assert.deepEqual(readAmount("12.050", "fr-FR"), { lux: null, problem: "Is that 12,05 or 12050? Write the one you mean." });
-    // Three would read as a group again: about two of them.
-    assert.deepEqual(readAmount("1,234", "en-US"), { lux: null, problem: "Is that about 1.23 or 1234? Write the one you mean." });
-    assert.deepEqual(readAmount("1.234", "fr-FR"), { lux: null, problem: "Is that about 1,23 or 1234? Write the one you mean." });
-    assert.deepEqual(readAmount("1.001", "nl-NL"), { lux: null, problem: "Is that about 1 or 1001? Write the one you mean." });
-    assert.deepEqual(readAmount("999,995", "en-US"), { lux: null, problem: "Is that about 1000 or 999995? Write the one you mean." });
+    // Three would read as a group again: exactly, with a fourth, a zero, as it can be written to mean it.
+    assert.deepEqual(readAmount("1,234", "en-US"), { lux: null, problem: "Is that 1.2340 or 1234? Write the one you mean." });
+    assert.deepEqual(readAmount("1.234", "fr-FR"), { lux: null, problem: "Is that 1,2340 or 1234? Write the one you mean." });
+    assert.deepEqual(readAmount("1.001", "nl-NL"), { lux: null, problem: "Is that 1,0010 or 1001? Write the one you mean." });
+    assert.deepEqual(readAmount("999,995", "en-US"), { lux: null, problem: "Is that 999.9950 or 999995? Write the one you mean." });
 
     // Neither number in a question has a separator before three digits.
     for (const [language, mark] of [["en-US", ","], ["de-DE", "."]]) {
@@ -364,6 +377,76 @@ describe("reading amounts", () => {
         assert.doesNotMatch(String(problem), /\d[.,]\d{3}(?!\d)/, `${language}: ${problem}`);
       }
     }
+  });
+
+  it("asks Lena's question for '1.000' on an English phone, as for '1,000', and reads plain decimals without one", () => {
+    // Lena's: on an English phone '1.000', meant as a thousand, went through as one DUSK on Send, native staking and Sozu.
+    for (const language of ["en-GB", "en-US", "en-IN", "de-DE", "pl-PL", "fr-FR"]) {
+      for (const typed of ["1.000", "1,000"]) {
+        assert.deepEqual(readAmount(typed, language), { lux: null, problem: "Is that 1 or 1000? Write the one you mean." }, `${language}: ${typed}`);
+        assert.equal(parseDusk(normalizeAmount(typed, decimalSeparator(language), language)), null, `${language}: ${typed}`);
+      }
+    }
+
+    assert.deepEqual(readAmount("10.000", "en-GB"), { lux: null, problem: "Is that 10 or 10000? Write the one you mean." });
+    assert.deepEqual(readAmount("1.234", "en-US"), { lux: null, problem: "Is that 1.2340 or 1234? Write the one you mean." });
+    // The review's: 2.125 meant as it's written is asked about exactly, never as about 2.13, and what the question
+    // shows reads back as that amount, so it can be written to mean it.
+    for (const [language, typed, shown, lux] of /** @type {const} */ ([["en-GB", "2.125", "2.1250", 2_125_000_000n], ["de-DE", "2,125", "2,1250", 2_125_000_000n], ["fr-FR", "999.999", "999,9990", 999_999_000_000n]])) {
+      const { problem } = readAmount(typed, language);
+
+      assert.equal(problem, `Is that ${shown} or ${typed.replace(/[.,]/, "")}? Write the one you mean.`, `${language}: ${typed}`);
+      assert.deepEqual(readAmount(shown, language), { lux, problem: null }, `${language}: ${shown}`);
+      assert.equal(readAmount(typed.replace(/[.,]/, ""), language).lux, lux * 1000n, `${language}: ${typed}`);
+    }
+    assert.deepEqual(readAmount("250,500", "de-DE"), { lux: null, problem: "Is that 250,5 or 250500? Write the one you mean." });
+
+    // Plain decimals aren't asked about, in either mark.
+    for (const [typed, lux] of /** @type {const} */ ([["0.5", DUSK / 2n], ["1.25", 1_250_000_000n], ["0.500", DUSK / 2n], ["0,123", 123_000_000n], ["1.2345", 1_234_500_000n], ["1234.567", 1_234_567_000_000n], ["1000", 1000n * DUSK]])) {
+      assert.deepEqual(readAmount(typed, "en-GB"), { lux, problem: null }, `en-GB: ${typed}`);
+    }
+
+    assert.deepEqual(readAmount("1,25", "de-DE"), { lux: 1_250_000_000n, problem: null });
+    assert.deepEqual(readAmount("1.234,5", "de-DE"), { lux: 1_234_500_000_000n, problem: null });
+  });
+
+  it("fills a field with what a wallet writes so it reads back without a question: three decimals have a fourth", () => {
+    // Max, a link's amount, Send back's: 1.234 DUSK reads back as itself, never as a question or a thousand.
+    assert.equal(amountForField("1.234", "."), "1.2340");
+    assert.equal(amountForField("1.234", ","), "1,2340");
+    assert.equal(amountForField("12.345", ","), "12,3450");
+    assert.equal(amountForField("0.123", "."), "0.123");
+    assert.equal(amountForField("1.5", ","), "1,5");
+    assert.equal(amountForField("1234.567", "."), "1234.567");
+    assert.equal(amountForField("1000", ","), "1000");
+
+    for (const language of ["en-GB", "de-DE", "fr-FR", "hi-IN"]) {
+      for (const lux of [1_234_000_000n, 12_345_000_000n, 999_999_000_000n, 1_001_000_000n]) {
+        const field = amountForField(formatDuskPlain(lux), decimalSeparator(language));
+
+        assert.deepEqual(readAmount(field, language), { lux, problem: null }, `${language}: ${field}`);
+      }
+    }
+
+    // What a wallet doesn't write, as "1.000" in a hand-made link, stays: the field asks which is meant.
+    assert.equal(amountForField("1.000", "."), "1.000");
+    assert.equal(readAmount(amountForField("1.000", "."), "en-GB").problem, "Is that 1 or 1000? Write the one you mean.");
+    assert.equal(amountForField("1,000", "."), "1,000");
+  });
+
+  it("looks for both amounts a search can mean, with either mark in any language", () => {
+    for (const language of ["en-GB", "de-DE"]) {
+      assert.deepEqual(amountsMeant("1.000", language), [
+        { from: 1000n * DUSK, to: 1001n * DUSK },
+        { from: DUSK, to: DUSK + 1_000_000n },
+      ], language);
+      assert.deepEqual(amountsMeant("1,000", language), [
+        { from: 1000n * DUSK, to: 1001n * DUSK },
+        { from: DUSK, to: DUSK + 1_000_000n },
+      ], language);
+    }
+
+    assert.deepEqual(amountsMeant("0.500", "en-GB"), [{ from: DUSK / 2n, to: DUSK / 2n + 1_000_000n }]);
   });
 
   it("writes and reads in the same language, unless told otherwise", () => {

@@ -16,7 +16,7 @@
  * formatDusk(1_853_542n, { round: "up" }); // { text: "0.0019", exact: "0.001853542" }
  * formatAmount(90_082_082_000_000_000n, { decimals: 18, round: "down" }); // { text: "0.09", exact: "0.090082082" }
  * readAmount("1 000,5", "fr-FR"); // { lux: 1_000_500_000_000n, problem: null }
- * readAmount("1.000", "nl-NL"); // { lux: null, problem: "Is that 1 or 1000? Write the one you mean." }
+ * readAmount("1.000", "en-GB"); // { lux: null, problem: "Is that 1 or 1000? Write the one you mean." }
  * unclearAmount("1.001", ","); // { grouped: "1001", decimal: "1,001" }
  * amountExample("10.5", "fr-FR"); // "10,5"
  * ```
@@ -97,8 +97,16 @@ export declare const decimalSeparator: (language?: string) => string;
 /** A whole number grouped as a language groups, in digits a person can type back: "1.484" in Dutch. */
 export declare const groupDigits: (whole: bigint | number | string, language?: string) => string;
 
-/** A plain amount for an amount field: in the decimal separator it reads back. */
-export declare const amountForField: (plain: string, decimal?: string) => string;
+/**
+ * A plain amount for an amount field: in the decimal separator it reads
+ * back. One as `formatDuskPlain` writes it, whose three decimals would read
+ * as a group of thousands (`unclearAmount`), has a fourth, a zero, so the
+ * field reads it as it is: "1.234" is "1.2340" in English and "1,2340" in
+ * German. One written otherwise, as "1.000" in a link, stays as it's written,
+ * for the field to ask which is meant. Every amount an app puts in a field
+ * goes through it: Max, a link's, Send back's.
+ */
+export declare function amountForField(plain: string, decimal?: string): string;
 
 /**
  * A plain amount, such as "10.5", in the language's separators, for an
@@ -111,12 +119,19 @@ export declare function amountExample(plain?: string, language?: string): string
  * An amount as typed, in the plain form `parseDusk` reads: the language's own
  * groups read too (`language`, the browser's unless given): "1 000,5" with any
  * of French's spaces, "1'000.5" in Swiss German, "12,34,567.89" in Hindi. What
- * could mean either of two amounts (`unclearAmount`) isn't made plain, so it's
- * refused.
+ * could mean either of two amounts (`unclearAmount`), in any language, isn't
+ * made plain, so it's refused.
  */
 export declare function normalizeAmount(text: string, decimal?: string, language?: string): string;
 
-/** The two amounts a text could mean, as the language writes each, or null. */
+/**
+ * The two amounts a text could mean, as the language writes each, or null:
+ * where a lone point or comma stands before three digits, after a whole part
+ * of one to three digits that isn't 0, in any language, as a point is often
+ * typed for decimals where a comma is the language's, and the other way
+ * round. "1.000" and "1,000" are one or a thousand in English and in German
+ * alike; "0.500", "1.25" and "1.2345" are what they say.
+ */
 export declare function unclearAmount(
   text: string,
   decimal?: string
@@ -128,9 +143,11 @@ export declare function parseDusk(plain: string): bigint | null;
 /**
  * An amount of DUSK as a person typed it, in the language's reading (the
  * browser's, unless given): the lux it is, or what's wrong with it in plain
- * words: that it could be two amounts, each said as no reader takes it for
- * the other ("Is that 1 or 1000?", "Is that about 1.23 or 1234?"; never
- * "1.000" for one), that a space the language doesn't
+ * words: that it could be two amounts (`unclearAmount`, in any language: "1.000"
+ * asks on an English phone as "1,000" does), each said as no reader takes it
+ * for the other, exactly, and as each can be written to mean it ("Is that 1
+ * or 1000?", "Is that 2.1250 or 2125?"; never "1.000" for one, nor "about
+ * 2.13"), that a space the language doesn't
  * group with is in it ("Leave out the space: 1234,5."), that it has too many
  * decimals, or what an amount looks like. Nothing typed is neither.
  */
@@ -142,7 +159,7 @@ export declare function readAmount(text: string, language?: string): { lux: bigi
  * 0.3, in lux, `to` left out. It's read in the language's way (the
  * browser's, unless given) and with either decimal mark, so "0.2" and "0,2"
  * are the same in German; where a mark could mean either of two
- * (`unclearAmount`), as "1.000" in German, both are looked for. Empty for
+ * (`unclearAmount`), as "1.000" in any language, both are looked for. Empty for
  * what isn't an amount above 0.
  */
 export declare function amountsMeant(query: unknown, language?: string): { from: bigint; to: bigint }[];

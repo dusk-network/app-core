@@ -3,12 +3,13 @@ import { describe, it } from "node:test";
 
 import { activityRows } from "../src/activity.js";
 import { migrationApprovals, migrationFacts, migrationsOf } from "../src/bridge.js";
-import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear } from "../src/export.js";
+import { CSV_COLUMNS, FACTS_WAIT_MS, REWARDS_COUNTED, REWARD_WORDS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear } from "../src/export.js";
 import { sozuFacts, sozuPosition } from "../src/sozu.js";
 import { A, B, C, DUSK, POOL, entryFrom, entryOf, hash, recorded } from "./fixtures/activity.js";
 import { fakeChain, hex } from "./fixtures/bridge.js";
 import { networks } from "@dusk-network/networks";
-import { readFixture } from "./fixtures/helpers.js";
+import { fakeArchive, readFixture } from "./fixtures/helpers.js";
+import { TRANSFER_CONTRACT } from "../src/history.js";
 import { chainArchive, figures, newYear } from "./fixtures/sozu.js";
 import { stDuskFor } from "@dusk-network/networks/sozu";
 
@@ -633,8 +634,11 @@ describe("the bridge", () => {
     const { csv } = await accountingCsv({ profile: { account: bridge.mainnet.sender, name: "Nandini" }, rows });
     const [record] = recordsOf(csv);
 
-    assert.equal(record["Sent Amount"], "20301");
-    assert.equal(record["Fee Amount"], "0.001858749");
+    // Nandini's: what reached the other side is what was sent, and the bridge's fee is a fee, beside the network's.
+    assert.equal(record["Sent Amount"], "20300");
+    assert.equal(record["Sent Currency"], "DUSK");
+    assert.equal(record["Fee Amount"], "1.001858749");
+    assert.equal(record["Fee Currency"], "DUSK");
     assert.equal(record.Description, "To BNB Smart Chain, bridge fee 1 DUSK · 0xe5006cb536a927d13a2cace8e7666d1083b329e0");
     assert.equal(record.Memo, "0xe5006cb536a927d13a2cace8e7666d1083b329e0");
   });
@@ -1088,7 +1092,7 @@ describe("staking rewards by calendar year", () => {
     const rows = activityRows({ account: B, network: 2, public: [claims[2], failed] });
     const [year] = await rewardsByYear({ price: () => null, rows, timeZone: "UTC" });
 
-    assert.deepEqual(year, { claimed: { lux: claimedThird, unpriced: 1, worth: "0.00000000" }, sozu: { lux: 0n, unpriced: 0, worth: "0.00000000" }, sozuGrown: { lux: 0n, unpriced: 0, worth: "0.00000000" }, year: 2026 });
+    assert.deepEqual(year, { claimed: { lux: claimedThird, unpriced: 1, worth: "0.00000000" }, reading: 0, sozu: { lux: 0n, unpriced: 0, worth: "0.00000000" }, sozuGrown: { lux: 0n, unpriced: 0, worth: "0.00000000" }, year: 2026 });
   });
 
   it("says Lena's 2026 as her stake with Sozu grew while held, as Sozu's 'Rewards so far' says it, beside what her unstakes took out", async () => {
@@ -1130,6 +1134,87 @@ describe("staking rewards by calendar year", () => {
 
     assert.deepEqual(after.years, [[2026, 29_808_459n, 7_686_635n]]);
     assert.equal(after.earned, 29_808_431n);
+  });
+
+  it("keeps what Lena's year said while her unstake's facts are being read, and says they are, rather than that it couldn't be read", async () => {
+    // Lena's: Stake opened 10 s after an unstake said 'couldn't be read' for both lines, as the archive didn't list
+    // its event yet; two minutes on, 0.0358 and 0.0129.
+    const lena = readFixture("sozu-lena-testnet.json");
+    const rowsOf = (/** @type {any[]} */ moves) =>
+      activityRows({
+        account: B,
+        network: 2,
+        public: moves.map(([date, kind, dusk, , , , id], i) =>
+          entryOf({ blockHeight: 4_800_000 + i, contractId: lena.pool, direction: kind === "stake" ? "out" : "in", fnName: `sozu_${kind}`, hash: id, kind: "contract_call", timestamp: Date.parse(`${date.replace(" ", "T")}Z`), value: dusk })
+        ),
+      });
+    const allFacts = new Map(
+      lena.moves.map((/** @type {any[]} */ [, kind, dusk, stDusk, fee, rate, id]) => [id, { amount: BigInt(dusk), fee: BigInt(fee), kind, pool: { stake: BigInt(rate), supply: DUSK }, stDusk: BigInt(stDusk) }])
+    );
+    const unstake = lena.moves.at(-1);
+    const unstakeAt = Date.parse(`${unstake[0].replace(" ", "T")}Z`);
+    const facts = new Map([...allFacts].filter(([id]) => id !== unstake[6]));
+    const status = { contracts: { pool: lena.pool }, position: { balance: BigInt(lena.after.balance), stDusk: BigInt(lena.after.stDusk) } };
+    const said = (/** @type {import("../src/export.js").YearRewards[]} */ years) => years.map(({ reading, sozu, sozuGrown, year }) => [year, sozuGrown?.lux, sozu?.lux, reading]);
+    const rows = rowsOf(lena.moves);
+
+    // Up to the unstake, what was said before it, and that one is being read.
+    const before = said(await rewardsByYear({ facts, now: unstakeAt, rows: rowsOf(lena.moves.slice(0, -1)), status, timeZone: "Europe/Berlin" }));
+    const reading = said(await rewardsByYear({ facts, now: unstakeAt + 10_000, rows, status, timeZone: "Europe/Berlin" }));
+
+    assert.equal(before.length, 1);
+    assert.equal(typeof before[0][1], "bigint");
+    assert.equal(typeof before[0][2], "bigint");
+    assert.deepEqual(reading, [[2026, before[0][1], before[0][2], 1]]);
+
+    // Once it's read, what it did: her figures as her export has them.
+    assert.deepEqual(said(await rewardsByYear({ facts: allFacts, now: Date.UTC(2026, 10, 11, 0, 30), rows, status, timeZone: "Europe/Berlin" })), [[2026, 29_808_459n, 7_686_635n, 0]]);
+    // Long after its block, an unstake still not read isn't being read: what it did isn't known.
+    assert.deepEqual(said(await rewardsByYear({ facts, now: unstakeAt + 3_600_000, rows, status, timeZone: "Europe/Berlin" })), [[2026, undefined, undefined, 0]]);
+    // Nor is one before others that are read.
+    const gap = new Map([...allFacts].filter(([id]) => id !== lena.moves[10][6]));
+
+    assert.deepEqual(said(await rewardsByYear({ facts: gap, now: unstakeAt + 10_000, rows, status, timeZone: "Europe/Berlin" })), [[2026, undefined, undefined, 0]]);
+  });
+
+  it("says nothing earned yet of a first stake whose facts are being read, and that they are", async () => {
+    const at = Date.UTC(2026, 10, 12, 1);
+    const rows = activityRows({ account: B, network: 2, public: [entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x41), kind: "contract_call", timestamp: at, value: "100000000" })] });
+    const years = await rewardsByYear({ facts: new Map(), now: at + 5_000, rows, status: { position: { balance: 99_750_000n, stDusk: 31_000_000n } }, timeZone: "UTC" });
+
+    assert.deepEqual(years.map(({ reading, sozu, sozuGrown, year }) => [year, sozuGrown?.lux, sozu?.lux, reading]), [[2026, 0n, 0n, 1]]);
+  });
+
+  it("keeps what grew up to an unstake of all of it while that's read, by the pool's rate now, as nothing is held any more", async () => {
+    // 997.5 DUSK bought 498.75 stDUSK at 2 DUSK each; a day on, all of it unstaked at 2.1, its facts not listed yet.
+    const at = Date.UTC(2026, 10, 12, 1);
+    const rows = activityRows({
+      account: B,
+      network: 2,
+      public: [
+        entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x42), kind: "contract_call", timestamp: at - 86_400_000, value: "1000000000000" }),
+        entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x43), kind: "contract_call", timestamp: at, value: "1047375000000" }),
+      ],
+    });
+    const facts = new Map([[hash(0x42), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool: { stake: 2n, supply: 1n }, stDusk: 498_750_000_000n }]]);
+    const status = { pool: { stake: 21n, supply: 10n }, position: { balance: 0n, stDusk: 0n } };
+    const said = async (/** @type {number} */ now) => (await rewardsByYear({ facts, now, rows, status, timeZone: "UTC" })).map(({ reading, sozu, sozuGrown }) => [sozuGrown?.lux, sozu?.lux, reading]);
+
+    assert.deepEqual(await said(at + 10_000), [[49_875_000_000n, 0n, 1]]);
+    // Once it's long past, not known.
+    assert.deepEqual(await said(at + 3_600_000), [[undefined, undefined, 0]]);
+
+    // Astra's: all but a lux of it unstaked, that lux worth 2 lux by its rounding: still the pool's 2.1, not 2.
+    const dust = { pool: { stake: 21n, supply: 10n }, position: { balance: 2n, stDusk: 1n } };
+    const dusty = (await rewardsByYear({ facts, now: at + 10_000, rows, status: dust, timeZone: "UTC" })).map(({ reading, sozu, sozuGrown }) => [sozuGrown?.lux, sozu?.lux, reading]);
+
+    assert.deepEqual(dusty, [[49_875_000_000n, 0n, 1]]);
+  });
+
+  it("says what each year's rewards are, and how taken out is counted, in the words both wallets show", () => {
+    assert.deepEqual(REWARD_WORDS, { claimed: "Native staking, claimed", sozu: "Sozu, taken out by unstaking", sozuGrown: "Sozu, grown while held" });
+    assert.equal(REWARDS_COUNTED, "Taken out by unstaking is part of grown while held: what came back, less what that stDUSK cost at its average price, deposit fees not counted.");
+    assert.equal(FACTS_WAIT_MS, 600_000);
   });
 
   // Mainnet: 1,000 DUSK staked with Sozu on 22 December 2025, the deposit fee of 2.5 off, at stDUSK's rate
@@ -1281,5 +1366,273 @@ describe("the gas of approvals and revokes on a migration's chain", () => {
 
     // Another's approvals aren't the person's costs.
     assert.equal((await fileOf(B, { network, public: payouts }, { approvals, evm, evmAddresses: [] })).records.filter((record) => record["Sent Currency"] === "ETH").length, 0);
+  });
+
+  // Nandini's two profiles: Profile 1 migrated from 0xB472 three times, with its approvals and revokes; Profile 2
+  // migrated from an address of its own once. Each bridged DUSK out to the address it migrated from.
+  const SERVICE = testchain.routes.services[0].account;
+  const OTHER = "0x9e2c00000000000000000000000000000000b746";
+  const TOKEN = testchain.routes.chains.bsc.token.toLowerCase();
+  const CONTRACT = testchain.routes.migrations[0].contract.toLowerCase();
+  const ITS_APPROVAL = `0x${"a1".repeat(32)}`;
+  const ITS_MIGRATION = `0x${"a2".repeat(32)}`;
+  const topic = (/** @type {string} */ address) => `0x${address.slice(2).padStart(64, "0")}`;
+  const word = (/** @type {bigint} */ n) => `0x${n.toString(16).padStart(64, "0")}`;
+  const APPROVAL = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
+  const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+  // Its approval of 0.05 at block 0x165, and its migration drawing on all of it at 0x166.
+  const itsLogs = [
+    { address: TOKEN, blockNumber: "0x165", data: word(50_000_000_000_000_000n), logIndex: "0x0", topics: [APPROVAL, topic(OTHER), topic(CONTRACT)], transactionHash: ITS_APPROVAL },
+    { address: TOKEN, blockNumber: "0x166", data: word(50_000_000_000_000_000n), logIndex: "0x0", topics: [TRANSFER, topic(OTHER), topic(CONTRACT)], transactionHash: ITS_MIGRATION },
+    { address: TOKEN, blockNumber: "0x166", data: word(0n), logIndex: "0x1", topics: [APPROVAL, topic(OTHER), topic(CONTRACT)], transactionHash: ITS_MIGRATION },
+  ];
+  const itsReceipts = {
+    [ITS_APPROVAL]: { blockNumber: "0x165", effectiveGasPrice: "0x3b9aca10", from: OTHER, gasUsed: "0xb466", logs: [], status: "0x1", to: TOKEN, transactionHash: ITS_APPROVAL },
+    [ITS_MIGRATION]: { blockNumber: "0x166", effectiveGasPrice: "0x3b9aca10", from: OTHER, gasUsed: "0xca5d", logs: itsLogs.slice(1), status: "0x1", to: CONTRACT, transactionHash: ITS_MIGRATION },
+  };
+  const blocks = { ...testchain.blocks, "0x165": { timestamp: "0x6af2ba40" }, "0x166": { timestamp: "0x6af2ba60" } };
+  const twoOwners = () =>
+    fakeChain({ head: BigInt(testchain.head), logs: [...testchain.logs, ...itsLogs].map(asLog), receipts: { ...testchain.receipts, ...itsReceipts }, timeAt: (n) => Number(BigInt(blocks[hex(n)]?.timestamp ?? "0x0")) });
+  /** A payout on Dusk, a minute after its migration, and the bridge-out before them, of a profile. */
+  const payoutOf = (/** @type {string} */ migration, /** @type {string} */ value, /** @type {number} */ i) =>
+    entryOf({ counterparty: ACCOUNT, direction: "in", hash: hash(0x70 + i), memo: migration, timestamp: Number(BigInt(blocks[{ ...testchain.receipts, ...itsReceipts }[migration].blockNumber].timestamp)) * 1000 + 60_000, value }, { network });
+  const bridgedOut = (/** @type {string} */ to, /** @type {number} */ i) => entryOf({ counterparty: SERVICE, direction: "out", hash: hash(0x90 + i), memo: to, timestamp: Date.UTC(2026, 10, 5, 3, 40), value: "150000000" }, { network });
+  const weiOf = (/** @type {string} */ text) => BigInt(text.split(".")[0]) * 10n ** 18n + BigInt((text.split(".")[1] ?? "").padEnd(18, "0"));
+  const gasOf = (/** @type {Record<string, string>[]} */ records) => records.filter((record) => record["Sent Currency"] === "ETH");
+
+  it("books each gas line once, in the file of the profile its migration paid, the same file from either wallet", async () => {
+    const first = [bridgedOut(OWNER, 0), ...migrations.map(([migration, value], i) => payoutOf(migration, value, i))];
+    const second = [bridgedOut(OTHER, 1), payoutOf(ITS_MIGRATION, "50000000", 5)];
+    /** @param {string} account @param {any[]} entries @param {Partial<ExportOptions>} options */
+    const made = async (account, entries, options) => {
+      const result = await accountingCsv({ bridge: { fetch: twoOwners().fetch, network }, profile: { account, name: account === B ? "Profile 1" : "Profile 2" }, profiles: [], rows: activityRows({ account, network, public: entries }), ...options });
+
+      return { ...result, records: recordsOf(result.csv) };
+    };
+
+    // The web wallet's way, with the EVM address connected there for every profile, and the extension's, with none:
+    // each finds the addresses its profile bridged to.
+    for (const evmAddresses of [[OWNER], undefined]) {
+      const one = await made(B, first, { evmAddresses });
+      const two = await made(A, second, { evmAddresses });
+      const [oneGas, twoGas] = [gasOf(one.records), gasOf(two.records)];
+
+      // Profile 1: all 0xB472 paid, its approvals and revokes too; Profile 2: its own migration's two, none of 0xB472's.
+      assert.equal(oneGas.length, 8, String(evmAddresses));
+      assert.ok(oneGas.every((record) => record.Account === OWNER));
+      assert.equal(oneGas.reduce((sum, record) => sum + weiOf(record["Sent Amount"]), 0n), 337_617_005_401_872n);
+      assert.deepEqual(twoGas.map((record) => [record.TxHash, record.Account, record.Description]), [
+        [ITS_APPROVAL, OTHER, "Network fee on BSC test chain: approval for a migration to Dusk"],
+        [ITS_MIGRATION, OTHER, "Network fee on BSC test chain: migration of 0.05 BEP20 DUSK to Dusk"],
+      ]);
+      assert.deepEqual(one.evm, { approvalsUnread: [], booked: [OWNER], unread: [] });
+      assert.deepEqual(two.evm, { approvalsUnread: [], booked: [OTHER], unread: [] });
+    }
+
+    // The two wallets' files are the same, line for line.
+    assert.equal((await made(B, first, { evmAddresses: [OWNER] })).csv, (await made(B, first, {})).csv);
+    assert.equal((await made(A, second, { evmAddresses: [OWNER] })).csv, (await made(A, second, {})).csv);
+  });
+
+  it("books the approvals and revokes of one address's migrations to two profiles each in the file of the migration it went with", async () => {
+    // Nandini's 0x7cDB: Profile 2's file had six approval and revoke lines of Profile 1's migrations, also in Profile 1's.
+    const [m1, m2, m3] = migrations;
+    const first = [bridgedOut(OWNER, 0), payoutOf(m1[0], m1[1], 0), payoutOf(m2[0], m2[1], 1)];
+    const second = [bridgedOut(OWNER, 1), payoutOf(m3[0], m3[1], 2)];
+    const evm = await migrationFacts({ fetch: chain().fetch, migrations: migrationsOf(activityRows({ account: B, network, public: [...first, ...second] })), network });
+    const { approvals } = await migrationApprovals({ fetch: chain().fetch, network, owners: [OWNER] });
+    const one = gasOf((await fileOf(B, { network, public: first }, { approvals, evm, evmAddresses: [OWNER] })).records);
+    const two = gasOf((await fileOf(A, { network, public: second }, { approvals, evm, evmAddresses: [OWNER] })).records);
+    const hashes = [...one, ...two].map((record) => record.TxHash);
+
+    // Its first approval and the two migrations it paid in Profile 1's; the second, its migration, and the revokes and the approval never used after it in Profile 2's.
+    assert.deepEqual(one.map((record) => record.Description), [
+      "Network fee on BSC test chain: approval for a migration to Dusk",
+      "Network fee on BSC test chain: migration of 0.003 BEP20 DUSK to Dusk",
+      "Network fee on BSC test chain: migration of 0.001 BEP20 DUSK to Dusk",
+    ]);
+    assert.deepEqual(two.map((record) => record.Description), [
+      "Network fee on BSC test chain: approval for a migration to Dusk",
+      "Network fee on BSC test chain: migration of 0.002 BEP20 DUSK to Dusk",
+      "Network fee on BSC test chain: approval for migrations to Dusk revoked",
+      "Network fee on BSC test chain: approval for a migration to Dusk, never used",
+      "Network fee on BSC test chain: approval for migrations to Dusk revoked",
+    ]);
+    assert.equal(new Set(hashes).size, 8);
+    assert.equal([...one, ...two].reduce((sum, record) => sum + weiOf(record["Sent Amount"]), 0n), 337_617_005_401_872n);
+  });
+
+  // The review's: an address that approved the migration contract once and never migrated, which both profiles bridged DUSK out to.
+  const NEVER = "0x5a5a00000000000000000000000000000000c0de";
+  const NEVER_APPROVAL = `0x${"b1".repeat(32)}`;
+  const neverLogs = [{ address: TOKEN, blockNumber: "0x165", data: word(10n ** 17n), logIndex: "0x0", topics: [APPROVAL, topic(NEVER), topic(CONTRACT)], transactionHash: NEVER_APPROVAL }];
+  const neverReceipts = { [NEVER_APPROVAL]: { blockNumber: "0x165", effectiveGasPrice: "0x3b9aca10", from: NEVER, gasUsed: "0xb466", logs: [], status: "0x1", to: TOKEN, transactionHash: NEVER_APPROVAL } };
+  const neverChain = () => fakeChain({ head: BigInt(testchain.head), logs: [...testchain.logs, ...neverLogs].map(asLog), receipts: { ...testchain.receipts, ...neverReceipts }, timeAt: (n) => Number(BigInt(blocks[hex(n)]?.timestamp ?? "0x0")) });
+  // The person's profiles by their public accounts' order: the first one, and the other.
+  const [FIRST, SECOND] = [A, B].sort();
+  /** The archive's memo index: each transfer out to the test chain naming the address, by its sender and block. */
+  const memoIndex = (/** @type {[string, number][]} */ sent, { down = false } = {}) => {
+    const node = fakeArchive({
+      finalized: 10_000_000,
+      memos: { [NEVER]: sent.map(([sender, block], i) => ({ block_height: block, events: [{ data: { memo: Buffer.from(NEVER).toString("hex"), receiver: SERVICE, sender, value: "150000000" }, target: TRANSFER_CONTRACT, topic: "moonlight" }], origin: hash(0xc0 + i).slice(2) })) },
+    });
+
+    node.down = down;
+
+    return node.archiveClient();
+  };
+  /** Which of the person's two profiles' files book the address's approval, each exported as the apps do, its other profile beside it. */
+  const booking = async (/** @type {{ bridged: string[], archive?: any, evmAddresses?: string[] }} */ { archive, bridged, evmAddresses }) => {
+    const said = [];
+
+    for (const [account, other, i] of /** @type {const} */ ([[FIRST, SECOND, 0], [SECOND, FIRST, 1]])) {
+      const rows = activityRows({ account, network, public: bridged.includes(account) ? [bridgedOut(NEVER, 10 + i)] : [] });
+      const made = await accountingCsv({ bridge: { archive, fetch: neverChain().fetch, network }, evmAddresses, profile: { account, name: `Profile ${i + 1}` }, profiles: [{ account: other, name: "The other" }], rows });
+
+      said.push({ account, approvalsUnread: made.evm.approvalsUnread, books: recordsOf(made.csv).some((record) => record.TxHash === NEVER_APPROVAL) });
+    }
+
+    return said;
+  };
+  const booksIn = (/** @type {{ account: string, books: boolean }[]} */ said) => said.filter(({ books }) => books).map(({ account }) => account);
+
+  it("books an approval of an address that never migrated in one profile's file: the one that bridged DUSK to it first, as the archive's memo index says", async () => {
+    // Both bridged to it; the second profile by account first, on chain: the other knows it reads it, and says nothing.
+    const bothBridged = await booking({ archive: memoIndex([[SECOND, 4_774_191], [FIRST, 4_774_256]]), bridged: [FIRST, SECOND] });
+
+    assert.deepEqual(booksIn(bothBridged), [SECOND]);
+    assert.deepEqual(bothBridged.map(({ approvalsUnread }) => approvalsUnread), [[], []]);
+    assert.deepEqual(booksIn(await booking({ archive: memoIndex([[FIRST, 4_774_191], [SECOND, 4_774_256]]), bridged: [FIRST, SECOND] })), [FIRST]);
+    // Only the second did, as the extension knows of it: the second's file, which alone reads it.
+    assert.deepEqual(booksIn(await booking({ archive: memoIndex([[SECOND, 4_774_191]]), bridged: [SECOND] })), [SECOND]);
+    // Without the memo index: the person's first profile, once all the same, where both know of it.
+    assert.deepEqual(booksIn(await booking({ bridged: [FIRST, SECOND] })), [FIRST]);
+  });
+
+  it("books an approval of an address the web wallet has connected, which no profile bridged to, in the person's first profile's file", async () => {
+    // The review's: it was in no file.
+    assert.deepEqual(booksIn(await booking({ archive: memoIndex([]), bridged: [], evmAddresses: [NEVER] })), [FIRST]);
+    assert.deepEqual(booksIn(await booking({ bridged: [], evmAddresses: [NEVER] })), [FIRST]);
+  });
+
+  it("books it in no file, and says so, where the archive can't say whose it is", async () => {
+    const said = await booking({ archive: memoIndex([[SECOND, 4_774_191]], { down: true }), bridged: [FIRST, SECOND] });
+
+    assert.deepEqual(booksIn(said), []);
+    for (const { approvalsUnread } of said) assert.deepEqual(approvalsUnread, [{ chain: "BSC test chain", from: null, owner: NEVER, state: "error" }]);
+  });
+
+  it("says an approval it can't place without the memo index, where only a later profile bridged to its address, rather than lose it without a word", async () => {
+    // Astra's: given to the first profile, which never reads that address, it was in no file and nothing said so.
+    const said = await booking({ bridged: [SECOND] });
+
+    assert.deepEqual(booksIn(said), []);
+    assert.deepEqual(said.map(({ account, approvalsUnread }) => [account, approvalsUnread]), [
+      [FIRST, []],
+      [SECOND, [{ chain: "BSC test chain", from: null, owner: NEVER, state: "error" }]],
+    ]);
+    // The first profile's own: its file, and nothing to say, as the other doesn't know of it.
+    const own = await booking({ bridged: [FIRST] });
+
+    assert.deepEqual(booksIn(own), [FIRST]);
+    assert.deepEqual(own.map(({ approvalsUnread }) => approvalsUnread), [[], []]);
+
+    // An address the app gives: the first profile's, which the other can't tell reads it, as the app may give it to this one alone.
+    for (const asked of [{ bridged: [], evmAddresses: [NEVER] }, { bridged: [SECOND], evmAddresses: [NEVER] }]) {
+      const each = await booking(asked);
+
+      assert.deepEqual(booksIn(each), [FIRST], JSON.stringify(asked));
+      assert.deepEqual(each.map(({ approvalsUnread }) => approvalsUnread.map(({ owner }) => owner)), [[], [NEVER]], JSON.stringify(asked));
+    }
+  });
+
+  it("says an approval it can't place where only a later profile deposited to its address on DuskEVM, which the memo index doesn't list", async () => {
+    // Astra's second: the index lists transfers out to other chains by their memo, not deposits, so the first profile
+    // got it, never reading that address, and neither file had it or said so.
+    const tx = { blockTimestamp: 1793080300, err: null, gasSpent: 1985878, tx: { callData: { contractId: deposit.entry.events[0].data.receiver, fnName: "depositETHToWithValue" }, gasLimit: 5000000, gasPrice: 1 } };
+    const depositedTo = entryFrom(deposit.account, deposit.entry, tx, { bridge: { amount: "500000000", kind: "deposit", to: NEVER } });
+    // A profile whose account comes first, and the one that deposited.
+    const first = "1".repeat(deposit.account.length);
+
+    assert.ok(first < deposit.account);
+    /** @param {string} account @param {any[]} entries @param {string} other */
+    const made = (account, entries, other) =>
+      accountingCsv({ bridge: { archive: memoIndex([]), fetch: neverChain().fetch, network }, profile: { account, name: "Profile" }, profiles: [{ account: other, name: "Other" }], rows: activityRows({ account, network, public: entries }) });
+    const depositor = await made(deposit.account, [depositedTo], first);
+    const firstFile = await made(first, [], deposit.account);
+
+    assert.deepEqual(depositor.evm.approvalsUnread, [{ chain: "BSC test chain", from: null, owner: NEVER, state: "error" }]);
+    assert.equal(recordsOf(depositor.csv).some((record) => record.TxHash === NEVER_APPROVAL), false);
+    assert.equal(recordsOf(firstFile.csv).some((record) => record.TxHash === NEVER_APPROVAL), false);
+    // Deposited from the first profile: its file, and nothing to say.
+    const ownDeposit = await made(deposit.account, [depositedTo], "z".repeat(deposit.account.length));
+
+    assert.deepEqual(ownDeposit.evm.approvalsUnread, []);
+    assert.equal(recordsOf(ownDeposit.csv).some((record) => record.TxHash === NEVER_APPROVAL), true);
+  });
+
+  it("keeps every approval and revoke in the file of a person's only profile, with a public account or not", async () => {
+    // Astra's: a profile given without its account, and no other, lost the approvals no migration went with.
+    const { approvals } = await migrationApprovals({ fetch: neverChain().fetch, network, owners: [NEVER] });
+
+    for (const profile of [{ name: "Only profile" }, { account: FIRST, name: "Only profile" }]) {
+      for (const evmAddresses of [undefined, [NEVER]]) {
+        const made = await accountingCsv({ approvals, evmAddresses, profile, profiles: [], rows: [] });
+
+        assert.deepEqual(recordsOf(made.csv).map((record) => record.TxHash), [NEVER_APPROVAL], JSON.stringify([profile, evmAddresses]));
+      }
+    }
+  });
+
+  // The review's: an owner's approvals that couldn't be read, or are older than what's read, left the file short without a word.
+  const ownPayouts = migrations.map(([migration, value], i) => payoutOf(migration, value, i));
+  const ownRows = activityRows({ account: B, network, public: [bridgedOut(OWNER, 0), ...ownPayouts] });
+
+  it("says whose approvals and revokes couldn't be read, beside what the file has of them", async () => {
+    const head = BigInt(testchain.head);
+    const { fetch } = chain();
+    // The RPC refuses the owner's logs read back from the head; every migration's own reads answer.
+    const flaky = /** @type {typeof fetch} */ (async (input, init) => {
+      const { id, method, params } = JSON.parse(String(init?.body));
+
+      if (method === "eth_getLogs" && BigInt(params[0].toBlock) === head) return new Response(JSON.stringify({ error: { code: -32005, message: "rate limited" }, id, jsonrpc: "2.0" }), { headers: { "content-type": "application/json" } });
+
+      return fetch(input, init);
+    });
+    const made = await accountingCsv({ bridge: { fetch: flaky, network }, profile: { account: B, name: "Profile 1" }, profiles: [], rows: ownRows });
+
+    // The migrations' own lines, their approvals among them: 5 of the 8.
+    assert.equal(gasOf(recordsOf(made.csv)).length, 5);
+    assert.deepEqual(made.evm.approvalsUnread, [{ chain: "BSC test chain", from: null, owner: OWNER, state: "error" }]);
+    // Read whole, nothing is said.
+    assert.deepEqual((await accountingCsv({ bridge: { fetch: chain().fetch, network }, profile: { account: B, name: "Profile 1" }, profiles: [], rows: ownRows })).evm.approvalsUnread, []);
+  });
+
+  it("says whose approvals and revokes are older than its read reaches, from the block it read back to", async () => {
+    // The head 300,000 blocks on, about two and a half days of BSC: the eight windows read stop short of the approvals.
+    const later = fakeChain({ head: BigInt(testchain.head) + 300_000n, logs: testchain.logs.map(asLog), receipts: testchain.receipts, timeAt: (n) => Number(BigInt(testchain.blocks[hex(n)]?.timestamp ?? "0x0")) });
+    const made = await accountingCsv({ bridge: { fetch: later.fetch, network }, profile: { account: B, name: "Profile 1" }, profiles: [], rows: ownRows });
+    const [read] = made.evm.approvalsUnread;
+
+    assert.equal(made.evm.approvalsUnread.length, 1);
+    assert.deepEqual([read.owner, read.chain, read.state], [OWNER, "BSC test chain", "beyond"]);
+    assert.ok(typeof read.from === "number" && read.from > Number(BigInt(testchain.head)), String(read.from));
+  });
+
+  it("says each migration it couldn't read at all, and each owner, where the bridge's network can't be read", async () => {
+    const made = await accountingCsv({ bridge: { fetch: chain().fetch, network: /** @type {any} */ ({ chainId: "not a network" }) }, profile: { account: B, name: "Profile 1" }, profiles: [], rows: ownRows });
+
+    assert.deepEqual(made.evm.unread.map(({ hash }) => hash), migrations.map(([migration]) => migration));
+    assert.deepEqual(made.evm.approvalsUnread.map(({ owner, state }) => [owner, state]), [[OWNER, "error"]]);
+  });
+
+  it("says which migration each approval and revoke went with: the one that drew on it, a revoke's approval's, else the nearest", async () => {
+    const { approvals } = await migrationApprovals({ fetch: chain().fetch, network, owners: [OWNER] });
+    const [m1, , m3] = migrations.map(([migration]) => migration);
+
+    assert.deepEqual(
+      approvals.map(({ migration, state }) => [state, migration]),
+      [["spent", m1], ["spent", m3], ["revoke", m3], ["unused", m3], ["revoke", m3]]
+    );
   });
 });

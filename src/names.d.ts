@@ -8,10 +8,13 @@
  *
  * @example
  * ```js
- * import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameStarts, profileNameClash } from "@dusk/app-core/names";
+ * import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameStarts, profileNameCheck, profileNameClash } from "@dusk/app-core/names";
  *
  * nameHides("\u202eecilA"); // true: it reads as "Alice". Refuse it, saying NAME_HIDES
  * looksAlike("Bob", "Bօb"); // true: an Armenian օ
+ * looksAlike("Wendy", "VVendy"); // true: two v's for a w
+ * profileNameCheck("alice.dusk", { profiles, contacts: [{ name: "Wendy", duskName: "alice.dusk", address }], self });
+ * // { refused: false, kind: "contact", dusk: true, name: "alice.dusk", entry, words: "You have a contact called Wendy, at alice.dusk. Is this someone else?" }
  * nameClash("Profile 2", { profiles, contacts, except: editedId });
  * // { kind: "profile", same: true, entry: { name: "Profile 2", … }, name: "Profile 2" }: refuse it
  * profileNameClash("sofiadesign.dusk", { profiles: [{ account, name: "Profile 1", duskName: "sofiadesign.dusk" }, …], contacts, self: other });
@@ -27,7 +30,9 @@
  * A name by what it looks like, as UTS #39 makes its skeleton: decomposed
  * (NFD), without what renders as nothing, each character as the one it looks
  * like, and decomposed again. Case stays: a capital I looks like a small l.
- * Two names with the same skeleton look alike.
+ * Two names with the same skeleton look alike. Unicode's table has an m as
+ * rn; the letter pairs `looksAlike` reads too, vv for a w and cl for a d,
+ * aren't in it, so a search by it doesn't find every d in "cl".
  */
 export declare function nameSkeleton(name: unknown): string;
 
@@ -60,7 +65,13 @@ export declare const NAME_HIDES: "This name has hidden characters. Type it again
  * Whether two names look alike: they read as the same name, or have the same
  * skeleton once case, accents, spaces and punctuation are off, as written or
  * in lower case. "Bob" and "Bօb" (Armenian), "Sam" and "Ꮪam" (Cherokee),
- * "Kim" and "Kɪm" (a small capital I), "Ian" and "lan".
+ * "Kim" and "Kɪm" (a small capital I), "Ian" and "lan". As written, the
+ * letter pairs that look like one letter in most fonts are that letter too,
+ * beside the name as written, never in its place (so "daIe" still looks like
+ * "Dale"):
+ * "VVendy" looks like "Wendy", "Davicl" like "David", and "Ernma" like
+ * "Emma", as Unicode's table has it; "Clara" and "Dara" don't, as their
+ * capitals tell them apart. The other checks here read names so too.
  */
 export declare function looksAlike(a: unknown, b: unknown): boolean;
 
@@ -106,12 +117,55 @@ export declare function profileNameClash<P extends { name?: unknown; duskName?: 
  * (petit-fils)". Pass what to check against: a contact's name against
  * `profiles`, a profile's against `contacts` (and `self`, as
  * `profileNameClash` takes it). The same name is `nameClash`'s, not this.
- * Null for none.
+ * A profile's name at Save is `profileNameCheck`'s, which asks of the
+ * wallet's .dusk names too, the contacts' among them. Null for none.
  */
 export declare function nameStarts<P extends { name?: unknown; duskName?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; address?: unknown }>(
   name: unknown,
   among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; self?: unknown }
 ): { kind: "profile"; entry: P; name: string } | { kind: "contact"; entry: C; name: string } | null;
+
+/**
+ * What a profile's new name says at Save, in the words both wallets show on
+ * the form, or null for nothing: `refused` (it isn't saved) or a question
+ * (it's saved, and the question shows under it), the profile or contact it's
+ * about (`entry`, `kind`), the name of theirs it takes or starts as (`name`),
+ * and whether that's a .dusk name (`dusk`). In this order:
+ *
+ * - one that hides what can't be seen (`nameHides`): refused, `NAME_HIDES`;
+ * - one that is, or looks like, another profile's name or .dusk name, or a
+ *   contact's name (`profileNameClash`): refused, "Your other profile is
+ *   called sofiadesign.dusk. Choose another name.", "That looks like Profile
+ *   1, one of your other profiles. Choose another name.", "You have a contact
+ *   called Alice. Choose another name." or "That looks like your contact
+ *   Alice. Choose another name.";
+ * - one that is, or looks like, a contact's .dusk name (`duskName`, the name
+ *   a contact was saved from), as Marek's profile named "alice.dusk", his
+ *   contact Wendy's: asked, naming the contact it is, "You have a contact
+ *   called Wendy, at alice.dusk. Is this someone else?", as History shows
+ *   Wendy's payments by that name;
+ * - one that starts as another profile's .dusk name, or is the start of it,
+ *   word for word, as Sofía's "sofiadesign.dusk cliente" or "sofiadesign":
+ *   asked, "Your other profile is called sofiadesign.dusk. Is this someone
+ *   else?"; then a contact's .dusk name so, as above;
+ * - one that starts as a contact's name, or is the start of it: asked, "You
+ *   have a contact called Lucas (petit-fils). Is this someone else?".
+ *
+ * `self` is the account or address of the profile named, as
+ * `profileNameClash` takes it: its own .dusk name, and a contact saved with
+ * its address, ask nothing. The names in the words show what can't be seen
+ * in them as codes.
+ */
+export declare function profileNameCheck<P extends { name?: unknown; duskName?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; duskName?: unknown; address?: unknown }>(
+  name: unknown,
+  among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; self?: unknown }
+): ProfileNameCheck<P, C> | null;
+
+/** What `profileNameCheck` says of a profile's name: refused or asked, in words, and whose name it's about. */
+export type ProfileNameCheck<P, C> =
+  | { refused: true; words: "This name has hidden characters. Type it again without them."; kind: "hides"; entry: null; name: ""; dusk: false }
+  | { refused: boolean; words: string; kind: "profile"; entry: P; name: string; dusk: boolean }
+  | { refused: boolean; words: string; kind: "contact"; entry: C; name: string; dusk: boolean };
 
 /**
  * The entries whose name looks like another's of another address, profiles

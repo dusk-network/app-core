@@ -677,6 +677,33 @@ export declare function migrationFacts(options: {
 export declare function migrationsOf(rows: Iterable<ActivityRow>): { hash: string; route: string; payout: string }[];
 
 /**
+ * The EVM addresses a profile bridged DUSK to, as `/activity`'s rows say
+ * them: the address a transfer out to BNB Smart Chain or Ethereum paid (its
+ * memo, as text) and the one a deposit to DuskEVM paid, of any that didn't
+ * fail, in lower case, each once. The person's own, as both wallets take
+ * them: a migration from one of them is theirs, and `accountingCsv` of
+ * `/export` books its gas, its approvals' and its revokes'.
+ */
+export declare function bridgedTo(rows: Iterable<ActivityRow>): string[];
+
+/**
+ * Who bridged DUSK out to each of `addresses` (EVM addresses, in any case):
+ * the transfers to one of the network's routes out (its `account`) that
+ * name it as their memo, as the Dusk archive's memo index lists them, each
+ * by its sender, block and hash, oldest first, by the address in lower case.
+ * The index matches a memo exactly: it's asked for each address as its
+ * checksum (EIP-55) writes it, as the wallets write a transfer out's memo,
+ * and in lower case, one request for all. `accountingCsv` of `/export` takes
+ * the first of the person's profiles among them as the file of an owner's
+ * approvals and revokes that no migration went with.
+ */
+export declare function bridgeSenders(options: {
+  archive: Pick<Archive, "query">;
+  network: BridgeNetwork;
+  addresses: Iterable<string>;
+}): Promise<Map<string, { sender: string; block: number; hash: string }[]>>;
+
+/**
  * An approval of a migration's contract on its token, or its revoke, that
  * an owner sent on the route's own chain, and what it paid there. Amounts in
  * that chain's smallest unit (wei).
@@ -699,6 +726,15 @@ export type MigrationApproval = {
   allowance: bigint;
   /** What it paid in gas: `gasUsed` × `effectiveGasPrice`. */
   gasWei: bigint | null;
+  /**
+   * The migration it goes with, by its transaction there, in lower case: the
+   * first that drew on it; a revoke's, the one its owner's approval or revoke
+   * before it went with, as it takes that approval away; another approval's,
+   * the owner's next migration, else their last. Null where the owner sent
+   * none in the blocks read. `accountingCsv` of `/export` books it in the file
+   * of the profile that migration paid.
+   */
+  migration: string | null;
   /**
    * "spent": a migration drew on it before the owner's next approval, and its
    * gas is that migration's (`migrationFacts`'s approval); "unused": the
