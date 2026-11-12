@@ -198,7 +198,33 @@ export type YearRewards = {
    * stake or an unstake in it or before isn't known.
    */
   sozuGrown: RewardsSum | null;
+  /**
+   * The year's newest stakes and unstakes with Sozu, of the last
+   * `FACTS_WAIT_MS`, whose facts aren't in `facts` yet, as the archive lists a
+   * transaction's events a little after its block: left out until they are,
+   * so `sozu` and `sozuGrown` are what they were before them, to show while
+   * they're read again (`sozuFacts` of `/sozu`, a little later), rather than
+   * that they couldn't be read. 0 for none.
+   */
+  reading: number;
 };
+
+/**
+ * What each of a year's rewards is called, in the words both wallets show:
+ * "Native staking, claimed" (`claimed`), "Sozu, grown while held"
+ * (`sozuGrown`) and "Sozu, taken out by unstaking" (`sozu`).
+ */
+export declare const REWARD_WORDS: Readonly<{ claimed: "Native staking, claimed"; sozuGrown: "Sozu, grown while held"; sozu: "Sozu, taken out by unstaking" }>;
+
+/**
+ * The one line both wallets show under a year's rewards: that taken out by
+ * unstaking is part of grown while held, not more on top of it, and how
+ * it's counted: average cost, deposit fees not counted.
+ */
+export declare const REWARDS_COUNTED: "Taken out by unstaking is part of grown while held: what came back, less what that stDUSK cost at its average price, deposit fees not counted.";
+
+/** How long a stake or an unstake with Sozu is being read, without its facts, before what it did counts as not known: 10 minutes, in milliseconds. */
+export declare const FACTS_WAIT_MS: 600000;
 
 /**
  * Staking rewards by calendar year, on the clock of `timeZone` (the
@@ -213,7 +239,12 @@ export type YearRewards = {
  * The rows don't say the order within a block: a stake there counts before
  * an unstake, so an unstake never comes before the stake that minted what it
  * gives back. A year is there where a reward was claimed, a stake or an
- * unstake with Sozu went through, or stDUSK was held, oldest first.
+ * unstake with Sozu went through, or stDUSK was held, oldest first. The
+ * newest stakes and unstakes whose facts aren't read yet, of the last
+ * `FACTS_WAIT_MS`, are left out until they are (`reading`): what's said
+ * meanwhile is what was before them, now's growth up to the first of them,
+ * at the pool's rate as the status gives it, as what's held now isn't.
+ * Show each year with `REWARD_WORDS` and, under them, `REWARDS_COUNTED`.
  */
 export declare function rewardsByYear(options: {
   rows: Iterable<ActivityRow>;

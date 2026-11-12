@@ -8,6 +8,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 - `/payment-links`: `LINK_BAD_AMOUNT` and `LINK_MEMO_LINE_BREAK`, what `readPaymentLink` says of a link whose amount can't be read or whose memo has a line break
 - `/names`: `profileNameCheck`, what a profile's name says at Save in both wallets' words: refused, or asked about a contact's .dusk name it is, naming that contact, or a .dusk name of the wallet's it starts as
+- `/export`: `REWARD_WORDS` and `REWARDS_COUNTED`, the words both wallets show for rewards by year: that what unstaking took out is part of what grew while held, at the stDUSK's average price, deposit fees not counted
 
 ### Changed
 
@@ -16,6 +17,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/amounts`: `amountForField` gives an amount a wallet writes with three decimals a fourth, a zero, so its field reads it back as it is: "1.2340"
 - `/payment-links`: `readPaymentLink` refuses a link whose memo has a line break, the same in every wallet, and `makePaymentLink` makes none
 - `/names`: names look alike by the letter pairs that look like one letter, as written: "VVendy" like "Wendy", "Davicl" like "David"
+- `/export`: `rewardsByYear` keeps a year's figures as they were while the facts of a stake or an unstake just made are read, saying so (`reading`), rather than none
 
 ### Fixed
 

@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import { activityRows } from "../src/activity.js";
 import { migrationApprovals, migrationFacts, migrationsOf } from "../src/bridge.js";
-import { CSV_COLUMNS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear } from "../src/export.js";
+import { CSV_COLUMNS, FACTS_WAIT_MS, REWARDS_COUNTED, REWARD_WORDS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear } from "../src/export.js";
 import { sozuFacts, sozuPosition } from "../src/sozu.js";
 import { A, B, C, DUSK, POOL, entryFrom, entryOf, hash, recorded } from "./fixtures/activity.js";
 import { fakeChain, hex } from "./fixtures/bridge.js";
@@ -1088,7 +1088,7 @@ describe("staking rewards by calendar year", () => {
     const rows = activityRows({ account: B, network: 2, public: [claims[2], failed] });
     const [year] = await rewardsByYear({ price: () => null, rows, timeZone: "UTC" });
 
-    assert.deepEqual(year, { claimed: { lux: claimedThird, unpriced: 1, worth: "0.00000000" }, sozu: { lux: 0n, unpriced: 0, worth: "0.00000000" }, sozuGrown: { lux: 0n, unpriced: 0, worth: "0.00000000" }, year: 2026 });
+    assert.deepEqual(year, { claimed: { lux: claimedThird, unpriced: 1, worth: "0.00000000" }, reading: 0, sozu: { lux: 0n, unpriced: 0, worth: "0.00000000" }, sozuGrown: { lux: 0n, unpriced: 0, worth: "0.00000000" }, year: 2026 });
   });
 
   it("says Lena's 2026 as her stake with Sozu grew while held, as Sozu's 'Rewards so far' says it, beside what her unstakes took out", async () => {
@@ -1130,6 +1130,87 @@ describe("staking rewards by calendar year", () => {
 
     assert.deepEqual(after.years, [[2026, 29_808_459n, 7_686_635n]]);
     assert.equal(after.earned, 29_808_431n);
+  });
+
+  it("keeps what Lena's year said while her unstake's facts are being read, and says they are, rather than that it couldn't be read", async () => {
+    // Lena's: Stake opened 10 s after an unstake said 'couldn't be read' for both lines, as the archive didn't list
+    // its event yet; two minutes on, 0.0358 and 0.0129.
+    const lena = readFixture("sozu-lena-testnet.json");
+    const rowsOf = (/** @type {any[]} */ moves) =>
+      activityRows({
+        account: B,
+        network: 2,
+        public: moves.map(([date, kind, dusk, , , , id], i) =>
+          entryOf({ blockHeight: 4_800_000 + i, contractId: lena.pool, direction: kind === "stake" ? "out" : "in", fnName: `sozu_${kind}`, hash: id, kind: "contract_call", timestamp: Date.parse(`${date.replace(" ", "T")}Z`), value: dusk })
+        ),
+      });
+    const allFacts = new Map(
+      lena.moves.map((/** @type {any[]} */ [, kind, dusk, stDusk, fee, rate, id]) => [id, { amount: BigInt(dusk), fee: BigInt(fee), kind, pool: { stake: BigInt(rate), supply: DUSK }, stDusk: BigInt(stDusk) }])
+    );
+    const unstake = lena.moves.at(-1);
+    const unstakeAt = Date.parse(`${unstake[0].replace(" ", "T")}Z`);
+    const facts = new Map([...allFacts].filter(([id]) => id !== unstake[6]));
+    const status = { contracts: { pool: lena.pool }, position: { balance: BigInt(lena.after.balance), stDusk: BigInt(lena.after.stDusk) } };
+    const said = (/** @type {import("../src/export.js").YearRewards[]} */ years) => years.map(({ reading, sozu, sozuGrown, year }) => [year, sozuGrown?.lux, sozu?.lux, reading]);
+    const rows = rowsOf(lena.moves);
+
+    // Up to the unstake, what was said before it, and that one is being read.
+    const before = said(await rewardsByYear({ facts, now: unstakeAt, rows: rowsOf(lena.moves.slice(0, -1)), status, timeZone: "Europe/Berlin" }));
+    const reading = said(await rewardsByYear({ facts, now: unstakeAt + 10_000, rows, status, timeZone: "Europe/Berlin" }));
+
+    assert.equal(before.length, 1);
+    assert.equal(typeof before[0][1], "bigint");
+    assert.equal(typeof before[0][2], "bigint");
+    assert.deepEqual(reading, [[2026, before[0][1], before[0][2], 1]]);
+
+    // Once it's read, what it did: her figures as her export has them.
+    assert.deepEqual(said(await rewardsByYear({ facts: allFacts, now: Date.UTC(2026, 10, 11, 0, 30), rows, status, timeZone: "Europe/Berlin" })), [[2026, 29_808_459n, 7_686_635n, 0]]);
+    // Long after its block, an unstake still not read isn't being read: what it did isn't known.
+    assert.deepEqual(said(await rewardsByYear({ facts, now: unstakeAt + 3_600_000, rows, status, timeZone: "Europe/Berlin" })), [[2026, undefined, undefined, 0]]);
+    // Nor is one before others that are read.
+    const gap = new Map([...allFacts].filter(([id]) => id !== lena.moves[10][6]));
+
+    assert.deepEqual(said(await rewardsByYear({ facts: gap, now: unstakeAt + 10_000, rows, status, timeZone: "Europe/Berlin" })), [[2026, undefined, undefined, 0]]);
+  });
+
+  it("says nothing earned yet of a first stake whose facts are being read, and that they are", async () => {
+    const at = Date.UTC(2026, 10, 12, 1);
+    const rows = activityRows({ account: B, network: 2, public: [entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x41), kind: "contract_call", timestamp: at, value: "100000000" })] });
+    const years = await rewardsByYear({ facts: new Map(), now: at + 5_000, rows, status: { position: { balance: 99_750_000n, stDusk: 31_000_000n } }, timeZone: "UTC" });
+
+    assert.deepEqual(years.map(({ reading, sozu, sozuGrown, year }) => [year, sozuGrown?.lux, sozu?.lux, reading]), [[2026, 0n, 0n, 1]]);
+  });
+
+  it("keeps what grew up to an unstake of all of it while that's read, by the pool's rate now, as nothing is held any more", async () => {
+    // 997.5 DUSK bought 498.75 stDUSK at 2 DUSK each; a day on, all of it unstaked at 2.1, its facts not listed yet.
+    const at = Date.UTC(2026, 10, 12, 1);
+    const rows = activityRows({
+      account: B,
+      network: 2,
+      public: [
+        entryOf({ contractId: POOL, fnName: "sozu_stake", hash: hash(0x42), kind: "contract_call", timestamp: at - 86_400_000, value: "1000000000000" }),
+        entryOf({ contractId: POOL, direction: "in", fnName: "sozu_unstake", hash: hash(0x43), kind: "contract_call", timestamp: at, value: "1047375000000" }),
+      ],
+    });
+    const facts = new Map([[hash(0x42), { amount: 1_000_000_000_000n, fee: 2_500_000_000n, kind: /** @type {const} */ ("stake"), pool: { stake: 2n, supply: 1n }, stDusk: 498_750_000_000n }]]);
+    const status = { pool: { stake: 21n, supply: 10n }, position: { balance: 0n, stDusk: 0n } };
+    const said = async (/** @type {number} */ now) => (await rewardsByYear({ facts, now, rows, status, timeZone: "UTC" })).map(({ reading, sozu, sozuGrown }) => [sozuGrown?.lux, sozu?.lux, reading]);
+
+    assert.deepEqual(await said(at + 10_000), [[49_875_000_000n, 0n, 1]]);
+    // Once it's long past, not known.
+    assert.deepEqual(await said(at + 3_600_000), [[undefined, undefined, 0]]);
+
+    // Astra's: all but a lux of it unstaked, that lux worth 2 lux by its rounding: still the pool's 2.1, not 2.
+    const dust = { pool: { stake: 21n, supply: 10n }, position: { balance: 2n, stDusk: 1n } };
+    const dusty = (await rewardsByYear({ facts, now: at + 10_000, rows, status: dust, timeZone: "UTC" })).map(({ reading, sozu, sozuGrown }) => [sozuGrown?.lux, sozu?.lux, reading]);
+
+    assert.deepEqual(dusty, [[49_875_000_000n, 0n, 1]]);
+  });
+
+  it("says what each year's rewards are, and how taken out is counted, in the words both wallets show", () => {
+    assert.deepEqual(REWARD_WORDS, { claimed: "Native staking, claimed", sozu: "Sozu, taken out by unstaking", sozuGrown: "Sozu, grown while held" });
+    assert.equal(REWARDS_COUNTED, "Taken out by unstaking is part of grown while held: what came back, less what that stDUSK cost at its average price, deposit fees not counted.");
+    assert.equal(FACTS_WAIT_MS, 600_000);
   });
 
   // Mainnet: 1,000 DUSK staked with Sozu on 22 December 2025, the deposit fee of 2.5 off, at stDUSK's rate
