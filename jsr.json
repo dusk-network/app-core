@@ -8,6 +8,7 @@
     "./payment-links": "./src/payment-links.js",
     "./requests": "./src/requests.js",
     "./prices": "./src/prices.js",
+    "./gas": "./src/gas.js",
     "./names": "./src/names.js",
     "./history": "./src/history.js",
     "./shielded": "./src/shielded.js",

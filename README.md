@@ -1,6 +1,6 @@
 # @dusk-network/app-core
 
-Shared logic for the Dusk apps: amounts and what they're worth in a person's currency, text a person must trust, payment links and requests, names that look alike, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, and DuskEVM withdrawals.
+Shared logic for the Dusk apps: amounts and what they're worth in a person's currency, text a person must trust, payment links and requests, names that look alike, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, DuskEVM withdrawals, and the default gas price.
 
 It has no framework and runs in a browser extension's service worker. Each part is its own entry point, so an app loads only what it uses. Apps pass in their own fetch, batching and storage; the package never chooses storage keys.
 
@@ -31,8 +31,9 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) and what its numbers ask a person to check (`numbersNote`); and text as a search compares it, without accents or case (`searchKey`) |
 | `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), as Send reads them on the wallet's network (`readPaymentLink`), and their amount as Send reads it (`linkAmount`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
 | `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; whether one holds what can't be seen, to refuse it (`nameHides`, `NAME_HIDES`); the name a contact's takes (`nameClash`), or a profile's (`profileNameClash`), a profile's .dusk name among them; the name one starts as, to ask about (`nameStarts`); what a profile's or a contact's name says at Save, in the wallets' words (`profileNameCheck`, `contactNameCheck`), and what answers its question (`NAME_SAVE_YES`); and which in a list to show with their address (`lookAlikes`) |
-| `@dusk-network/app-core/prices` | What one DUSK is worth now in a person's currency, from the price source both wallets use, on mainnet alone (`duskPrice`), and what an amount comes to at it, with the time of that price (`inCurrency`) |
 | `@dusk-network/app-core/requests` | Payment requests: what came in for each request a wallet made (`matchRequests`), a payment that paid one again, sent back (`refundOf`), and the payment a send would make again (`sentAlready`) |
+| `@dusk-network/app-core/prices` | What one DUSK is worth now in a person's currency, from the price source both wallets use, on mainnet alone (`duskPrice`), and what an amount comes to at it, with the time of that price (`inCurrency`) |
+| `@dusk-network/app-core/gas` | The gas price both wallets start a transaction from, by one rule: the node's mempool median up to a ceiling, and whether the network is busy (`defaultGasPrice`, `GAS_PRICE_BUSY`) |
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
 | `@dusk-network/app-core/activity` | An account's activity as rows of facts, one per transaction, newest first, from its public and shielded history and the wallet's own sends (`activityRows`), and the sends the chain's rows now say all of (`settleSends`) |
@@ -171,6 +172,18 @@ inCurrency(30_000_000n, quote, { language }); // { value: "under 0,01 €", text
 
 - `duskPrice` reads what one DUSK is worth now from the source both wallets read their values in a currency from, CoinGecko (`PRICE_URL`), in the currency asked, a code it gives, as `PRICE_CURRENCIES` of `/amounts` lists them, with the time it set that price. Only mainnet's DUSK has one: on any other network it's null and asks for nothing. Null too where the source doesn't answer within 15 s, answers with an error, or gives no price in that currency: then there's no value to show. With `cache`, a `Map` of text does, a price is kept for 5 minutes (`PRICE_MAX_AGE_MS`), by currency.
 - `inCurrency` is what an amount of DUSK comes to at that price, in the words both wallets show beside the DUSK, as on a request, and on the payer's Send and Review in theirs: `value`, rounded once to the currency's smallest coin from the exact product, or "under 0,01 €" below it, never 0; and `text`, the same with the price's time, its day too where it isn't today's. Null without a price or an amount, as a request of any amount. A request's link stays in DUSK.
+
+## Gas
+
+```js
+import { GAS_PRICE_BUSY, defaultGasPrice } from "@dusk-network/app-core/gas";
+
+const { median } = await network.blocks.gasPrice; // the node's /on/blocks/gas-price
+defaultGasPrice({ median, minimum: 1n }); // { price: 2n, busy: false, median: 2n, minimum: 1n, ceiling: 5n }
+defaultGasPrice({ median: 900n }); // { price: 5n, busy: true, … }: Review says GAS_PRICE_BUSY
+```
+
+- `defaultGasPrice` is the gas price both wallets start a transaction from: the node's mempool median, at least the network's minimum (its settings' lowest gas price, 1 lux where they say none) and at most a ceiling, its settings' where they have one, else 5 times its minimum (`GAS_PRICE_CEILING_TIMES`), so a mempool filled at a high price can't raise every default fee. Over the ceiling, it's the ceiling and `busy`: Review says so, `GAS_PRICE_BUSY`, "The network is busy. You can raise the gas price for it to go out sooner.", while the price is under the median. Until the node answers, the minimum. It takes the median as either wallet reads it, a bigint or digits, so the same answer gives the same price in both. Gas a person sets, in Settings or on Review, is theirs.
 
 ## History
 

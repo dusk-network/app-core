@@ -1,7 +1,7 @@
 {
   "name": "@dusk-network/app-core",
   "version": "0.13.0",
-  "description": "Shared logic for the Dusk apps: amounts and what they're worth in a person's currency, text a person must trust, payment links and requests, names that look alike, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, and DuskEVM withdrawals.",
+  "description": "Shared logic for the Dusk apps: amounts and what they're worth in a person's currency, text a person must trust, payment links and requests, names that look alike, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, DuskEVM withdrawals, and the default gas price.",
   "license": "MPL-2.0",
   "type": "module",
   "repository": {
@@ -28,6 +28,10 @@
     "./prices": {
       "types": "./src/prices.d.ts",
       "default": "./src/prices.js"
+    },
+    "./gas": {
+      "types": "./src/gas.d.ts",
+      "default": "./src/gas.js"
     },
     "./names": {
       "types": "./src/names.d.ts",

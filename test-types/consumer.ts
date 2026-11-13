@@ -659,6 +659,19 @@ void [quoteNow, shownIn, priceFacts, duskPrice({ currency: "USD", network: "dusk
 // @ts-expect-error the price is for a network
 void duskPrice({ currency: "EUR" });
 
+// /gas
+import { GAS_PRICE_BUSY, GAS_PRICE_CEILING_TIMES, GAS_PRICE_MINIMUM, defaultGasPrice, type DefaultGasPrice } from "@dusk-network/app-core/gas";
+
+const gasNow: DefaultGasPrice = defaultGasPrice({ ceiling: null, median: "2", minimum: 1n });
+const gasPrice: bigint = gasNow.price;
+const gasBusy: boolean = gasNow.busy;
+const gasMedian: bigint | null = gasNow.median;
+const gasWords: "The network is busy. You can raise the gas price for it to go out sooner." = GAS_PRICE_BUSY;
+const gasBounds: [1n, 5n] = [GAS_PRICE_MINIMUM, GAS_PRICE_CEILING_TIMES];
+void [gasPrice, gasBusy, gasMedian, gasWords, gasBounds, defaultGasPrice(), defaultGasPrice({ median: 2 })];
+// @ts-expect-error a median is a whole number of lux, not a node's whole answer
+void defaultGasPrice({ median: { median: 2n } });
+
 // /requests
 import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, refundOf, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched, type RequestPayment } from "@dusk-network/app-core/requests";
 
