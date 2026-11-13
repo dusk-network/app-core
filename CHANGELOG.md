@@ -10,6 +10,8 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/names`: `NAME_SAVE_YES`, "Yes, save it": a name asked about at Save is saved only once it's answered
 - `/payment-links`: `linkAmount`, a link's amount as Send reads it in the person's language, for a preview to say the same: "Is that 1 or 1000?" for `amount=1.000`, never 1 DUSK
 - `/export`: `rewardWorth`, what a year's rewards were worth in both wallets' words: "under 0,01 €" below the smallest coin, and a loss with its minus sign, or "a loss under 0,01 €"
+- `/prices`: `duskPrice`, what one DUSK is worth now in a person's currency, from CoinGecko as both wallets read values, on mainnet alone, with its time
+- `/prices`: `inCurrency`, what an amount comes to at that price, in the words both wallets show beside the DUSK: "≈ 1,82 € · price at 12:03"
 
 ### Changed
 

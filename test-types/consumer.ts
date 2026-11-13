@@ -647,6 +647,18 @@ const startsAccount: string | undefined = starts?.kind === "profile" ? starts.en
 void starts?.same;
 void [clashKind, clashAccount, alikeHere, nameChecks, hiddenName, hiddenWords, profileClashName, clashTaken, ownNameTaken, startsName, startsAccount];
 
+// /prices
+import { PRICE_MAX_AGE_MS, PRICE_URL, duskPrice, inCurrency, type DuskPrice, type FetchLike as PriceFetch } from "@dusk-network/app-core/prices";
+
+declare const priceFetch: PriceFetch;
+const quoteNow: Promise<DuskPrice | null> = duskPrice({ cache: new Map(), currency: "EUR", fetch: priceFetch, network: networks.mainnet });
+const quoteKept: DuskPrice = { at: 1, currency: "EUR", price: 0.06 };
+const shownIn: { value: string; text: string } | null = inCurrency(30_000_000_000n, quoteKept, { language: "es-ES", now: 2, timeZone: "Europe/Madrid" });
+const priceFacts: [string, number] = [PRICE_URL, PRICE_MAX_AGE_MS];
+void [quoteNow, shownIn, priceFacts, duskPrice({ currency: "USD", network: "dusk:1", now: 1, timeoutMs: 1 }), inCurrency("1", null), inCurrency(null, quoteKept)];
+// @ts-expect-error the price is for a network
+void duskPrice({ currency: "EUR" });
+
 // /requests
 import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, refundOf, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched, type RequestPayment } from "@dusk-network/app-core/requests";
 

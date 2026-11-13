@@ -1,6 +1,6 @@
 # @dusk-network/app-core
 
-Shared logic for the Dusk apps: amounts, text a person must trust, payment links and requests, names that look alike, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, and DuskEVM withdrawals.
+Shared logic for the Dusk apps: amounts and what they're worth in a person's currency, text a person must trust, payment links and requests, names that look alike, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, and DuskEVM withdrawals.
 
 It has no framework and runs in a browser extension's service worker. Each part is its own entry point, so an app loads only what it uses. Apps pass in their own fetch, batching and storage; the package never chooses storage keys.
 
@@ -31,6 +31,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) and what its numbers ask a person to check (`numbersNote`); and text as a search compares it, without accents or case (`searchKey`) |
 | `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), as Send reads them on the wallet's network (`readPaymentLink`), and their amount as Send reads it (`linkAmount`), making them only for what Send takes (`makePaymentLink`), and the network they're for (`chainLabel`, `networkMismatch`) |
 | `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; whether one holds what can't be seen, to refuse it (`nameHides`, `NAME_HIDES`); the name a contact's takes (`nameClash`), or a profile's (`profileNameClash`), a profile's .dusk name among them; the name one starts as, to ask about (`nameStarts`); what a profile's or a contact's name says at Save, in the wallets' words (`profileNameCheck`, `contactNameCheck`), and what answers its question (`NAME_SAVE_YES`); and which in a list to show with their address (`lookAlikes`) |
+| `@dusk-network/app-core/prices` | What one DUSK is worth now in a person's currency, from the price source both wallets use, on mainnet alone (`duskPrice`), and what an amount comes to at it, with the time of that price (`inCurrency`) |
 | `@dusk-network/app-core/requests` | Payment requests: what came in for each request a wallet made (`matchRequests`), a payment that paid one again, sent back (`refundOf`), and the payment a send would make again (`sentAlready`) |
 | `@dusk-network/app-core/history` | A public account's history from the Dusk archive, synced by block height into the app's store (`createHistory`), through the archive's GraphQL (`createArchive`, `historyArchiveUrl`); its entries as facts (`parseHistoryEntry`, `historyEntry`); a range of heights (`historyRange`); a transaction's details (`fetchTxDetails`, `fetchTxNonce`); and the heights a history covers (`addCoverage`, `topGap`, `shownDownTo`) |
 | `@dusk-network/app-core/shielded` | A profile's shielded history from the notes its shielded sync keeps, each block asked for among kept decoys (`shieldedHistory`); its entries as facts (`shieldedEntries`); the blocks at the notes' heights (`fetchShieldedBlocks`); the note tree's heights and the decoys drawn from them (`noteTreeHeights`, `readNoteHeights`, `createLeafHeightTap`, `pickHeights`, `leafInfo`) |
@@ -156,6 +157,20 @@ sentAlready(rows, { to, lux, memo }); // before a send: the row of the payment i
 - "paid" takes the amount and the memo asked, both, in one payment, or the memo of a request of no amount; anything less is "check", with what `matched`, never paid. "waiting" is none yet. Only a payment that went through (`executed`) counts, by what its transfer paid, without a gas refund its transaction paid with it. A payment answers one request, to the address it asked on, from 5 minutes before it was asked: the oldest it pays in full, before any it matches less. `more` holds what else came in for it, oldest first: one with all of it again (`matched` "amount-memo") paid it twice.
 - `refundOf` is what Send is filled in with to pay back a payment that paid a request again: to whoever sent it, as the rows say, what it brought, and the request's memo after "Refund: " where that fits in a memo's 512 bytes, else "Refund". Null where the sender isn't known, as for a shielded payment.
 - `sentAlready` is a payment out to the same recipient, of the same amount and memo, that didn't fail and wasn't dropped, on its way too: in the last 10 minutes, or at any time with a memo. Its amount is what its transfer paid, without a gas refund to another account.
+
+## Prices
+
+```js
+import { duskPrice, inCurrency } from "@dusk-network/app-core/prices";
+
+const quote = await duskPrice({ currency: "EUR", network: "mainnet", fetch, cache });
+// { currency: "EUR", price: 0.060722, at: 1763031839000 }, or null: on testnet, or where the source doesn't answer
+inCurrency(request.lux, quote, { language }); // { value: "≈ 1,82 €", text: "≈ 1,82 € · price at 12:03" }
+inCurrency(30_000_000n, quote, { language }); // { value: "under 0,01 €", text: "under 0,01 € · price at 12:03" }
+```
+
+- `duskPrice` reads what one DUSK is worth now from the source both wallets read their values in a currency from, CoinGecko (`PRICE_URL`), in the currency asked, a code it gives, as `PRICE_CURRENCIES` of `/amounts` lists them, with the time it set that price. Only mainnet's DUSK has one: on any other network it's null and asks for nothing. Null too where the source doesn't answer within 15 s, answers with an error, or gives no price in that currency: then there's no value to show. With `cache`, a `Map` of text does, a price is kept for 5 minutes (`PRICE_MAX_AGE_MS`), by currency.
+- `inCurrency` is what an amount of DUSK comes to at that price, in the words both wallets show beside the DUSK, as on a request, and on the payer's Send and Review in theirs: `value`, rounded once to the currency's smallest coin from the exact product, or "under 0,01 €" below it, never 0; and `text`, the same with the price's time, its day too where it isn't today's. Null without a price or an amount, as a request of any amount. A request's link stays in DUSK.
 
 ## History
 

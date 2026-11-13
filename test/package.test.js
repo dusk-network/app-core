@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./names", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./prices", "./names", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
 const SHARED = ["./src/bridge-common.js", "./src/bridge-evm.js", "./src/bridge-ledger.js", "./src/bridge-status.js", "./src/confusables.js", "./src/moved.js"];
 /** The shared modules that need nothing: data, and one rule. */
@@ -132,6 +132,11 @@ describe("the package", () => {
 
     assert.deepEqual(matchRequests([], []), new Map());
     assert.equal(sentAlready([], { lux: 1n, memo: "", to: "" }), null);
+
+    const { duskPrice, inCurrency } = await import("@dusk-network/app-core/prices");
+
+    assert.equal(await duskPrice({ currency: "EUR", network: "testnet" }), null);
+    assert.equal(inCurrency(1n, null), null);
 
     const { accountingCsv, quarterPeriod } = await import("@dusk-network/app-core/export");
 
@@ -259,6 +264,8 @@ describe("the package", () => {
       "src/names.js",
       "src/payment-links.d.ts",
       "src/payment-links.js",
+      "src/prices.d.ts",
+      "src/prices.js",
       "src/requests.d.ts",
       "src/requests.js",
       "src/shielded.d.ts",
