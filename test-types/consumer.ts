@@ -590,7 +590,7 @@ void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
 // @ts-expect-error a request needs its recipient
 void makePaymentLink({ amount: "1" });
 
-import { LINK_BAD_ADDRESS, LINK_BAD_AMOUNT, LINK_MEMO_LINE_BREAK, LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
+import { LINK_BAD_ADDRESS, LINK_BAD_AMOUNT, LINK_MEMO_LINE_BREAK, LINK_TWO_AMOUNTS, LINK_UNREADABLE, linkAmount, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
 
 const sendRead: LinkRead | null = readPaymentLink("dusk:public-x@dusk:1", { network: 2, walletUrl: "https://wallet.example" });
 const sendReason: "" | "unreadable" | "two-amounts" | "other-network" | undefined = sendRead?.reason;
@@ -600,9 +600,11 @@ const badAddress: "This link's address isn't valid. Ask for a new one." = LINK_B
 const badAmount: "This link's amount can't be read. Ask for a new one." = LINK_BAD_AMOUNT;
 const memoBreak: "This link's memo has a line break. Ask for a new one." = LINK_MEMO_LINE_BREAK;
 void [sendReason, sendFills, sendWords, badAddress, badAmount, memoBreak];
+const asSendReads: { field: string; lux: bigint | null; problem: string | null } = linkAmount(sendRead?.link, "pl-PL");
+void [asSendReads, linkAmount(null), linkAmount(readLink)];
 
 // /names
-import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ProfileNameCheck } from "@dusk-network/app-core/names";
+import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ContactNameCheck, type ProfileNameCheck } from "@dusk-network/app-core/names";
 
 const contactsHere = [{ address: "q", id: "c1", name: "Estudio Marta" }];
 const profilesHere = [{ account: "p", name: "Profile 2" }];
@@ -626,11 +628,49 @@ const saveRefused: boolean | undefined = atSave?.refused;
 const saveDusk: boolean | undefined = atSave?.dusk;
 const saveEntry: string | undefined = atSave?.kind === "contact" ? atSave.entry.address : atSave?.kind === "profile" ? atSave.entry.account : undefined;
 void [saveWords, saveRefused, saveDusk, saveEntry];
+// Any .dusk name asks, of no one the wallet knows: its entry is null.
+const askedDusk: string | undefined = atSave?.kind === "dusk" ? `${atSave.name} ${atSave.entry === null}` : undefined;
+const saveAnswer: "Yes, save it" = NAME_SAVE_YES;
+const contactAtSave: ContactNameCheck<{ account: string; name: string; duskName?: string }, { id: string; name: string; address: string }> | null = contactNameCheck("Lucas", {
+  address: "q",
+  contacts: [{ address: "w", id: "c1", name: "Lucas (petit-fils)" }],
+  except: "c2",
+  profiles: [{ account: "p", name: "Profile 1" }],
+});
+const contactAsked: string | undefined = contactAtSave?.kind === "contact" ? `${contactAtSave.entry.id} ${contactAtSave.words}` : contactAtSave?.kind === "profile" ? contactAtSave.entry.account : undefined;
+// @ts-expect-error a contact's name asks nothing of a .dusk name: that's each wallet's own refusal
+void (contactAtSave?.kind === "dusk");
+void [askedDusk, saveAnswer, contactAsked, contactNameCheck("x")];
 const startsName: string | undefined = starts?.name;
 const startsAccount: string | undefined = starts?.kind === "profile" ? starts.entry.account : starts?.entry.address;
 // @ts-expect-error a name that starts as another is asked about, never said to be the same
 void starts?.same;
 void [clashKind, clashAccount, alikeHere, nameChecks, hiddenName, hiddenWords, profileClashName, clashTaken, ownNameTaken, startsName, startsAccount];
+
+// /prices
+import { PRICE_MAX_AGE_MS, PRICE_URL, duskPrice, inCurrency, type DuskPrice, type FetchLike as PriceFetch } from "@dusk-network/app-core/prices";
+
+declare const priceFetch: PriceFetch;
+const quoteNow: Promise<DuskPrice | null> = duskPrice({ cache: new Map(), currency: "EUR", fetch: priceFetch, network: networks.mainnet });
+const quoteKept: DuskPrice = { at: 1, currency: "EUR", price: 0.06 };
+const shownIn: { value: string; text: string } | null = inCurrency(30_000_000_000n, quoteKept, { language: "es-ES", now: 2, timeZone: "Europe/Madrid" });
+const priceFacts: [string, number] = [PRICE_URL, PRICE_MAX_AGE_MS];
+void [quoteNow, shownIn, priceFacts, duskPrice({ currency: "USD", network: "dusk:1", now: 1, timeoutMs: 1 }), inCurrency("1", null), inCurrency(null, quoteKept)];
+// @ts-expect-error the price is for a network
+void duskPrice({ currency: "EUR" });
+
+// /gas
+import { GAS_PRICE_BUSY, GAS_PRICE_CEILING_TIMES, GAS_PRICE_MINIMUM, defaultGasPrice, type DefaultGasPrice } from "@dusk-network/app-core/gas";
+
+const gasNow: DefaultGasPrice = defaultGasPrice({ ceiling: null, median: "2", minimum: 1n });
+const gasPrice: bigint = gasNow.price;
+const gasBusy: boolean = gasNow.busy;
+const gasMedian: bigint | null = gasNow.median;
+const gasWords: "The network is busy. You can raise the gas price for it to go out sooner." = GAS_PRICE_BUSY;
+const gasBounds: [1n, 5n] = [GAS_PRICE_MINIMUM, GAS_PRICE_CEILING_TIMES];
+void [gasPrice, gasBusy, gasMedian, gasWords, gasBounds, defaultGasPrice(), defaultGasPrice({ median: 2 })];
+// @ts-expect-error a median is a whole number of lux, not a node's whole answer
+void defaultGasPrice({ median: { median: 2n } });
 
 // /requests
 import { AGAIN_MS, CLOCK_SKEW_MS, matchRequests, refundOf, sentAlready, type KeptRequest, type RequestMatch, type RequestMatched, type RequestPayment } from "@dusk-network/app-core/requests";
@@ -686,7 +726,7 @@ const newYearPoint: Promise<SozuPoint | null> = sozuPointAt({ anchors: [{ at: 1,
 void newYearPoint.then((point) => stDuskWorth(point));
 
 // /export
-import { CSV_COLUMNS, FACTS_WAIT_MS, REWARDS_COUNTED, REWARD_WORDS, accountingCsv, datesPeriod, quarterPeriod, rewardsByYear, type ExportOptions, type ExportPeriod, type ExportResult, type RewardsSum, type YearRewards } from "@dusk-network/app-core/export";
+import { CSV_COLUMNS, FACTS_WAIT_MS, REWARDS_COUNTED, REWARD_WORDS, accountingCsv, datesPeriod, quarterPeriod, rewardWorth, rewardsByYear, type ExportOptions, type ExportPeriod, type ExportResult, type RewardsSum, type YearRewards } from "@dusk-network/app-core/export";
 
 const quarter: ExportPeriod = quarterPeriod(2026, 4, { timeZone: "Europe/Madrid" });
 const dates: ExportPeriod = datesPeriod("2026-10-01", "2026-12-31");
@@ -715,6 +755,10 @@ const grownYear = grownYearly.then(([first]): [bigint | undefined, string | null
 void [taxYear, grownYear, rewardsByYear({ rows: readRows, status: sozuStatus })];
 const yearReading: Promise<number[]> = yearly.then((years) => years.map((year) => year.reading));
 const yearWords: [string, string, string, string, number] = [REWARD_WORDS.claimed, REWARD_WORDS.sozuGrown, REWARD_WORDS.sozu, REWARDS_COUNTED, FACTS_WAIT_MS];
+const yearWorth: string = rewardWorth("-0.00003000", { currency: "EUR", language: "es-ES" });
+void [yearWorth, rewardWorth(null, { currency: "EUR" })];
+// @ts-expect-error a worth is in a currency
+void rewardWorth("1");
 void [yearReading, yearWords];
 
 // /bridge's ledger

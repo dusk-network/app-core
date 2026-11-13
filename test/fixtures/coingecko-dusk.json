@@ -1,0 +1,18 @@
+{
+ "note": "CoinGecko's answer to PRICE_URL for DUSK on 13 November 2026, at 11:04 UTC: its market data, six of its 63 currencies kept, as the web wallet reads its value in a currency.",
+ "id": "dusk-network",
+ "symbol": "dusk",
+ "name": "DUSK",
+ "market_data": {
+  "current_price": {
+   "eur": 0.060722,
+   "usd": 0.067096,
+   "jpy": 10.73,
+   "kwd": 0.02089638,
+   "sgd": 0.086404,
+   "inr": 6.32
+  },
+  "last_updated": "2026-11-13T11:03:59.000Z"
+ },
+ "last_updated": "2026-11-13T11:03:59.000Z"
+}

@@ -2,6 +2,23 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.14.0]
+
+### Added
+
+- `/names`: `contactNameCheck`, what a contact's name says at Save in both wallets' words: refused as a profile's, or asked about another contact's name it is, looks like, starts as or is the start of, with that contact's address
+- `/names`: `NAME_SAVE_YES`, "Yes, save it": a name asked about at Save is saved only once it's answered
+- `/payment-links`: `linkAmount`, a link's amount as Send reads it in the person's language, for a preview to say the same: "Is that 1 or 1000?" for `amount=1.000`, never 1 DUSK
+- `/export`: `rewardWorth`, what a year's rewards were worth in both wallets' words: "under 0,01 €" below the smallest coin, and a loss with its minus sign, or "a loss under 0,01 €"
+- `/prices`: `duskPrice`, what one DUSK is worth now in a person's currency, from CoinGecko as both wallets read values, on mainnet alone, with its time
+- `/prices`: `inCurrency`, what an amount comes to at that price, in the words both wallets show beside the DUSK: "≈ 1,82 € · price at 12:03"
+- `/gas`: `defaultGasPrice`, the gas price both wallets start from: the mempool's median up to a ceiling, 5 times the network's minimum unless its settings say, and `busy` above it, with `GAS_PRICE_BUSY` for Review
+
+### Changed
+
+- `/names`: `profileNameCheck` asks about any .dusk name in a profile's name, not only the wallet's: "sofiadesign.dusk is a .dusk name. Is it this profile's?"
+- `/export`: `rewardsByYear` counts what Sozu's unstakes took out at average cost with deposit fees included, to the nearest lux, and `REWARDS_COUNTED` names the method: "…less that stDUSK's average cost, deposit fees included."
+
 ## [0.13.0]
 
 ### Added

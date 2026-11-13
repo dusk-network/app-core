@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { CONFUSABLES, CONFUSABLES_VERSION } from "../src/confusables.js";
-import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName } from "../src/names.js";
+import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName } from "../src/names.js";
+import { A, C } from "./fixtures/activity.js";
 
 describe("names that look alike", () => {
   it("catches Marek's: Armenian, Cherokee and a small capital I, as Cyrillic before", () => {
@@ -290,16 +291,123 @@ describe("a profile's name at Save", () => {
   it("asks about a contact's name it starts as, as before, and says nothing of the rest", () => {
     assert.deepEqual(check("Lucas"), { dusk: false, entry: contacts[2], kind: "contact", name: "Lucas (petit-fils)", refused: false, words: "You have a contact called Lucas (petit-fils). Is this someone else?" });
 
-    for (const name of ["Carla", "Ali", "Wen", "Profile 3", "", "bob.dusk"]) assert.equal(check(name), null, name);
+    for (const name of ["Carla", "Ali", "Wen", "Profile 3", "", "dusk", ".dusk", "Dusk wallet", "x .dusk", "bob.dusky", "bob dusk"]) assert.equal(check(name), null, name);
     // A contact saved with the profile's own address takes nothing from its name, by its .dusk name or its own.
     assert.equal(check("cliente.dusk"), null);
     assert.equal(check("Mi cliente"), null);
     assert.deepEqual(check("cliente.dusk", "p1"), { dusk: true, entry: contacts[3], kind: "contact", name: "cliente.dusk", refused: false, words: "You have a contact called Mi cliente, at cliente.dusk. Is this someone else?" });
   });
 
+  it("asks about any other .dusk name, not only the wallet's: Marek's Profile 2 named sofiadesign.dusk, whom he paid", () => {
+    // Not one of his contacts, and no profile of his is verified as it: History then showed his own transfers and
+    // his payment to Sofía under the same name.
+    const his = [{ account: "p1", address: "s1", name: "Profile 1" }, { account: "p2", address: "s2", name: "Profile 2" }];
+    const asked = (/** @type {string} */ dusk) => ({ dusk: true, entry: null, kind: "dusk", name: dusk, refused: false, words: `${dusk} is a .dusk name. Is it this profile's?` });
+    const marek = (/** @type {string} */ name) => profileNameCheck(name, { contacts, profiles: his, self: "p2" });
+
+    assert.deepEqual(marek("sofiadesign.dusk"), asked("sofiadesign.dusk"));
+    // As it's written, in any case, in letters or a point that look like a .dusk name's, and among other words.
+    for (const [name, dusk] of [
+      ["SofiaDesign.DUSK", "SofiaDesign.DUSK"],
+      ["\u0455ofiadesign.dusk", "\u0455ofiadesign.dusk"],
+      ["sofiadesign\uff0edusk", "sofiadesign\uff0edusk"],
+      ["sofiadesign.d\u057dsk", "sofiadesign.d\u057dsk"],
+      ["sofiadesign.dusk 2", "sofiadesign.dusk"],
+      ["Mi cliente (sofiadesign.dusk)", "sofiadesign.dusk"],
+      ["bob.dusk", "bob.dusk"],
+      ["my.dusk", "my.dusk"],
+      // By every key the look-alike rules read a name by: mathematical bold capitals, which a skeleton gives as
+      // capitals; marks over its letters, as one or as two characters; and the letter pairs, a d as cl.
+      ["sofia.\u{1d403}\u{1d414}\u{1d412}\u{1d40a}", "sofia.\u{1d403}\u{1d414}\u{1d412}\u{1d40a}"],
+      ["sofia.du\u0301sk", "sofia.du\u0301sk"],
+      ["sofia.d\u00f9sk", "sofia.d\u00f9sk"],
+      ["sofia.clusk", "sofia.clusk"],
+      ["sofia.cIusk", "sofia.cIusk"],
+    ]) {
+      assert.deepEqual(marek(name), asked(dusk), name);
+    }
+
+    // Each of those reads as sofia.dusk, as looksAlike says; and Wendy's alice.dusk so written is named as hers.
+    for (const name of ["sofia.\u{1d403}\u{1d414}\u{1d412}\u{1d40a}", "sofia.du\u0301sk", "sofia.d\u00f9sk", "sofia.clusk", "sofia.cIusk"]) assert.equal(looksAlike(name, "sofia.dusk"), true, name);
+    assert.equal(marek("Para alice.\u{1d403}\u{1d414}\u{1d412}\u{1d40a}")?.words, "You have a contact called Wendy, at alice.dusk. Is this someone else?");
+  });
+
+  it("names whose .dusk name one is where the wallet knows, wherever it is in the name", () => {
+    assert.deepEqual(check("Mi sofiadesign.dusk"), { dusk: true, entry: profiles[0], kind: "profile", name: "sofiadesign.dusk", refused: false, words: "Your other profile is called sofiadesign.dusk. Is this someone else?" });
+    assert.deepEqual(check("Para alice.dusk"), { dusk: true, entry: contacts[1], kind: "contact", name: "alice.dusk", refused: false, words: "You have a contact called Wendy, at alice.dusk. Is this someone else?" });
+  });
+
+  it("asks about a .dusk name the profile's own is spelled in: a hyphen or a point more is another name", () => {
+    const owner = [{ account: "p1", address: "s1", duskName: "alice.dusk", name: "Profile 1" }];
+    const own = (/** @type {string} */ name) => profileNameCheck(name, { profiles: owner, self: "p1" });
+
+    for (const name of ["ali-ce.dusk", "al.ice.dusk", "alice.dusk.dusk", "alice-.dusk"]) {
+      assert.deepEqual(own(name), { dusk: true, entry: null, kind: "dusk", name, refused: false, words: `${name} is a .dusk name. Is it this profile's?` }, name);
+    }
+
+    // Its own, in any case or with a point after it, is its own.
+    for (const name of ["alice.dusk", "Alice.DUSK", "alice.dusk.", "(alice.dusk)"]) assert.equal(own(name), null, name);
+  });
+
+  it("asks nothing of the profile's own verified .dusk name, in a name or as it", () => {
+    for (const name of ["sofiadesign.dusk", "SofiaDesign.dusk", "sofiadesign.dusk (yo)"]) assert.equal(check(name, "p1"), null, name);
+    // Another .dusk name beside its own still asks.
+    assert.deepEqual(check("sofiadesign.dusk y bob.dusk", "p1"), { dusk: true, entry: null, kind: "dusk", name: "bob.dusk", refused: false, words: "bob.dusk is a .dusk name. Is it this profile's?" });
+  });
+
+  it("is answered, to be saved, in the words both wallets show", () => {
+    assert.equal(NAME_SAVE_YES, "Yes, save it");
+  });
+
   it("shows what can't be seen in a name kept from before as its codes", () => {
     const kept = [{ address: "r", duskName: "bob.dusk", name: "\u202eboB" }];
 
     assert.equal(profileNameCheck("bob.dusk", { contacts: kept, self: "p2" })?.words, "You have a contact called \\u202eboB, at bob.dusk. Is this someone else?");
+  });
+});
+
+describe("a contact's name at Save", () => {
+  // Amélie's: her grandson saved as "Lucas (petit-fils)"; the "new phone, new account" message asks her to save
+  // another account as plain "Lucas". Sofía's Profile 1 is sofiadesign.dusk.
+  const profiles = [
+    { account: "p1", address: "s1", duskName: "sofiadesign.dusk", name: "Profile 1" },
+    { account: "p2", address: "s2", name: "Mamie" },
+  ];
+  const contacts = [
+    { address: A, id: "c1", name: "Lucas (petit-fils)" },
+    { address: C, id: "c2", name: "Wendy" },
+  ];
+  const check = (/** @type {string} */ name, /** @type {{ except?: string, address?: string }} */ more = {}) => contactNameCheck(name, { address: "elsewhere", contacts, profiles, ...more });
+  const lucas = { dusk: false, entry: contacts[0], kind: "contact", name: "Lucas (petit-fils)", refused: false };
+
+  it("asks about a name another contact's starts as, or that starts as theirs, with their address: Amélie's 'Lucas'", () => {
+    assert.deepEqual(check("Lucas"), { ...lucas, words: "You have a contact called Lucas (petit-fils), at 26JfWK…B5NsNi. Is this someone else?" });
+    assert.deepEqual(check("Lucas (petit-fils) 2"), { ...lucas, words: "You have a contact called Lucas (petit-fils), at 26JfWK…B5NsNi. Is this someone else?" });
+    assert.deepEqual(check("lucas"), check("Lucas"));
+  });
+
+  it("asks about another contact's name, or one like it, rather than saving it beside theirs", () => {
+    assert.deepEqual(check("Lucas (petit-fils)"), { ...lucas, words: "You have a contact called Lucas (petit-fils), at 26JfWK…B5NsNi. Is this someone else?" });
+    assert.deepEqual(check("Luc\u0430s (petit-fils)"), { ...lucas, words: "That looks like your contact Lucas (petit-fils), at 26JfWK…B5NsNi. Is this someone else?" });
+    assert.deepEqual(check("VVendy"), { dusk: false, entry: contacts[1], kind: "contact", name: "Wendy", refused: false, words: "That looks like your contact Wendy, at zFVXTQ…y4yEuL. Is this someone else?" });
+    // The contact changed takes nothing from itself.
+    assert.equal(check("Lucas (petit-fils)", { except: "c1" }), null);
+    assert.equal(check("Lucas", { except: "c1" }), null);
+  });
+
+  it("refuses a profile's name or .dusk name, or one like it, and asks about one a profile's starts as", () => {
+    assert.deepEqual(check("Profile 1"), { dusk: false, entry: profiles[0], kind: "profile", name: "Profile 1", refused: true, words: "One of your profiles is called Profile 1. Choose another name." });
+    assert.deepEqual(check("ProfiIe 1"), { dusk: false, entry: profiles[0], kind: "profile", name: "Profile 1", refused: true, words: "That looks like Profile 1, one of your profiles. Choose another name." });
+    assert.deepEqual(check("sofiadesign.dusk"), { dusk: true, entry: profiles[0], kind: "profile", name: "sofiadesign.dusk", refused: true, words: "One of your profiles is called sofiadesign.dusk. Choose another name." });
+    assert.deepEqual(check("Mamie Jeanne"), { dusk: false, entry: profiles[1], kind: "profile", name: "Mamie", refused: false, words: "One of your profiles is called Mamie. Is this someone else?" });
+    // A contact saved with a profile's own account or shielded address takes nothing from that profile's name.
+    assert.equal(check("Profile 1", { address: "p1" }), null);
+    assert.equal(check("Mamie Jeanne", { address: "s2" }), null);
+  });
+
+  it("refuses what can't be seen, and says nothing of the rest", () => {
+    assert.deepEqual(check("Luc\u200bas"), { dusk: false, entry: null, kind: "hides", name: "", refused: true, words: NAME_HIDES });
+
+    for (const name of ["Carla", "Luc", "Wen", "Ann", "Profile 3", ""]) assert.equal(check(name), null, name);
   });
 });

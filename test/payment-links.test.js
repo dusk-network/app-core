@@ -5,7 +5,7 @@ import { networks } from "@dusk-network/networks";
 
 import { activityRows } from "../src/activity.js";
 import { amountForField, parseDusk, normalizeAmount, decimalSeparator } from "../src/amounts.js";
-import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, MAX_MEMO_BYTES, chainLabel, makePaymentLink, networkMismatch, parsePaymentLink, readPaymentLink, recipientKind } from "../src/payment-links.js";
+import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, MAX_MEMO_BYTES, chainLabel, linkAmount, makePaymentLink, networkMismatch, parsePaymentLink, readPaymentLink, recipientKind } from "../src/payment-links.js";
 import { A, B, recorded } from "./fixtures/activity.js";
 import { like } from "./fixtures/helpers.js";
 
@@ -405,6 +405,44 @@ describe("a link as Send reads it, pasted, scanned or opened", () => {
       assert.notEqual(read.problem, "", link);
       assert.deepEqual(Object.keys(read).sort(), ["chainId", "link", "network", "problem", "reason"], link);
     }
+  });
+
+  it("reads a link's amount as Send does, for a preview to say the same: Marek's 1.000 asks, never 1 DUSK", () => {
+    // Marek's: the locked 'Payment request' card said '1 DUSK' and '10 DUSK' while Send asked which was meant.
+    for (const [amount, problem] of [
+      ["1.000", "Is that 1 or 1000? Write the one you mean."],
+      ["10.000", "Is that 10 or 10000? Write the one you mean."],
+      ["1,000", "Is that 1 or 1000? Write the one you mean."],
+    ]) {
+      const link = /** @type {any} */ (readPaymentLink(`${testnetSend}?to=${A}&amount=${amount}&network=testnet`, { network: 2 })).link;
+
+      // The link's own lux is a plain number's, 1 DUSK of "1.000": not what Send reads.
+      assert.equal(link.lux, parseDusk(amount));
+      assert.deepEqual(linkAmount(link, "en-GB"), { field: amount, lux: null, problem }, amount);
+    }
+
+    // In Polish, where 1.000 is a thousand: the field has the language's mark, and asks the same.
+    const polish = /** @type {any} */ (readPaymentLink(`${testnetSend}?to=${A}&amount=1.000&network=testnet`, { network: 2 })).link;
+
+    assert.deepEqual(linkAmount(polish, "pl-PL"), { field: "1,000", lux: null, problem: "Is that 1 or 1000? Write the one you mean." });
+  });
+
+  it("gives the amount Send fills in and reads, in the person's language, and any amount for none", () => {
+    /** @param {string} query */
+    const linkOf = (query) => /** @type {any} */ (readPaymentLink(`${testnetSend}?to=${A}${query}&network=testnet`, { network: 2 })).link;
+
+    // As a wallet writes 2.125 DUSK: Send fills it in so it reads back as it is, without a question.
+    assert.deepEqual(linkAmount(linkOf("&amount=2.125"), "en-GB"), { field: "2.1250", lux: 2_125_000_000n, problem: null });
+    assert.deepEqual(linkAmount(linkOf("&amount=2.125"), "de-DE"), { field: "2,1250", lux: 2_125_000_000n, problem: null });
+    assert.deepEqual(linkAmount(linkOf("&amount=0.15"), "es-ES"), { field: "0,15", lux: 150_000_000n, problem: null });
+    assert.deepEqual(linkAmount(linkOf("&amountLux=1000000000"), "en-GB"), { field: "1", lux: 1_000_000_000n, problem: null });
+    // What Send won't take, it says: as the field would.
+    assert.deepEqual(linkAmount(linkOf("&amount=0"), "en-GB"), { field: "0", lux: null, problem: "Enter an amount greater than 0." });
+    // No amount asked: any.
+    assert.deepEqual(linkAmount(linkOf(""), "en-GB"), { field: "", lux: null, problem: null });
+    assert.deepEqual(linkAmount(null, "en-GB"), { field: "", lux: null, problem: null });
+    // The field each wallet fills from a link today, the same.
+    assert.equal(linkAmount(linkOf("&amount=1.5"), "fr-FR").field, amountForField("1.5", decimalSeparator("fr-FR")));
   });
 
   it("refuses a dusk: link that asks for a shielded payment to a public account, or a public one to a shielded address", () => {

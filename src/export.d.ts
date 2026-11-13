@@ -230,9 +230,10 @@ export declare function accountingCsv(options: ExportOptions): Promise<ExportRes
 
 /**
  * Rewards that reached the account, in whole lux, toward nothing: what's
- * under a lux is no reward. And what they were worth in the currency `price`
- * answers in, each at its own time, to 8 decimals: the sum of those whose
- * price is known (null without a `price`), and how many aren't (`unpriced`).
+ * under a lux is no reward; what unstaking took out, its deposit fees off, to
+ * the nearest lux. And what they were worth in the currency `price` answers
+ * in, each at its own time, to 8 decimals: the sum of those whose price is
+ * known (null without a `price`), and how many aren't (`unpriced`).
  */
 export type RewardsSum = { lux: bigint; worth: string | null; unpriced: number };
 
@@ -243,12 +244,14 @@ export type YearRewards = {
   claimed: RewardsSum;
   /**
    * Taken out by unstaking: what the stDUSK Sozu's unstakes that year gave
-   * back was worth at their own rates, beyond what it cost at the rates it
-   * was staked at, on average: deposit fees and the pool's rounding aside, as
-   * the pool rounds what each stake mints and each unstake pays by a lux or
-   * so. A stake and its unstake at one rate took out nothing. Null where a
-   * stake or an unstake before one of them isn't known (`facts` lacks it, or
-   * the history isn't `complete`).
+   * back was worth at their own rates, beyond what it cost on average
+   * (average cost, deposit fees included): what it was worth at the rates it
+   * was staked at, and the deposit fees those stakes paid. The pool's
+   * rounding is aside, as the pool rounds what each stake mints and each
+   * unstake pays by a lux or so, and the year's sum is to the nearest lux. A
+   * stake and its unstake at one rate lost their deposit fee: a year can take
+   * out less than nothing. Null where a stake or an unstake before one of
+   * them isn't known (`facts` lacks it, or the history isn't `complete`).
    */
   sozu: RewardsSum | null;
   /**
@@ -287,9 +290,21 @@ export declare const REWARD_WORDS: Readonly<{ claimed: "Native staking, claimed"
 /**
  * The one line both wallets show under a year's rewards: that taken out by
  * unstaking is part of grown while held, not more on top of it, and how
- * it's counted: average cost, deposit fees not counted.
+ * it's counted: average cost, deposit fees included.
  */
-export declare const REWARDS_COUNTED: "Taken out by unstaking is part of grown while held: what came back, less what that stDUSK cost at its average price, deposit fees not counted.";
+export declare const REWARDS_COUNTED: "Taken out by unstaking is part of grown while held: what came back, less that stDUSK's average cost, deposit fees included.";
+
+/**
+ * What a year's rewards were worth, a `RewardsSum`'s `worth`, in the words
+ * both wallets show in `currency` (the one `price` answered in), in the
+ * person's language (`language`, the browser's unless given): "6,43 €";
+ * "under 0,01 €" for less than the currency's smallest coin and more than
+ * nothing; a loss, as what unstaking took out can be once deposit fees are
+ * counted, with the minus sign amounts have, "−52,38 €", or "a loss under
+ * 0,01 €" for less than a coin; never 0 for what isn't. "" for no worth, as
+ * without a price.
+ */
+export declare function rewardWorth(worth: string | null | undefined, options: { currency: string; language?: string }): string;
 
 /** How long a stake or an unstake with Sozu is being read, without its facts, before what it did counts as not known: 10 minutes, in milliseconds. */
 export declare const FACTS_WAIT_MS: 600000;

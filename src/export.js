@@ -37,7 +37,7 @@
  * @module
  */
 
-import { formatDuskPlain } from "./amounts.js";
+import { amountLocale, formatDuskPlain } from "./amounts.js";
 import { routes } from "@dusk-network/networks";
 
 import { bridgeSenders, bridgedTo, migrationApprovals, migrationFacts, migrationsOf } from "./bridge-evm.js";
@@ -857,7 +857,38 @@ export async function accountingCsv({ approvals, bom = false, bridge, contactNam
 export const REWARD_WORDS = Object.freeze({ claimed: "Native staking, claimed", sozu: "Sozu, taken out by unstaking", sozuGrown: "Sozu, grown while held" });
 
 /** The one line under them both wallets show: what taken out by unstaking is, and how it's counted. */
-export const REWARDS_COUNTED = "Taken out by unstaking is part of grown while held: what came back, less what that stDUSK cost at its average price, deposit fees not counted.";
+export const REWARDS_COUNTED = "Taken out by unstaking is part of grown while held: what came back, less that stDUSK's average cost, deposit fees included.";
+
+/** The minus sign amounts are shown with, as `/amounts` writes a negative one. */
+const MINUS = "\u2212";
+
+/**
+ * @param {string | null | undefined} worth
+ * @param {{ currency: string, language?: string }} options
+ * @returns {string}
+ */
+export function rewardWorth(worth, { currency, language } = /** @type {{ currency: string }} */ ({ currency: "" })) {
+  const match = /^(-?)(\d+)(?:\.(\d*))?$/.exec(String(worth ?? "").trim());
+  const code = String(currency ?? "").trim().toUpperCase();
+
+  if (!match || !/^[A-Z]{3}$/.test(code)) return "";
+
+  const money = new Intl.NumberFormat(amountLocale(language), { currency: code, style: "currency" });
+  const places = money.resolvedOptions().maximumFractionDigits ?? 2;
+  const [, minus, whole, fraction = ""] = match;
+  const loss = minus === "-" && /[1-9]/.test(`${whole}${fraction}`);
+  /** @param {string} value Exact, as Intl rounds it once */
+  const shown = (value) => money.format(/** @type {any} */ (value)).replace(/-/g, MINUS);
+
+  // More than nothing, and less than the currency's smallest coin: under it, as a loss where it is one; never 0.
+  if (/^0+$/.test(whole) && !/[1-9]/.test(fraction.slice(0, places)) && /[1-9]/.test(fraction.slice(places))) {
+    const least = shown(places ? `0.${"1".padStart(places, "0")}` : "1");
+
+    return loss ? `a loss under ${least}` : `under ${least}`;
+  }
+
+  return shown(`${loss ? "-" : ""}${whole}.${fraction || "0"}`);
+}
 
 /**
  * How long a stake or an unstake with Sozu waits for its facts before what
@@ -872,6 +903,18 @@ export const FACTS_WAIT_MS = 600_000;
  * lux, toward nothing.
  */
 const FINE = 10n ** 18n;
+
+/**
+ * `FINE` parts of a lux in whole lux, to the nearest, a half away from nothing.
+ *
+ * @param {bigint} fine
+ */
+const nearestLux = (fine) => {
+  const whole = fine / FINE;
+  const rest = fine % FINE;
+
+  return 2n * (rest < 0n ? -rest : rest) >= FINE ? whole + (rest < 0n ? -1n : 1n) : whole;
+};
 
 /**
  * What an amount of stDUSK was worth at a pool's figures, in `FINE` parts of
@@ -932,7 +975,8 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
   /** @typedef {{ stake: bigint, supply: bigint }} Pool */
   /** @type {Map<number, { claimed: Reward[], sozu: Reward[] | null, reading: number }>} */
   const years = new Map();
-  // Sozu's stDUSK held and what it cost, in FINE parts of a lux, while every stake and unstake before is known.
+  // Sozu's stDUSK held and what it cost, deposit fees included, in FINE parts of a lux, while every stake and
+  // unstake before is known.
   let held = 0n;
   let cost = 0n;
   let known = complete;
@@ -987,15 +1031,15 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
     if (row.sozu === "stake") {
       known &&= fact !== undefined;
       held += fact?.stDusk ?? 0n;
-      // What its stDUSK was worth at the rate it was minted at, the deposit fee and the pool's rounding aside;
-      // what went in less the fee, where the fact has no rate.
-      cost += fact && pool ? fineWorth(fact.stDusk, pool) : (row.value - (fact?.fee ?? 0n)) * FINE;
+      // What its stDUSK was worth at the rate it was minted at, the pool's rounding aside, and its deposit fee, which
+      // is part of what it cost; what went in, where the fact has no rate.
+      cost += fact && pool ? fineWorth(fact.stDusk, pool) + fact.fee * FINE : row.value * FINE;
     } else if (!known || !fact || fact.stDusk > held || held === 0n) {
       known = false;
       rewards.sozu = null;
     } else {
       // An unstake: what its stDUSK was worth at its own rate, as the pool rounds it aside, or what came back where
-      // the fact has no rate, beyond what that stDUSK cost on average.
+      // the fact has no rate, beyond what that stDUSK cost on average, its deposit fees among it.
       const spent = (cost * fact.stDusk) / held;
 
       rewards.sozu?.push({ at, fine: (pool ? fineWorth(fact.stDusk, pool) : row.value * FINE) - spent });
@@ -1068,12 +1112,15 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
 
   /**
    * A year's rewards in whole lux, toward nothing: what's under a lux is no reward, as the pool's rounding in a
-   * stake or an unstake is none. Each part brings the lux it takes the year's to, and is worth those at its price.
+   * stake or an unstake is none. What unstaking took out, its deposit fees off, is to the nearest lux: a stake and
+   * its unstake at one rate lost their fee, the pool's rounding either way aside. Each part brings the lux it takes
+   * the year's to, and is worth those at its price.
    *
    * @param {Reward[]} list
+   * @param {boolean} [nearest]
    * @returns {Promise<import("./export.js").RewardsSum>}
    */
-  const sumOf = async (list) => {
+  const sumOf = async (list, nearest = false) => {
     let fine = 0n;
     let lux = 0n;
     let units = 0n;
@@ -1082,7 +1129,7 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
     for (const part of list) {
       fine += part.fine;
 
-      const brings = fine / FINE - lux;
+      const brings = (nearest ? nearestLux(fine) : fine / FINE) - lux;
 
       lux += brings;
 
@@ -1105,7 +1152,7 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
       .map(async ([year, { claimed, reading, sozu }]) => {
         const parts = year >= lost ? null : grownIn(year);
 
-        return { claimed: await sumOf(claimed), reading, sozu: sozu && (await sumOf(sozu)), sozuGrown: parts && (await sumOf(parts)), year };
+        return { claimed: await sumOf(claimed), reading, sozu: sozu && (await sumOf(sozu, true)), sozuGrown: parts && (await sumOf(parts)), year };
       })
   );
 }

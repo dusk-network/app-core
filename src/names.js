@@ -8,6 +8,8 @@
  * @module
  */
 
+import { shortAccount } from "@dusk-network/networks/format";
+
 import { CONFUSABLES } from "./confusables.js";
 import { displayText } from "./text.js";
 
@@ -44,6 +46,9 @@ const PAIRED = Object.freeze({ W: "VV", d: "cl", w: "vv" });
 
 /** What an app says of a name it refuses for what can't be seen in it. */
 export const NAME_HIDES = "This name has hidden characters. Type it again without them.";
+
+/** What answers a name's question so that it's saved: a name asked about is saved only once it's answered. */
+export const NAME_SAVE_YES = "Yes, save it";
 
 /**
  * @param {unknown} name
@@ -157,7 +162,8 @@ export function nameClash(name, { contacts = [], except, profiles = [] } = {}) {
 
 /**
  * The profiles and contacts that aren't the profile named: it, and a
- * contact saved with either of its addresses, are its own.
+ * contact saved with either of its addresses, are its own. With the profile
+ * named, where it's among them (`self`).
  *
  * @template {{ account?: unknown, address?: unknown }} P
  * @template {{ account?: unknown, address?: unknown }} C
@@ -169,7 +175,7 @@ function othersThan({ contacts, profiles, self }) {
   /** @param {{ account?: unknown, address?: unknown } | undefined} entry */
   const itself = (entry) => own.has(entry?.account) || own.has(entry?.address);
 
-  return { contacts: contacts.filter((contact) => !itself(contact)), profiles: profiles.filter((profile) => profile !== named && !itself(profile)) };
+  return { contacts: contacts.filter((contact) => !itself(contact)), profiles: profiles.filter((profile) => profile !== named && !itself(profile)), self: named };
 }
 
 /**
@@ -254,6 +260,57 @@ export function nameStarts(name, { contacts = [], profiles = [], self } = {}) {
  */
 const shown = (name) => (nameHides(name) ? displayText(name).text : String(name ?? ""));
 
+// The end of a .dusk name, after at least one character of its own: what a word's keys end with to read as one;
+// with the letter pairs, as a d looks like cl, .clusk.
+const DUSK_ENDING = /[^.\s]\.dusk$/u;
+const PAIRED_DUSK_ENDING = /[^.\s]\.clusk$/u;
+// What a word starts or ends with that's no part of a name in it: brackets, quotes and punctuation.
+const WORD_EDGES = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
+
+/**
+ * A skeleton as the look-alike checks compare one, its points and hyphens
+ * kept: without what can't be seen or the marks over its letters, in lower
+ * case, which a skeleton keeps where it gives a capital, as Unicode's has
+ * "D" for a mathematical bold 𝐃.
+ *
+ * @param {string} shape
+ */
+const plainShape = (shape) => shape.normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "").toLowerCase();
+
+/**
+ * The words of a name that read as .dusk names, as they're written, without
+ * the punctuation around them, by the look-alike rules: in any case, in
+ * letters or points that look like a .dusk name's, with marks over its
+ * letters, and with the letter pairs that look like one, as
+ * "SofiaDesign.DUSK", "ѕofia.dusk" with a Cyrillic ѕ, "sofia．dusk" with a
+ * fullwidth point, "sofia.𝐃𝐔𝐒𝐊" in mathematical bold, "sofia.dúsk" or
+ * "sofia.clusk".
+ *
+ * @param {unknown} name
+ * @returns {string[]}
+ */
+const duskNamesIn = (name) =>
+  String(name ?? "")
+    .split(/\s+/u)
+    .map((word) => word.replace(WORD_EDGES, ""))
+    .filter((word) => {
+      if (word === "") return false;
+
+      const written = nameSkeleton(word);
+
+      return [nameSkeleton(word.toLowerCase()), written].some((shape) => DUSK_ENDING.test(plainShape(shape))) || PAIRED_DUSK_ENDING.test(plainShape(paired(written)));
+    });
+
+/**
+ * A .dusk name as the name service tells one from another: trimmed, its
+ * ASCII capitals in lower case, all else as written, its points and hyphens
+ * among it, so "ali-ce.dusk" and "al.ice.dusk" are other names than
+ * "alice.dusk".
+ *
+ * @param {unknown} name
+ */
+const domainOf = (name) => String(name ?? "").trim().replace(/[A-Z]/g, (char) => char.toLowerCase());
+
 /**
  * Whether one name's words are the first words of the other's, either way,
  * as the look-alike rules read them.
@@ -300,6 +357,8 @@ export function profileNameCheck(name, { contacts = [], profiles = [], self } = 
   const duskOf = (contact) => (contact?.duskName === undefined || contact.duskName === null || contact.duskName === "" ? "" : String(contact.duskName));
   /** @param {C} contact @param {string} dusk */
   const contactAt = (contact, dusk) => /** @type {any} */ ({ dusk: true, entry: contact, kind: "contact", name: dusk, refused: false, words: `You have a contact called ${shown(contact.name)}, at ${shown(dusk)}. Is this someone else?` });
+  /** @param {P} profile */
+  const profileAt = (profile) => /** @type {any} */ ({ dusk: true, entry: profile, kind: "profile", name: String(profile.duskName), refused: false, words: `Your other profile is called ${shown(profile.duskName)}. Is this someone else?` });
 
   // A contact's .dusk name it is, or looks like: the contact it is, by name, as History shows that name for them.
   const named = others.contacts.find((contact) => duskOf(contact) !== "" && alike(keys, keysOf(duskOf(contact))));
@@ -309,16 +368,92 @@ export function profileNameCheck(name, { contacts = [], profiles = [], self } = 
   // A .dusk name it starts as, or that starts as it, word for word: another profile's, then a contact's.
   const profile = others.profiles.find((each) => each?.duskName && startsAs(words, each.duskName));
 
-  if (profile) return /** @type {any} */ ({ dusk: true, entry: profile, kind: "profile", name: String(profile.duskName), refused: false, words: `Your other profile is called ${shown(profile.duskName)}. Is this someone else?` });
+  if (profile) return profileAt(profile);
 
   const at = others.contacts.find((contact) => duskOf(contact) !== "" && startsAs(words, duskOf(contact)));
 
   if (at) return contactAt(at, duskOf(at));
 
+  // Any other .dusk name it holds, but the profile's own: whose it is where the wallet knows, else anyone's, as
+  // History would show this profile by the name it shows that name's owner by. Its own are its verified one and
+  // that of a contact saved with its address.
+  const own = [others.self?.duskName, ...contacts.filter((each) => !others.contacts.includes(each)).map(duskOf)].filter((each) => each !== undefined && each !== null && each !== "");
+
+  for (const dusk of duskNamesIn(name)) {
+    if (own.some((each) => domainOf(each) === domainOf(dusk))) continue;
+
+    const theirs = keysOf(dusk);
+    const other = others.profiles.find((each) => each?.duskName && alike(theirs, keysOf(each.duskName)));
+
+    if (other) return profileAt(other);
+
+    const known = others.contacts.find((each) => duskOf(each) !== "" && alike(theirs, keysOf(duskOf(each))));
+
+    if (known) return contactAt(known, duskOf(known));
+
+    return /** @type {any} */ ({ dusk: true, entry: null, kind: "dusk", name: dusk, refused: false, words: `${shown(dusk)} is a .dusk name. Is it this profile's?` });
+  }
+
   // Then a contact's own name, as before.
   const contact = others.contacts.find((each) => namesOf(each, "contact").some((each) => startsAs(words, each)));
 
   return contact ? /** @type {any} */ ({ dusk: false, entry: contact, kind: "contact", name: String(contact.name), refused: false, words: `You have a contact called ${shown(contact.name)}. Is this someone else?` }) : null;
+}
+
+/**
+ * Where a contact is, for the words of a check: ", at " and its address cut
+ * short, as every Dusk app cuts it; "" for one without an address.
+ *
+ * @param {{ address?: unknown } | null | undefined} entry
+ */
+const atAddress = (entry) => {
+  const address = String(entry?.address ?? "").trim();
+
+  return address ? `, at ${shortAccount(address)}` : "";
+};
+
+/**
+ * @template {{ name?: unknown, duskName?: unknown, account?: unknown, address?: unknown }} P
+ * @template {{ name?: unknown, address?: unknown, id?: unknown }} C
+ * @param {unknown} name
+ * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, except?: unknown, address?: unknown }} [among]
+ * @returns {import("./names.js").ContactNameCheck<P, C> | null}
+ */
+export function contactNameCheck(name, { address, contacts = [], except, profiles = [] } = {}) {
+  if (nameHides(name)) return { dusk: false, entry: null, kind: "hides", name: "", refused: true, words: NAME_HIDES };
+
+  const saved = String(address ?? "").trim();
+  // A profile takes nothing from a contact saved with its own address, and the contact changed nothing from itself.
+  const own = profiles.filter((profile) => !saved || (String(profile?.account ?? "") !== saved && String(profile?.address ?? "") !== saved));
+  const rest = contacts.filter((contact) => except === undefined || except === null || contact?.id !== except);
+  /** @param {{ entry: P, name: string }} hit */
+  const duskOf = (hit) => hit.name === String(hit.entry?.duskName ?? "");
+  const clash = nameClash(name, { contacts: rest, profiles: own });
+
+  // A profile's name, or its .dusk name, or one like it: refused, as Review would read the contact as that profile.
+  if (clash?.kind === "profile") {
+    const other = shown(clash.name);
+    const words = clash.same ? `One of your profiles is called ${other}. Choose another name.` : `That looks like ${other}, one of your profiles. Choose another name.`;
+
+    return /** @type {any} */ ({ dusk: duskOf(clash), entry: clash.entry, kind: "profile", name: clash.name, refused: true, words });
+  }
+
+  // Another contact's name, or one like it: asked, with that contact's address, as only it tells the two apart.
+  if (clash) {
+    const other = `${shown(clash.name)}${atAddress(clash.entry)}`;
+    const words = clash.same ? `You have a contact called ${other}. Is this someone else?` : `That looks like your contact ${other}. Is this someone else?`;
+
+    return /** @type {any} */ ({ dusk: false, entry: clash.entry, kind: "contact", name: clash.name, refused: false, words });
+  }
+
+  // A name a profile's or a contact's starts as, or that starts as theirs, word for word: asked.
+  const starts = nameStarts(name, { contacts: rest, profiles: own });
+
+  if (starts?.kind === "profile") return /** @type {any} */ ({ dusk: duskOf(starts), entry: starts.entry, kind: "profile", name: starts.name, refused: false, words: `One of your profiles is called ${shown(starts.name)}. Is this someone else?` });
+
+  return starts
+    ? /** @type {any} */ ({ dusk: false, entry: starts.entry, kind: "contact", name: starts.name, refused: false, words: `You have a contact called ${shown(starts.name)}${atAddress(starts.entry)}. Is this someone else?` })
+    : null;
 }
 
 /**

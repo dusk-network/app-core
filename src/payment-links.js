@@ -11,7 +11,7 @@
 import { blockedReason, networkFor, networks } from "@dusk-network/networks";
 import { decodeBase58, isAccount } from "@dusk-network/networks/account";
 
-import { formatDuskPlain, parseDusk, readAmount } from "./amounts.js";
+import { amountForField, decimalSeparator, formatDuskPlain, parseDusk, readAmount } from "./amounts.js";
 import { looksAlike } from "./names.js";
 
 /** @typedef {import("./payment-links.js").PaymentLink} PaymentLink */
@@ -473,6 +473,18 @@ export function readPaymentLink(input, { network, walletUrl } = {}) {
   const otherNetwork = networkMismatch(chainId, network);
 
   return said(otherNetwork ? { chainId, link: null, problem: otherNetwork, reason: "other-network" } : { chainId, link, problem: "", reason: "" });
+}
+
+/**
+ * @param {PaymentLink | null | undefined} link
+ * @param {string} [language] The browser's, unless given
+ * @returns {{ field: string, lux: bigint | null, problem: string | null }}
+ */
+export function linkAmount(link, language) {
+  // As Send's field holds it once filled in from the link, and reads it back.
+  const field = link?.amountDusk ? amountForField(link.amountDusk, decimalSeparator(language)) : "";
+
+  return { field, ...readAmount(field, language) };
 }
 
 /**
