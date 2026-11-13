@@ -22,6 +22,10 @@
  * // In Send, as a link is pasted, scanned or opened: on the wallet's network.
  * readPaymentLink(pasted, { network: 2 });
  * // { link: null, problem: "This request is for Mainnet. You are on Testnet.", reason: "other-network", chainId: "dusk:1", network: "Mainnet" }
+ *
+ * // Its amount as Send fills it in and reads it, for a preview to say the same: here amount=1.000.
+ * linkAmount(readPaymentLink(opened, { network: 2 })?.link, "pl-PL");
+ * // { field: "1,000", lux: null, problem: "Is that 1 or 1000? Write the one you mean." }
  * ```
  *
  * @module
@@ -47,7 +51,13 @@ export type PaymentLink = {
   amountDusk: string;
   /** An exact amount in lux, when the link says one: then `amountDusk` is what it comes to. */
   amountLux: string;
-  /** What `amountDusk` is in lux, or null where it isn't one. */
+  /**
+   * What `amountDusk` is in lux as a plain number, a point its decimal mark,
+   * or null where it isn't one: for checking amounts agree, not for showing.
+   * Send reads `amountDusk` in the person's language, and asks which is meant
+   * of "1.000", where this is 1 DUSK: what it fills in and reads is
+   * `linkAmount`'s.
+   */
   lux: bigint | null;
   memo: string;
   label: string;
@@ -164,6 +174,21 @@ export type LinkRead = {
  * preview of it, as before a wallet opens, says why and nothing else.
  */
 export declare function readPaymentLink(input: unknown, options?: { network?: unknown; walletUrl?: string }): LinkRead | null;
+
+/**
+ * A link's amount as Send reads it, in `language` (the browser's, unless
+ * given), the same in a preview before a wallet opens: what Send's amount
+ * field holds once it's filled in from the link (`field`, as
+ * `amountForField` of `/amounts` writes `amountDusk`), and what the field
+ * reads (`readAmount`): the amount in lux, or the question it asks of one
+ * that could mean two, as "1.000" (`problem`: "Is that 1 or 1000? Write the
+ * one you mean."), or what's wrong with one Send won't take ("Enter an
+ * amount greater than 0."). Never one of the two amounts for the other: a
+ * preview shows `problem` where there's one, not `link.lux`. A link without
+ * an amount, or none, is `{ field: "", lux: null, problem: null }`: any
+ * amount.
+ */
+export declare function linkAmount(link: PaymentLink | null | undefined, language?: string): { field: string; lux: bigint | null; problem: string | null };
 
 /** What `makePaymentLink` takes. */
 export type PaymentRequest = {

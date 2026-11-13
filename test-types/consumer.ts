@@ -590,7 +590,7 @@ void [madeProblem, madeLink, linkForm, linkLux, memoLimit, linkTexts];
 // @ts-expect-error a request needs its recipient
 void makePaymentLink({ amount: "1" });
 
-import { LINK_BAD_ADDRESS, LINK_BAD_AMOUNT, LINK_MEMO_LINE_BREAK, LINK_TWO_AMOUNTS, LINK_UNREADABLE, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
+import { LINK_BAD_ADDRESS, LINK_BAD_AMOUNT, LINK_MEMO_LINE_BREAK, LINK_TWO_AMOUNTS, LINK_UNREADABLE, linkAmount, readPaymentLink, type LinkRead } from "@dusk-network/app-core/payment-links";
 
 const sendRead: LinkRead | null = readPaymentLink("dusk:public-x@dusk:1", { network: 2, walletUrl: "https://wallet.example" });
 const sendReason: "" | "unreadable" | "two-amounts" | "other-network" | undefined = sendRead?.reason;
@@ -600,6 +600,8 @@ const badAddress: "This link's address isn't valid. Ask for a new one." = LINK_B
 const badAmount: "This link's amount can't be read. Ask for a new one." = LINK_BAD_AMOUNT;
 const memoBreak: "This link's memo has a line break. Ask for a new one." = LINK_MEMO_LINE_BREAK;
 void [sendReason, sendFills, sendWords, badAddress, badAmount, memoBreak];
+const asSendReads: { field: string; lux: bigint | null; problem: string | null } = linkAmount(sendRead?.link, "pl-PL");
+void [asSendReads, linkAmount(null), linkAmount(readLink)];
 
 // /names
 import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ContactNameCheck, type ProfileNameCheck } from "@dusk-network/app-core/names";

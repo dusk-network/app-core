@@ -8,6 +8,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 - `/names`: `contactNameCheck`, what a contact's name says at Save in both wallets' words: refused as a profile's, or asked about another contact's name it is, looks like, starts as or is the start of, with that contact's address
 - `/names`: `NAME_SAVE_YES`, "Yes, save it": a name asked about at Save is saved only once it's answered
+- `/payment-links`: `linkAmount`, a link's amount as Send reads it in the person's language, for a preview to say the same: "Is that 1 or 1000?" for `amount=1.000`, never 1 DUSK
 
 ### Changed
 
