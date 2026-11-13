@@ -9,10 +9,12 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/names`: `contactNameCheck`, what a contact's name says at Save in both wallets' words: refused as a profile's, or asked about another contact's name it is, looks like, starts as or is the start of, with that contact's address
 - `/names`: `NAME_SAVE_YES`, "Yes, save it": a name asked about at Save is saved only once it's answered
 - `/payment-links`: `linkAmount`, a link's amount as Send reads it in the person's language, for a preview to say the same: "Is that 1 or 1000?" for `amount=1.000`, never 1 DUSK
+- `/export`: `rewardWorth`, what a year's rewards were worth in both wallets' words: "under 0,01 €" below the smallest coin, and a loss with its minus sign, or "a loss under 0,01 €"
 
 ### Changed
 
 - `/names`: `profileNameCheck` asks about any .dusk name in a profile's name, not only the wallet's: "sofiadesign.dusk is a .dusk name. Is it this profile's?"
+- `/export`: `rewardsByYear` counts what Sozu's unstakes took out at average cost with deposit fees included, to the nearest lux, and `REWARDS_COUNTED` names the method: "…less that stDUSK's average cost, deposit fees included."
 
 ## [0.13.0]
 
