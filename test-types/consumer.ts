@@ -602,7 +602,7 @@ const memoBreak: "This link's memo has a line break. Ask for a new one." = LINK_
 void [sendReason, sendFills, sendWords, badAddress, badAmount, memoBreak];
 
 // /names
-import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ProfileNameCheck } from "@dusk-network/app-core/names";
+import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ContactNameCheck, type ProfileNameCheck } from "@dusk-network/app-core/names";
 
 const contactsHere = [{ address: "q", id: "c1", name: "Estudio Marta" }];
 const profilesHere = [{ account: "p", name: "Profile 2" }];
@@ -626,6 +626,19 @@ const saveRefused: boolean | undefined = atSave?.refused;
 const saveDusk: boolean | undefined = atSave?.dusk;
 const saveEntry: string | undefined = atSave?.kind === "contact" ? atSave.entry.address : atSave?.kind === "profile" ? atSave.entry.account : undefined;
 void [saveWords, saveRefused, saveDusk, saveEntry];
+// Any .dusk name asks, of no one the wallet knows: its entry is null.
+const askedDusk: string | undefined = atSave?.kind === "dusk" ? `${atSave.name} ${atSave.entry === null}` : undefined;
+const saveAnswer: "Yes, save it" = NAME_SAVE_YES;
+const contactAtSave: ContactNameCheck<{ account: string; name: string; duskName?: string }, { id: string; name: string; address: string }> | null = contactNameCheck("Lucas", {
+  address: "q",
+  contacts: [{ address: "w", id: "c1", name: "Lucas (petit-fils)" }],
+  except: "c2",
+  profiles: [{ account: "p", name: "Profile 1" }],
+});
+const contactAsked: string | undefined = contactAtSave?.kind === "contact" ? `${contactAtSave.entry.id} ${contactAtSave.words}` : contactAtSave?.kind === "profile" ? contactAtSave.entry.account : undefined;
+// @ts-expect-error a contact's name asks nothing of a .dusk name: that's each wallet's own refusal
+void (contactAtSave?.kind === "dusk");
+void [askedDusk, saveAnswer, contactAsked, contactNameCheck("x")];
 const startsName: string | undefined = starts?.name;
 const startsAccount: string | undefined = starts?.kind === "profile" ? starts.entry.account : starts?.entry.address;
 // @ts-expect-error a name that starts as another is asked about, never said to be the same

@@ -8,13 +8,18 @@
  *
  * @example
  * ```js
- * import { NAME_HIDES, lookAlikes, looksAlike, nameClash, nameHides, nameStarts, profileNameCheck, profileNameClash } from "@dusk/app-core/names";
+ * import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameHides, nameStarts, profileNameCheck, profileNameClash } from "@dusk/app-core/names";
  *
  * nameHides("\u202eecilA"); // true: it reads as "Alice". Refuse it, saying NAME_HIDES
  * looksAlike("Bob", "Bօb"); // true: an Armenian օ
  * looksAlike("Wendy", "VVendy"); // true: two v's for a w
  * profileNameCheck("alice.dusk", { profiles, contacts: [{ name: "Wendy", duskName: "alice.dusk", address }], self });
- * // { refused: false, kind: "contact", dusk: true, name: "alice.dusk", entry, words: "You have a contact called Wendy, at alice.dusk. Is this someone else?" }
+ * // { refused: false, kind: "contact", dusk: true, name: "alice.dusk", entry, words: "You have a contact called Wendy, at alice.dusk. Is this someone else?" }:
+ * // not saved until it's answered, with NAME_SAVE_YES
+ * profileNameCheck("sofiadesign.dusk", { profiles, contacts, self });
+ * // { refused: false, kind: "dusk", dusk: true, name: "sofiadesign.dusk", entry: null, words: "sofiadesign.dusk is a .dusk name. Is it this profile's?" }
+ * contactNameCheck("Lucas", { profiles, contacts: [{ id: "c1", name: "Lucas (petit-fils)", address }], address: other });
+ * // { refused: false, kind: "contact", dusk: false, name: "Lucas (petit-fils)", entry, words: "You have a contact called Lucas (petit-fils), at 23zcbk…hjmd3E. Is this someone else?" }
  * nameClash("Profile 2", { profiles, contacts, except: editedId });
  * // { kind: "profile", same: true, entry: { name: "Profile 2", … }, name: "Profile 2" }: refuse it
  * profileNameClash("sofiadesign.dusk", { profiles: [{ account, name: "Profile 1", duskName: "sofiadesign.dusk" }, …], contacts, self: other });
@@ -60,6 +65,13 @@ export declare function nameHides(name: unknown): boolean;
 
 /** "This name has hidden characters. Type it again without them." */
 export declare const NAME_HIDES: "This name has hidden characters. Type it again without them.";
+
+/**
+ * "Yes, save it": what answers the question a name asks at Save
+ * (`profileNameCheck`, `contactNameCheck`), in both wallets. A name asked
+ * about isn't saved until it's answered so; changed, it's checked again.
+ */
+export declare const NAME_SAVE_YES: "Yes, save it";
 
 /**
  * Whether two names look alike: they read as the same name, or have the same
@@ -115,10 +127,10 @@ export declare function profileNameClash<P extends { name?: unknown; duskName?: 
  * its names. For a question, not a refusal: the two read differently, but a
  * glance can take one for the other, as Send's "From Lucas … To Lucas
  * (petit-fils)". Pass what to check against: a contact's name against
- * `profiles`, a profile's against `contacts` (and `self`, as
- * `profileNameClash` takes it). The same name is `nameClash`'s, not this.
- * A profile's name at Save is `profileNameCheck`'s, which asks of the
- * wallet's .dusk names too, the contacts' among them. Null for none.
+ * `profiles` and the other contacts, a profile's against `contacts` (and
+ * `self`, as `profileNameClash` takes it). The same name is `nameClash`'s,
+ * not this. A name at Save is `profileNameCheck`'s or `contactNameCheck`'s,
+ * which ask in the wallets' words. Null for none.
  */
 export declare function nameStarts<P extends { name?: unknown; duskName?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; address?: unknown }>(
   name: unknown,
@@ -128,9 +140,10 @@ export declare function nameStarts<P extends { name?: unknown; duskName?: unknow
 /**
  * What a profile's new name says at Save, in the words both wallets show on
  * the form, or null for nothing: `refused` (it isn't saved) or a question
- * (it's saved, and the question shows under it), the profile or contact it's
- * about (`entry`, `kind`), the name of theirs it takes or starts as (`name`),
- * and whether that's a .dusk name (`dusk`). In this order:
+ * (it isn't saved until it's answered, `NAME_SAVE_YES`; the question shows
+ * under the field), the profile or contact it's about (`entry`, `kind`), the
+ * name of theirs it takes or starts as (`name`), and whether that's a .dusk
+ * name (`dusk`). In this order:
  *
  * - one that hides what can't be seen (`nameHides`): refused, `NAME_HIDES`;
  * - one that is, or looks like, another profile's name or .dusk name, or a
@@ -148,13 +161,23 @@ export declare function nameStarts<P extends { name?: unknown; duskName?: unknow
  *   word for word, as Sofía's "sofiadesign.dusk cliente" or "sofiadesign":
  *   asked, "Your other profile is called sofiadesign.dusk. Is this someone
  *   else?"; then a contact's .dusk name so, as above;
+ * - one with any other .dusk name in it, a word that reads as one by the
+ *   look-alike rules, in any case, in letters that look like one's, with
+ *   marks over them, or in the letter pairs that look like one ("sofia.𝐃𝐔𝐒𝐊",
+ *   "sofia.dúsk", "sofia.clusk") (`kind` "dusk", `entry` null), as Marek's
+ *   profile named "sofiadesign.dusk", the name of someone he paid and History
+ *   shows by it: asked, "sofiadesign.dusk is a .dusk name. Is it this
+ *   profile's?"; where it's another profile's .dusk name or a contact's, as
+ *   above, naming them;
  * - one that starts as a contact's name, or is the start of it: asked, "You
  *   have a contact called Lucas (petit-fils). Is this someone else?".
  *
  * `self` is the account or address of the profile named, as
  * `profileNameClash` takes it: its own .dusk name, and a contact saved with
- * its address, ask nothing. The names in the words show what can't be seen
- * in them as codes.
+ * its address, ask nothing: its own as the name service tells names apart,
+ * in any case, so "ali-ce.dusk" or "al.ice.dusk" for a profile that is
+ * "alice.dusk" asks. The names in the words show what can't be seen in them
+ * as codes.
  */
 export declare function profileNameCheck<P extends { name?: unknown; duskName?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; duskName?: unknown; address?: unknown }>(
   name: unknown,
@@ -164,8 +187,53 @@ export declare function profileNameCheck<P extends { name?: unknown; duskName?: 
 /** What `profileNameCheck` says of a profile's name: refused or asked, in words, and whose name it's about. */
 export type ProfileNameCheck<P, C> =
   | { refused: true; words: "This name has hidden characters. Type it again without them."; kind: "hides"; entry: null; name: ""; dusk: false }
+  | { refused: false; words: string; kind: "dusk"; entry: null; name: string; dusk: true }
   | { refused: boolean; words: string; kind: "profile"; entry: P; name: string; dusk: boolean }
   | { refused: boolean; words: string; kind: "contact"; entry: C; name: string; dusk: boolean };
+
+/**
+ * What a contact's new or changed name says at Save, in the words both
+ * wallets show on the form, or null for nothing, as `profileNameCheck` says
+ * it of a profile's: `refused` (it isn't saved) or a question (it isn't
+ * saved until it's answered, `NAME_SAVE_YES`), and whose name it's about
+ * (`entry`, `kind`, `name`, `dusk`). In this order:
+ *
+ * - one that hides what can't be seen (`nameHides`): refused, `NAME_HIDES`;
+ * - one that is, or looks like, a profile's name or verified .dusk name
+ *   (`nameClash`): refused, "One of your profiles is called Profile 1.
+ *   Choose another name." or "That looks like Profile 1, one of your
+ *   profiles. Choose another name.", as Review would read the contact as
+ *   that profile;
+ * - one that is, or looks like, another contact's name: asked, with that
+ *   contact's address cut short, "You have a contact called Lucas, at
+ *   23zcbk…hjmd3E. Is this someone else?" or "That looks like your contact
+ *   Lucas, at 23zcbk…hjmd3E. Is this someone else?", as only the address
+ *   tells the two apart;
+ * - one that starts as a profile's name, or is the start of it, word for
+ *   word (`nameStarts`): asked, "One of your profiles is called Lucas. Is
+ *   this someone else?";
+ * - one that starts as another contact's name, or is the start of it, as
+ *   Amélie's new "Lucas" beside "Lucas (petit-fils)", the "new phone, new
+ *   account" trick: asked, "You have a contact called Lucas (petit-fils), at
+ *   23zcbk…hjmd3E. Is this someone else?".
+ *
+ * `except` is the ID of the contact changed, which takes nothing from its
+ * own name. `address` is the address the contact is saved with: the profile
+ * whose own account or shielded address it is takes nothing from it either.
+ * A name that looks like a .dusk name the contact isn't saved from is each
+ * wallet's own rule, before this. The names in the words show what can't be
+ * seen in them as codes.
+ */
+export declare function contactNameCheck<P extends { name?: unknown; duskName?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; address?: unknown; id?: unknown }>(
+  name: unknown,
+  among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; except?: unknown; address?: unknown }
+): ContactNameCheck<P, C> | null;
+
+/** What `contactNameCheck` says of a contact's name: refused or asked, in words, and whose name it's about. */
+export type ContactNameCheck<P, C> =
+  | { refused: true; words: "This name has hidden characters. Type it again without them."; kind: "hides"; entry: null; name: ""; dusk: false }
+  | { refused: boolean; words: string; kind: "profile"; entry: P; name: string; dusk: boolean }
+  | { refused: false; words: string; kind: "contact"; entry: C; name: string; dusk: false };
 
 /**
  * The entries whose name looks like another's of another address, profiles
