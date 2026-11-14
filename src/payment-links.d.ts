@@ -165,8 +165,11 @@ export type LinkRead = {
  * `parsePaymentLink` takes it; without `network`, a link for any network
  * fills in. Refused, in this order: an amount that isn't a plain number once
  * decoded (`LINK_BAD_AMOUNT`): anything in it or around it but digits and one
- * point or comma, as a `#` it encodes (`%23`), a hidden character or a space,
- * which a field that drops them would show as an amount the link doesn't say;
+ * point or comma, as a `#` it encodes (`%23`), a hidden character or a space
+ * of any kind, a tab and a line break among them, as it's written in the
+ * link, which a field that drops them would show as an amount the link
+ * doesn't say: a browser's reading of an https link drops tabs and line
+ * breaks, and "0.001", a tab and "5" would be 0.0015;
  * amounts that differ (in DUSK and in lux, or one of them twice, in any case);
  * what `parsePaymentLink` can't read, saying why, field names that hide
  * something among it; a recipient Send can't pay (`LINK_BAD_ADDRESS`): one that isn't

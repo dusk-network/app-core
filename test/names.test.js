@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { CONFUSABLES, CONFUSABLES_VERSION } from "../src/confusables.js";
-import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName } from "../src/names.js";
+import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameSkeleton, nameStarts, passesForDuskName, profileNameCheck, profileNameClash, sameName } from "../src/names.js";
 import { A, C } from "./fixtures/activity.js";
+import { like } from "./fixtures/helpers.js";
 
 describe("names that look alike", () => {
   it("catches Marek's: Armenian, Cherokee and a small capital I, as Cyrillic before", () => {
@@ -67,7 +68,7 @@ describe("names that look alike", () => {
       ["Anna", "Hanna"],
       ["Kim", "Tim"],
       ["Profile 1", "Profile 2"],
-      ["ian", "lan"],
+      ["Lia", "Ila"],
     ]) {
       assert.equal(looksAlike(name, other), false, `${name} ${other}`);
     }
@@ -135,8 +136,8 @@ describe("names that look alike", () => {
       assert.equal(sameName(name, other), false, `${name} ${other}`);
     }
 
-    // A small i and l don't look alike, nor capital Y and V, nor digits that stand for no letter here.
-    for (const [name, other] of [["ian", "lan"], ["Bill", "Biil"], ["Yan", "Van"], ["Profile 1", "Profile 2"], ["Room 3", "Room 8"]]) assert.equal(looksAlike(name, other), false, `${name} ${other}`);
+    // A capital Y and V don't look alike, nor a capital L and I, nor digits that stand for no letter here.
+    for (const [name, other] of [["Yan", "Van"], ["Lia", "Ila"], ["Profile 1", "Profile 2"], ["Room 3", "Room 8"]]) assert.equal(looksAlike(name, other), false, `${name} ${other}`);
 
     // Marek's Dav1d and Wendv beside David and Wendy: a contact so named is asked about, a profile refused, a list marks both.
     const contacts = [{ address: A, id: "c1", name: "David" }, { address: C, id: "c2", name: "Wendy" }];
@@ -151,10 +152,36 @@ describe("names that look alike", () => {
     assert.deepEqual(nameStarts("Wendv Design", { contacts }), { entry: contacts[1], kind: "contact", name: "Wendy" });
   });
 
-  it("reads each 1 on its own as an i or an l: Astra's L11ian beside Lilian, a written i and l still apart", () => {
-    // Both of Lilian's i and l written as 1: with every 1 read as one letter or the other, neither key matched.
-    for (const other of ["L11ian", "Li1ian", "L1lian", "LI1ian"]) assert.equal(looksAlike("Lilian", other), true, other);
-    for (const other of ["Liiian", "Llllan", "L11lan"]) assert.equal(looksAlike("Lilian", other), false, other);
+  it("reads digits and symbols for letters in any case, beside the strokes: Astra's luca5 beside Lucas, as before", () => {
+    // A small l is a stroke and a capital L isn't, so with the strokes alone luca5, in lower case, no longer looked like Lucas.
+    for (const [name, other] of [
+      ["Lucas", "luca5"],
+      ["Lucas", "lUCA5"],
+      ["Lilian", "l1l1an"],
+      ["Lilian", "L1L1AN"],
+      ["Alice", "AL1CE"],
+      ["Bill", "B1LL"],
+      ["Isla", "I5LA"],
+      ["Olivia", "OL1V1A"],
+      ["Profile 1", "PROF1LE 1"],
+      ["Lucas (petit-fils)", "luca5 (petit-fil5)"],
+      // And what's new the same way: a $ for an s, letters styled as symbols, in any case.
+      ["Lucas", "luca$"],
+      ["Lucas", "\u24db\u24e4\u24d2\u24d0\u24e2"],
+    ]) {
+      assert.equal(looksAlike(name, other), true, `${name} ${other}`);
+    }
+
+    const contacts = [{ address: A, id: "c1", name: "Lucas" }];
+
+    assert.deepEqual(nameStarts("luca5 Smith", { contacts }), { entry: contacts[0], kind: "contact", name: "Lucas" });
+    assert.equal(contactNameCheck("luca5", { address: "x", contacts })?.words, "That looks like your contact Lucas, at 26JfWK…B5NsNi. Is this someone else?");
+  });
+
+  it("reads each thin upright stroke as any other: Astra's L11ian beside Lilian, and a written i and l, which look alike too", () => {
+    // Both of Lilian's i and l written as 1, as a ! or a |, or as each other, as Marek's Davld for David.
+    for (const other of ["L11ian", "Li1ian", "L1lian", "LI1ian", "Liiian", "Llllan", "L11lan", "L!l!an", "L|l|an"]) assert.equal(looksAlike("Lilian", other), true, other);
+    for (const [name, other] of [["ian", "lan"], ["Bill", "Biil"], ["Bill", "Bi!l"]]) assert.equal(looksAlike(name, other), true, `${name} ${other}`);
 
     const contacts = [{ address: A, id: "c1", name: "Lilian" }];
     const fake = { address: "x", name: "L11ian" };
@@ -163,6 +190,45 @@ describe("names that look alike", () => {
     assert.deepEqual(contactNameCheck("L11ian", { address: "x", contacts })?.words, "That looks like your contact Lilian, at 26JfWK…B5NsNi. Is this someone else?");
     assert.deepEqual(lookAlikes([...contacts, fake]), new Set([contacts[0], fake]));
     assert.deepEqual(nameStarts("L11ian Design", { contacts }), { entry: contacts[0], kind: "contact", name: "Lilian" });
+  });
+
+  it("catches Marek's Davld and Dav!d beside David: an l, a ! or a | for an i, as a 1 was, in every check", () => {
+    for (const other of ["Davld", "Dav!d", "Dav|d", "DAV!D", "Dav\u01c3d", "Dav\uff01d", "Dav1d", "Dav\u00a1d", "Dav\u0131d"]) {
+      assert.equal(looksAlike("David", other), true, other);
+      assert.equal(sameName("David", other), false, other);
+    }
+
+    // Saved silently beside David in both wallets: asked about as a contact, refused as a profile, marked in a list.
+    const contacts = [{ address: A, id: "c1", name: "David" }];
+
+    for (const name of ["Davld", "Dav!d"]) {
+      assert.deepEqual(contactNameCheck(name, { address: "sofia", contacts }), { dusk: false, entry: contacts[0], kind: "contact", name: "David", refused: false, words: "That looks like your contact David, at 26JfWK…B5NsNi. Is this someone else?" }, name);
+      assert.deepEqual(profileNameCheck(name, { contacts, self: "p2" })?.words, "That looks like your contact David. Choose another name.", name);
+
+      const fake = { address: "sofia", name };
+
+      assert.deepEqual(lookAlikes([...contacts, fake]), new Set([contacts[0], fake]), name);
+      assert.deepEqual(nameStarts(`${name} Smith`, { contacts }), { entry: contacts[0], kind: "contact", name: "David" }, name);
+    }
+  });
+
+  it("reads the other symbols written for letters as those letters, a $ for an s, an @ for an a, a € for an e, and letters styled as symbols as theirs", () => {
+    for (const [name, other] of [
+      ["Rosa", "Ro$a"],
+      ["David", "D@vid"],
+      ["Emma", "\u20acmma"],
+      // Circled, white on black, squared and in small capitals.
+      ["David", "\u24b9\u24d0\u24e5\u24d8\u24d3"],
+      ["David", "\u{1f153}\u{1f150}\u{1f165}\u{1f158}\u{1f153}"],
+      ["David", "\u{1f133}\u{1f130}\u{1f145}\u{1f138}\u{1f133}"],
+      ["Sofia", "\ua731\u1d0f\ua730\u026a\u1d00"],
+    ]) {
+      assert.equal(looksAlike(name, other), true, `${name} ${other}`);
+    }
+
+    const contacts = [{ address: A, id: "c1", name: "Rosa" }];
+
+    assert.deepEqual(contactNameCheck("Ro$a", { address: "x", contacts })?.words, "That looks like your contact Rosa, at 26JfWK…B5NsNi. Is this someone else?");
   });
 
   it("is Unicode 18's table, kept in the package", () => {
@@ -437,6 +503,37 @@ describe("a profile's name at Save", () => {
     for (const unknown of [new Map([["sofiadesign.dusk", null]]), new Map(), undefined, new Map([["sofiadesign.dusk", {}]])]) assert.deepEqual(marek("sofiadesign.dusk", { owners: unknown }), asked);
   });
 
+  it("reads a .dusk name in small capitals or circled letters as one: Marek's sofiadesign.\u1d05\u1d1c\ua731\u1d0b and \u24e2\u24de\u24d5\u24d8\u24d0\u24d3\u24d4\u24e2\u24d8\u24d6\u24dd.dusk", () => {
+    // Saved without a word, and History then called his own Profile 2's transfers by Sofía's name.
+    const styled = [
+      "sofiadesign.\u1d05\u1d1c\ua731\u1d0b",
+      "\u24e2\u24de\u24d5\u24d8\u24d0\u24d3\u24d4\u24e2\u24d8\u24d6\u24dd.dusk",
+      "\ua731\u1d0f\ua730\u026a\u1d00\u1d05\u1d07\ua731\u026a\u0262\u0274.\u1d05\u1d1c\ua731\u1d0b",
+      "\u{1f162}\u{1f15e}\u{1f155}\u{1f158}\u{1f150}\u{1f153}\u{1f154}\u{1f162}\u{1f158}\u{1f156}\u{1f15d}.dusk",
+      "Mi cliente (sofiadesign.\u1d05\u1d1c\ua731\u1d0b)",
+    ];
+    const his = [{ account: "p1", address: "s1", name: "Profile 1" }, { account: "p2", address: "s2", name: "Profile 2" }];
+
+    for (const name of styled) {
+      // Looked up as it reads in plain letters, and refused as hers.
+      assert.deepEqual(nameDuskNames(name), ["sofiadesign.dusk"], name);
+      assert.deepEqual(
+        profileNameCheck(name, { owners: new Map([["sofiadesign.dusk", { account: "sofia" }]]), profiles: his, self: "p2" }),
+        { dusk: true, entry: null, kind: "dusk", name: "sofiadesign.dusk", refused: true, words: "That looks like sofiadesign.dusk, which belongs to another account. Choose another name." },
+        name
+      );
+
+      // Not looked up: asked about, as written.
+      const asked = /** @type {any} */ (profileNameCheck(name, { profiles: his, self: "p2" }));
+
+      like(asked, { dusk: true, kind: "dusk", refused: false }, name);
+      assert.match(asked.words, / is a \.dusk name\. Is it this profile's\?$/, name);
+
+      // Where Sofía is a contact, saved from her .dusk name: asked about by her name.
+      assert.equal(profileNameCheck(name, { contacts: [{ address: "sofia", duskName: "sofiadesign.dusk", name: "Sofía" }], profiles: his, self: "p2" })?.words, "You have a contact called Sofía, at sofiadesign.dusk. Is this someone else?", name);
+    }
+  });
+
   it("gives the .dusk names a profile's name holds, to look up as the name service names them", () => {
     assert.deepEqual(nameDuskNames("Profile 2"), []);
     assert.deepEqual(nameDuskNames("sofiadesign.dusk y bob.dusk"), ["sofiadesign.dusk", "bob.dusk"]);
@@ -483,6 +580,30 @@ describe("a profile's name at Save", () => {
 });
 
 describe("a contact's name at Save", () => {
+  it("passes for a .dusk name it isn't saved from where it ends as one, in plain letters or styled ones: Marek's sofiadesign.\u1d05\u1d1c\ua731\u1d0b", () => {
+    // Both wallets refused "sofiadesign.dusk" as a contact's name, but not in small capitals or with a fullwidth point.
+    for (const name of [
+      "sofiadesign.dusk",
+      "SofiaDesign.DUSK",
+      " sofiadesign.dusk. ",
+      "sofiadesign .dusk",
+      "sofiadesign.\u1d05\u1d1c\ua731\u1d0b",
+      "sofiadesign\uff0edusk",
+      "\u24e2\u24de\u24d5\u24d8\u24d0\u24d3\u24d4\u24e2\u24d8\u24d6\u24dd.dusk",
+      "sofiadesign.\u{1d41d}\u{1d42e}\u{1d42c}\u{1d424}",
+      "sofiadesign.\u{1f153}\u{1f164}\u{1f162}\u{1f15a}",
+    ]) {
+      assert.equal(passesForDuskName(name), true, name);
+      assert.equal(passesForDuskName(name, "bob.dusk"), true, name);
+    }
+
+    // The name it's saved from, in any case or letters, is its own; a look-alike of it isn't.
+    for (const name of ["sofiadesign.dusk", "SOFIADESIGN.DUSK", "sofiadesign.\u1d05\u1d1c\ua731\u1d0b"]) assert.equal(passesForDuskName(name, "sofiadesign.dusk"), false, name);
+    assert.equal(passesForDuskName("\u0455ofiadesign.dusk", "sofiadesign.dusk"), true);
+    // Nor what doesn't end as one.
+    for (const name of ["Sof\u00eda", "Estudio dusk", "dusk", "Mi cliente (sofiadesign.dusk)", "", null]) assert.equal(passesForDuskName(name), false, String(name));
+  });
+
   // Amélie's: her grandson saved as "Lucas (petit-fils)"; the "new phone, new account" message asks her to save
   // another account as plain "Lucas". Sofía's Profile 1 is sofiadesign.dusk.
   const profiles = [

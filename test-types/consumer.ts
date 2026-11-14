@@ -694,6 +694,11 @@ const lookedUp: DuskNameOwners = new Map<string, DuskNameOwner>([["sofiadesign.d
 const takenName = profileNameCheck("sofiadesign.dusk", { owners: lookedUp, profiles: ownNames, self: "q" });
 const takenWords: string | undefined = takenName?.refused ? takenName.words : undefined;
 void [toLookUp, takenWords, profileNameCheck("x", { owners: { "x.dusk": null } })];
+// A contact's name that passes for a .dusk name it isn't saved from, as both wallets refuse it.
+import { passesForDuskName } from "@dusk-network/app-core/names";
+
+const passesForDusk: [boolean, boolean] = [passesForDuskName("sofiadesign.dusk"), passesForDuskName("Sofía", null)];
+void passesForDusk;
 
 // /recovery-words
 import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";

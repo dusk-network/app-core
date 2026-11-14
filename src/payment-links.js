@@ -397,26 +397,44 @@ export function parsePaymentLink(input, { walletUrl } = {}) {
   return read && "link" in read ? read.link : null;
 }
 
+// A tab or a line break, which the URL parser drops from anywhere in a link.
+const DROPPED = /[\t\n\r]/g;
+// A control or a space at either end of a link, which the URL parser drops too.
+const LINK_ENDS = /^[\u0000-\u0020]+|[\u0000-\u0020]+$/g;
+
 /**
- * A link's query, as its form reads it, its fields named in any case: all
- * after the `?` of a `dusk:` link, up to a `#`, which its reading refuses;
- * an https link's search.
+ * A link's query as it's written, its fields named in any case: all after
+ * its first `?` up to its first `#`, which a `dusk:` link's reading refuses
+ * and an https link's fragment is. An https link's is read as the URL parser
+ * reads it, but for the tabs and line breaks in its values, which it drops,
+ * so joining what's around them: an amount of "0.001", a tab and "5" is
+ * 0.0015 to it, and here it's as written. Its fields' names are the
+ * parser's, what it drops dropped before they're decoded, so a name it reads
+ * as a field's, as "%6", a tab and "1mount" for `amount`, is that field's
+ * here too.
  *
  * @param {string} raw
  */
 function queryOf(raw) {
-  if (/^dusk:/i.test(raw)) {
-    const [link] = raw.split("#");
-    const q = link.indexOf("?");
+  const dusk = /^dusk:/i.test(raw);
+  const [link] = (dusk ? raw : raw.replace(LINK_ENDS, "")).split("#");
+  const q = link.indexOf("?");
+  const query = q >= 0 ? link.slice(q + 1) : "";
 
-    return fieldsOf(new URLSearchParams(q >= 0 ? link.slice(q + 1) : ""));
-  }
+  if (dusk) return fieldsOf(new URLSearchParams(query));
 
-  try {
-    return fieldsOf(new URL(raw).searchParams);
-  } catch {
-    return new URLSearchParams();
-  }
+  // Each field's name without what the parser drops; the tabs and line breaks in its value kept, encoded.
+  const written = query
+    .split("&")
+    .map((field) => {
+      const is = field.indexOf("=");
+
+      return is < 0 ? field.replace(DROPPED, "") : `${field.slice(0, is).replace(DROPPED, "")}=${field.slice(is + 1).replace(DROPPED, encodeURIComponent)}`;
+    })
+    .join("&");
+
+  // An empty fragment after it, so the parser keeps what's at the query's end, as in the link it's read from.
+  return fieldsOf(new URL(`https://link.invalid/?${written}#`).searchParams);
 }
 
 /**

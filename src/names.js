@@ -13,7 +13,7 @@ import { shortAccount } from "@dusk-network/networks/format";
 import { CONFUSABLES } from "./confusables.js";
 import { displayText } from "./text.js";
 
-/** @typedef {{ same: string, written: string, paired: string, lower: string, digits: string }} NameKeys */
+/** @typedef {{ same: string, written: string, paired: string, lower: string, digits: string, strokes: string }} NameKeys */
 
 /** @type {Map<number, string> | null} */
 let looksLike = null;
@@ -43,12 +43,21 @@ const NOT_LETTER_OR_DIGIT = /[^\p{L}\p{N}]/gu;
 const PAIRS = /[wWd]/g;
 /** @type {Readonly<Record<string, string>>} */
 const PAIRED = Object.freeze({ W: "VV", d: "cl", w: "vv" });
-// The digits that stand in for letters, a 0 for an o and a 5 for an s; a 1 stands in for an i or an l, each 1 on its own.
-const DIGITS = /[05]/g;
+// What's written for a letter: a 0 for an o, a 5 or a $ for an s, an @ for an a and a € for an e.
+const STANDS_IN = /[05$@€]/g;
 /** @type {Readonly<Record<string, string>>} */
-const DIGIT_LETTERS = Object.freeze({ 0: "o", 5: "s" });
+const STOOD_FOR = Object.freeze({ $: "s", 0: "o", 5: "s", "@": "a", "€": "e" });
 /** What a 1 in a name's digits key can stand in for, where the other name has it: an i, an l, or a 1. */
 const ONE = new Set(["1", "i", "l"]);
+// What Unicode's table reads as a thin upright stroke, an i, an l or a !, as it reads a 1, an I, a | and a ¡: each
+// looks like the others, so "Davld", "Dav!d" and "Dav1d" look like "David".
+const STROKES = /[il!]/g;
+// The small capitals, as the capitals they are, which NFKC leaves as they are: "ᴅᴜꜱᴋ" is DUSK. There's no small X.
+const SMALL_CAPITALS = new Map(
+  [..."\u1d00\u0299\u1d04\u1d05\u1d07\ua730\u0262\u029c\u026a\u1d0a\u1d0b\u029f\u1d0d\u0274\u1d0f\u1d18\ua7af\u0280\ua731\u1d1b\u1d1c\u1d20\u1d21\u028f\u1d22"].map((char, i) => [char, "ABCDEFGHIJKLMNOPQRSTUVWYZ"[i]])
+);
+// The capitals white on a black circle or square, 🅓 and 🆂, A to Z, which NFKC leaves as they are too.
+const WHITE_ON_BLACK = [0x1f150, 0x1f170];
 
 /** What an app says of a name it refuses for what can't be seen in it. */
 export const NAME_HIDES = "This name has hidden characters. Type it again without them.";
@@ -94,17 +103,46 @@ const folded = (text) => text.normalize("NFD").replace(UNSEEN, "").replace(NOT_L
 const paired = (shape) => shape.replace(PAIRS, (char) => PAIRED[char]);
 
 /**
- * A name's skeleton with its digits as the letters they stand in for, a 0
- * as an o and a 5 as an s, and each small y as the v it looks like, as
- * written: "Ro5a" as "Rosa", "Wendv" as "Wendy". A capital Y stays: "Yan"
- * isn't "Van". Each 1 stays a 1, which Unicode's table would make an l: it
- * stands in for an i or an l, each on its own (`digitsAlike`).
+ * A name's letters as the plain ones they're styled as: its compatibility
+ * forms as their letters (NFKC: fullwidth, mathematical, circled ⓢ, squared
+ * 🄢, letterlike ℓ), its small capitals as the capitals they are (ᴅ is a D),
+ * and the capitals white on black as theirs (🅓 is a D).
+ *
+ * @param {string} text
+ */
+function lettersOf(text) {
+  let letters = "";
+
+  for (const char of text.normalize("NFKC")) {
+    const code = /** @type {number} */ (char.codePointAt(0));
+    const block = WHITE_ON_BLACK.find((first) => code >= first && code < first + 26);
+
+    letters += SMALL_CAPITALS.get(char) ?? (block === undefined ? char : String.fromCharCode(65 + code - block));
+  }
+
+  return letters;
+}
+
+/**
+ * A name in plain letters (`lettersOf`) with what's written for a letter as
+ * that letter: a 0 as an o, a 5 and a $ as an s, an @ as an a, a € as an e.
+ *
+ * @param {string} text
+ */
+const lettered = (text) => lettersOf(text).replace(STANDS_IN, (char) => STOOD_FOR[char]);
+
+/**
+ * A name's skeleton with what's written for letters as those letters
+ * (`lettered`), and each small y as the v it looks like, as written: "Ro5a"
+ * and "Ro$a" as "Rosa", "Wendv" as "Wendy". A capital Y stays: "Yan" isn't
+ * "Van". Each 1 stays a 1, which Unicode's table would make an l: it stands
+ * in for an i or an l, each on its own (`digitsAlike`), so its key, in lower
+ * case, has "luca5" as "Lucas" and "L11ian" as "Lilian".
  *
  * @param {string} text
  */
 const digitShape = (text) =>
-  text
-    .replace(DIGITS, (digit) => DIGIT_LETTERS[digit])
+  lettered(text)
     .split("1")
     .map((part) => nameSkeleton(part))
     .join("1")
@@ -113,8 +151,7 @@ const digitShape = (text) =>
 /**
  * Whether two names' digits keys (or words of them) look alike: the same,
  * but where one has a 1 the other may have an i or an l, each 1 on its own,
- * as "L11ian" reads as "Lilian" and "Dav1d" as "David"; a written i and l
- * stay apart, as "Lilian" and "Liiian" do.
+ * as "L11ian" reads as "Lilian" and "Dav1d" as "David".
  *
  * @param {string} a
  * @param {string} b
@@ -128,13 +165,29 @@ function digitsAlike(a, b) {
 }
 
 /**
- * A name's five keys: as a person reads it, and by what it looks like, as
+ * A name's skeleton with what's written for letters as those letters
+ * (`lettered`), each thin upright stroke as one and the same, an i, an l, a
+ * 1, a ! or a |, and each small y as the v it looks like, as written: "Dav!d"
+ * and "Davld" as "David". A capital L and a capital Y stay: "Lia" isn't
+ * "Ila", nor "Yan" "Van".
+ *
+ * @param {string} text
+ */
+const strokeShape = (text) =>
+  nameSkeleton(lettered(text))
+    .replace(STROKES, "1")
+    .replace(/y/g, "v");
+
+/**
+ * A name's six keys: as a person reads it, and by what it looks like, as
  * written, as written with its letter pairs, in lower case, where a capital
- * that looks like another letter is the small one, and with its digits as
- * the letters they stand in for. The pairs and the digits are keys of their
- * own beside the written one, never in its place: "daIe" with a capital I
- * looks like "Dale" as written, though its d makes a pair the capital D
- * doesn't.
+ * that looks like another letter is the small one, with what's written for
+ * letters as those letters in any case (`digitShape`), and with every thin
+ * stroke as one, as written (`strokeShape`). The pairs, the digits and the
+ * strokes are keys of their own beside the written one, never in its place:
+ * "daIe" with a capital I looks like "Dale" as written, though its d makes a
+ * pair the capital D doesn't, and "luca5" looks like "Lucas" by its digits,
+ * though its small l is a stroke the capital L isn't.
  *
  * @param {unknown} name
  * @returns {NameKeys}
@@ -148,15 +201,19 @@ function keysOf(name) {
     lower: folded(nameSkeleton(text.toLowerCase())),
     paired: folded(paired(written)),
     same: folded(text),
+    strokes: folded(strokeShape(text)),
     written: folded(written),
   };
 }
+
+/** The keys two names are alike by where they're the same: all but the digits', which `digitsAlike` compares. */
+const KEYS = /** @type {const} */ (["same", "written", "paired", "lower", "strokes"]);
 
 /**
  * @param {NameKeys} a
  * @param {NameKeys} b
  */
-const alike = (a, b) => /** @type {(keyof NameKeys)[]} */ (["same", "written", "paired", "lower"]).some((key) => a[key] !== "" && a[key] === b[key]) || digitsAlike(a.digits, b.digits);
+const alike = (a, b) => KEYS.some((key) => a[key] !== "" && a[key] === b[key]) || digitsAlike(a.digits, b.digits);
 
 /**
  * @param {unknown} a
@@ -253,8 +310,9 @@ const wordsOf = (text) =>
 
 /**
  * A name's words as a person reads them, and by what they look like, as
- * written, as written with its letter pairs, in lower case, and with its
- * digits as letters, as `keysOf` reads the whole name.
+ * written, as written with its letter pairs, in lower case, with what's
+ * written for letters as those letters, and with every thin stroke as one,
+ * as `keysOf` reads the whole name.
  *
  * @param {unknown} name
  * @returns {string[][]}
@@ -263,7 +321,7 @@ function wordKeys(name) {
   const text = String(name ?? "");
   const written = nameSkeleton(text);
 
-  return [wordsOf(text), wordsOf(written), wordsOf(paired(written)), wordsOf(nameSkeleton(text.toLowerCase())), wordsOf(digitShape(text))];
+  return [wordsOf(text), wordsOf(written), wordsOf(paired(written)), wordsOf(nameSkeleton(text.toLowerCase())), wordsOf(digitShape(text)), wordsOf(strokeShape(text))];
 }
 
 /** Which of `wordKeys`' lists is its digits', whose words are compared by `digitsAlike`. */
@@ -316,8 +374,31 @@ const shown = (name) => (nameHides(name) ? displayText(name).text : String(name 
 // with the letter pairs, as a d looks like cl, .clusk.
 const DUSK_ENDING = /[^.\s]\.dusk$/u;
 const PAIRED_DUSK_ENDING = /[^.\s]\.clusk$/u;
-// What a word starts or ends with that's no part of a name in it: brackets, quotes and punctuation.
-const WORD_EDGES = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
+
+/**
+ * Whether a character is a letter or a digit, or a symbol styled as one, as
+ * a circled ⓢ (`lettersOf`).
+ *
+ * @param {string} char
+ */
+const letterLike = (char) => /^[\p{L}\p{N}]$/u.test(char) || /^[\p{L}\p{N}]$/u.test(lettersOf(char));
+
+/**
+ * A word without what it starts or ends with that's no part of a name in
+ * it: brackets, quotes and punctuation.
+ *
+ * @param {string} word
+ */
+function withoutEdges(word) {
+  const chars = [...word];
+  let start = 0;
+  let end = chars.length;
+
+  while (start < end && !letterLike(chars[start])) start += 1;
+  while (end > start && !letterLike(chars[end - 1])) end -= 1;
+
+  return chars.slice(start, end).join("");
+}
 
 /**
  * A skeleton as the look-alike checks compare one, its points and hyphens
@@ -334,13 +415,14 @@ const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 
 /**
  * Whether a character can be part of a .dusk name as a person reads one: a
- * letter, a digit or a mark over one, and a point or a hyphen, or what reads
- * as one, as a fullwidth point. Spaces and other punctuation part names, as
- * the comma in "alice.dusk,bob.dusk".
+ * letter, a digit or a mark over one, or a symbol styled as a letter, as a
+ * circled ⓢ (`lettersOf`), and a point or a hyphen, or what reads as one, as
+ * a fullwidth point. Spaces and other punctuation part names, as the comma in
+ * "alice.dusk,bob.dusk".
  *
  * @param {string} char
  */
-const inDuskName = (char) => /^[\p{L}\p{N}\p{M}]$/u.test(char) || [char.normalize("NFKC"), nameSkeleton(char)].some((shape) => shape === "." || shape === "-");
+const inDuskName = (char) => /^\p{M}$/u.test(char) || letterLike(char) || [lettersOf(char), nameSkeleton(char)].some((shape) => shape === "." || shape === "-");
 
 /**
  * The words of a name that read as .dusk names, as they're written, split
@@ -372,7 +454,7 @@ function duskNamesIn(name) {
   words.push(word);
 
   return words
-    .map((each) => each.replace(WORD_EDGES, ""))
+    .map(withoutEdges)
     .filter((each) => {
       if (each === "") return false;
 
@@ -452,7 +534,7 @@ const plainChar = (char) => {
  * @param {string} word As `duskNamesIn` gives it
  */
 function readingOf(word) {
-  const chars = [...word.normalize("NFKC").normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "")].map(plainChar);
+  const chars = [...lettersOf(word).normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "")].map(plainChar);
   const point = chars.lastIndexOf(".");
   const reading = point > 0 ? `${chars.slice(0, point).join("")}.dusk` : "";
 
@@ -485,6 +567,18 @@ export function nameDuskNames(name) {
   }
 
   return names;
+}
+
+/**
+ * @param {unknown} name
+ * @param {unknown} [duskName]
+ * @returns {boolean}
+ */
+export function passesForDuskName(name, duskName) {
+  // In plain letters, so a .dusk in small capitals or circled letters, or after a fullwidth point, ends it too.
+  const typed = lettersOf(String(name ?? "")).trim().toLowerCase().replace(/\.$/, "");
+
+  return typed.endsWith(".dusk") && typed !== String(duskName ?? "").trim().toLowerCase();
 }
 
 /**
