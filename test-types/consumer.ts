@@ -328,6 +328,14 @@ const wrong: ActivityStatus = "submitted";
 const noHash: SentTransaction = { kind: "transfer" };
 const tokenSend: SentTransaction = { asset: { decimals: 9, op: "transfer", symbol: "TKN", to: "account", type: "DRC20", valueUnits: "1" }, hash: "" };
 void tokenSend;
+
+// A memo from someone who isn't one of the wallet's profiles or contacts is the sender's own words.
+import { MEMO_FROM_UNKNOWN, knownCounterparty, sendersMemo } from "@dusk-network/app-core/activity";
+
+const sendersWords: { memo: string; from: string } | null = sendersMemo(first, { contacts: [{ address: "q", name: "Nandini" }], profiles: [{ account: "x", address: "y" }] });
+const fromUnknown: "From an address not in your contacts" = MEMO_FROM_UNKNOWN;
+const fromKnown: boolean = knownCounterparty(first?.counterparty, { contacts: [{ address: "q" }] });
+void [sendersWords, fromUnknown, fromKnown, sendersMemo(null), knownCounterparty("x")];
 void [wrong, noHash];
 
 // What happened on the other side of the bridge's routes.
@@ -552,6 +560,14 @@ void [shownAmount, plainAmount, readLux, eitherAmount];
 const weiShown: { text: string; exact: string } = formatAmount(10n ** 18n, { decimals: 18, locale: "en", mode: "exact", round: "down" });
 const hint: string = amountExample("10.5", "fr-FR");
 const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 000,5", "fr-FR");
+// Where it could be two, the question and the two, for a button each.
+import type { AmountChoice, AmountRead } from "@dusk-network/app-core/amounts";
+
+const readAsked: AmountRead = readAmount("2.125", "en-SG");
+const readChoices: [AmountChoice, AmountChoice] | undefined = readAsked.choices;
+const readQuestion: string | undefined = readAsked.question;
+const choiceFacts: [bigint | undefined, string | undefined] = [readAsked.choices?.[0].lux, readAsked.choices?.[1].field];
+void [readChoices, readQuestion, choiceFacts];
 const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
 void [weiShown, hint, readTyped, readFrench];
 
@@ -601,7 +617,16 @@ const badAmount: "This link's amount can't be read. Ask for a new one." = LINK_B
 const memoBreak: "This link's memo has a line break. Ask for a new one." = LINK_MEMO_LINE_BREAK;
 void [sendReason, sendFills, sendWords, badAddress, badAmount, memoBreak];
 const asSendReads: { field: string; lux: bigint | null; problem: string | null } = linkAmount(sendRead?.link, "pl-PL");
-void [asSendReads, linkAmount(null), linkAmount(readLink)];
+const linkChoices: AmountRead["choices"] = linkAmount(sendRead?.link, "pl-PL").choices;
+void [asSendReads, linkChoices, linkAmount(null), linkAmount(readLink)];
+
+// A request shared as a message, the same from both wallets.
+import { requestMessage } from "@dusk-network/app-core/payment-links";
+
+const shareText: string = requestMessage({ language: "es-ES", link: madeLink ?? "", lux: madeLinks.lux, memo: "Factura 33", name: "sofiadesign.dusk", network: null });
+void [shareText, requestMessage({ link: "x" }), requestMessage({ link: "x", lux: "20000000", network: "Testnet" })];
+// @ts-expect-error a message ends with its link
+void requestMessage({ name: "Chen" });
 
 // /names
 import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ContactNameCheck, type ProfileNameCheck } from "@dusk-network/app-core/names";
@@ -646,6 +671,15 @@ const startsAccount: string | undefined = starts?.kind === "profile" ? starts.en
 // @ts-expect-error a name that starts as another is asked about, never said to be the same
 void starts?.same;
 void [clashKind, clashAccount, alikeHere, nameChecks, hiddenName, hiddenWords, profileClashName, clashTaken, ownNameTaken, startsName, startsAccount];
+// The .dusk names a profile's name holds, looked up, and what the lookup said of each.
+import { nameDuskNames, type DuskNameOwner, type DuskNameOwners } from "@dusk-network/app-core/names";
+
+const toLookUp: string[] = nameDuskNames("sofiadesign.dusk");
+const sofiasName: DuskNameOwner = { account: "sofia", address: null };
+const lookedUp: DuskNameOwners = new Map<string, DuskNameOwner>([["sofiadesign.dusk", sofiasName], ["bob.dusk", null], ["x.dusk", "account"]]);
+const takenName = profileNameCheck("sofiadesign.dusk", { owners: lookedUp, profiles: ownNames, self: "q" });
+const takenWords: string | undefined = takenName?.refused ? takenName.words : undefined;
+void [toLookUp, takenWords, profileNameCheck("x", { owners: { "x.dusk": null } })];
 
 // /prices
 import { PRICE_MAX_AGE_MS, PRICE_URL, duskPrice, inCurrency, type DuskPrice, type FetchLike as PriceFetch } from "@dusk-network/app-core/prices";
@@ -669,6 +703,14 @@ const gasMedian: bigint | null = gasNow.median;
 const gasWords: "The network is busy. You can raise the gas price for it to go out sooner." = GAS_PRICE_BUSY;
 const gasBounds: [1n, 5n] = [GAS_PRICE_MINIMUM, GAS_PRICE_CEILING_TIMES];
 void [gasPrice, gasBusy, gasMedian, gasWords, gasBounds, defaultGasPrice(), defaultGasPrice({ median: 2 })];
+// From what waits in the mempool, as the node's GraphQL lists it.
+import { BLOCK_GAS, BLOCK_TRANSACTIONS } from "@dusk-network/app-core/gas";
+
+const fromMempool: DefaultGasPrice = defaultGasPrice({ mempool: [{ gasLimit: 6000000, gasPrice: 2 }, { gasLimit: "1", gasPrice: 1n }], minimum: 1n });
+const blockBounds: [1000, 3000000000n] = [BLOCK_TRANSACTIONS, BLOCK_GAS];
+void [fromMempool, blockBounds, defaultGasPrice({ mempool: null })];
+// @ts-expect-error what waits is a list of transactions, not the node's whole answer
+void defaultGasPrice({ mempool: { mempoolTxs: [] } });
 // @ts-expect-error a median is a whole number of lux, not a node's whole answer
 void defaultGasPrice({ median: { median: 2n } });
 

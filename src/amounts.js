@@ -314,8 +314,8 @@ const WRITTEN_PLAIN = /^(0|[1-9]\d*)(\.\d*[1-9])?$/;
  * the decimal separator the field reads back. One as `formatDuskPlain` writes
  * it, with three decimals that would read as a group of thousands, has a
  * fourth, a zero, so the field reads it as it is: "1.234" is "1.2340". One
- * written otherwise, as "1.000" in a link, stays as it's written, for the
- * field to ask which is meant.
+ * written otherwise, as "1.000", stays as it's written, for the field to ask
+ * which is meant.
  *
  * @param {string} plain
  * @param {string} [decimal] `decimalSeparator()`, unless given
@@ -492,11 +492,13 @@ export function amountsMeant(query, language) {
 
 /**
  * An amount of DUSK as a person typed it, in the language's reading: the lux
- * it is, or what's wrong with it in plain words. Nothing typed is neither.
+ * it is, or what's wrong with it in plain words; and where it could be two,
+ * the question alone and each of the two, as a field writes it and in lux,
+ * to choose from. Nothing typed is neither.
  *
  * @param {string} text
  * @param {string} [language] The browser's, unless given
- * @returns {{ lux: bigint | null, problem: string | null }}
+ * @returns {import("./amounts.js").AmountRead}
  */
 export function readAmount(text, language) {
   const typed = String(text ?? "").trim();
@@ -507,8 +509,24 @@ export function readAmount(text, language) {
   const either = unclearAmount(typed, decimal);
 
   // Each as no reader takes for the other, and as it's written to be meant: "1 or 1000", never "1.000" for one, which
-  // reads as a thousand to a German, and "2.1250 or 2125", exact, for 2.125.
-  if (either) return { lux: null, problem: `Is that ${decimalMeant(either, decimal)} or ${either.grouped}? Write the one you mean.` };
+  // reads as a thousand to a German, and "2.1250 or 2125", exact, for 2.125. Each as a field reads it back as that
+  // amount, the question gone: the decimal one first.
+  if (either) {
+    const meant = decimalMeant(either, decimal);
+    const question = `Is that ${meant} or ${either.grouped}?`;
+    const decimalLux = /** @type {bigint} */ (parseDusk(either.decimal.replace(decimal, ".")));
+    const groupedLux = /** @type {bigint} */ (parseDusk(either.grouped));
+
+    return {
+      choices: [
+        { field: meant, lux: decimalLux },
+        { field: either.grouped, lux: groupedLux },
+      ],
+      lux: null,
+      problem: `${question} Write the one you mean.`,
+      question,
+    };
+  }
 
   const plain = normalizeAmount(typed, decimal, language);
   const lux = parseDusk(plain);

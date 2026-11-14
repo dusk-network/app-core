@@ -16,7 +16,9 @@
  * formatDusk(1_853_542n, { round: "up" }); // { text: "0.0019", exact: "0.001853542" }
  * formatAmount(90_082_082_000_000_000n, { decimals: 18, round: "down" }); // { text: "0.09", exact: "0.090082082" }
  * readAmount("1 000,5", "fr-FR"); // { lux: 1_000_500_000_000n, problem: null }
- * readAmount("1.000", "en-GB"); // { lux: null, problem: "Is that 1 or 1000? Write the one you mean." }
+ * readAmount("1.000", "en-GB");
+ * // { lux: null, problem: "Is that 1 or 1000? Write the one you mean.", question: "Is that 1 or 1000?",
+ * //   choices: [{ field: "1", lux: 1_000_000_000n }, { field: "1000", lux: 1_000_000_000_000n }] }
  * unclearAmount("1.001", ","); // { grouped: "1001", decimal: "1,001" }
  * amountExample("10.5", "fr-FR"); // "10,5"
  * ```
@@ -102,9 +104,10 @@ export declare const groupDigits: (whole: bigint | number | string, language?: s
  * back. One as `formatDuskPlain` writes it, whose three decimals would read
  * as a group of thousands (`unclearAmount`), has a fourth, a zero, so the
  * field reads it as it is: "1.234" is "1.2340" in English and "1,2340" in
- * German. One written otherwise, as "1.000" in a link, stays as it's written,
- * for the field to ask which is meant. Every amount an app puts in a field
- * goes through it: Max, a link's, Send back's.
+ * German. One written otherwise, as "1.000", stays as it's written, for the
+ * field to ask which is meant. Every amount a wallet works out and puts in a
+ * field goes through it: Max, Send back's, a send's kept to send again. A
+ * link's is read as typing reads it (`linkAmount` of `/payment-links`).
  */
 export declare function amountForField(plain: string, decimal?: string): string;
 
@@ -150,8 +153,22 @@ export declare function parseDusk(plain: string): bigint | null;
  * 2.13"), that a space the language doesn't
  * group with is in it ("Leave out the space: 1234,5."), that it has too many
  * decimals, or what an amount looks like. Nothing typed is neither.
+ *
+ * Where it could be two, the question alone (`question`, "Is that 2.1250 or
+ * 2125?", which `problem` follows with "Write the one you mean.") and the two
+ * to choose from (`choices`), the decimal one first: each as the field is
+ * to hold it, which reads back as that amount without the question
+ * (`field`, "2.1250" and "2125"), and in lux (`lux`), for a button each.
  */
-export declare function readAmount(text: string, language?: string): { lux: bigint | null; problem: string | null };
+export declare function readAmount(text: string, language?: string): AmountRead;
+
+/** One of two amounts a text could mean: as a field writes it, so it reads back as that amount, and in lux. */
+export type AmountChoice = { field: string; lux: bigint };
+
+/** What `readAmount` reads: the amount, or what's wrong; and where it could be two, the question and the two. */
+export type AmountRead =
+  | { lux: bigint | null; problem: string | null; question?: undefined; choices?: undefined }
+  | { lux: null; problem: string; question: string; choices: [AmountChoice, AmountChoice] };
 
 /**
  * The amounts of DUSK a search can mean, as what a row shows starts with

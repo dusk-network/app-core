@@ -2,6 +2,25 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.15.0]
+
+### Added
+
+- `/payment-links`: `requestMessage`, a request as both wallets share it: "sofiadesign.dusk asks you to pay 0,03 DUSK · Factura 33", then "Pay here:" and the link as it is
+- `/activity`: `sendersMemo`, a memo on a payment from an address that isn't one of the wallet's profiles or contacts (`knownCounterparty`), as the sender's words, with `MEMO_FROM_UNKNOWN`, "From an address not in your contacts", or the sender's .dusk name
+- `/names`: `nameDuskNames`, the .dusk names a profile's name holds, to look up before `profileNameCheck`: as written, and as they read in plain letters
+- `/gas`: `BLOCK_TRANSACTIONS` and `BLOCK_GAS`, what a block takes
+
+### Changed
+
+- `/gas`: `defaultGasPrice` takes what waits in the mempool (`mempool`) and is the network's minimum while it fits in the next block, else its median up to the ceiling
+- `/names`: `profileNameCheck` refuses a .dusk name the name service says is another account's (`owners`): "sofiadesign.dusk belongs to another account. Choose another name.", and asks nothing of one that's the profile's own
+- `/names`: names look alike with digits for letters, a 1 for an i or an l, a 0 for an o and a 5 for an s, and a v for a y: "Dav1d" like "David", "Wendv" like "Wendy"
+- `/amounts`: `readAmount` gives its question's two readings to choose from (`choices`), each as the field reads it back without the question, and the question alone (`question`)
+- `/payment-links`: `linkAmount` reads a link's amount as typing reads it: `amount=2.125` asks "Is that 2.1250 or 2125?", as typed 2.125 does
+- `/payment-links`: `makePaymentLink` writes an amount of three decimals with a fourth, as `2.1250`, which Send reads without the question
+- `/export`: `rewardsByYear` counts each stake's deposit fee off what Sozu's stDUSK grew while held, as taken out by unstaking does, both to the nearest lux, and `REWARDS_COUNTED` says both: "…both count stDUSK at its average cost, deposit fees included."
+
 ## [0.14.0]
 
 ### Added

@@ -772,3 +772,38 @@ export function settleSends({ public: entries, shielded, pending, keeps } = {}) 
 
   return { drop, keep };
 }
+
+/** What a memo on a payment from an address that isn't one of the wallet's profiles or contacts is shown under. */
+export const MEMO_FROM_UNKNOWN = "From an address not in your contacts";
+
+/**
+ * @param {unknown} address
+ * @param {{ profiles?: ReadonlyArray<{ account?: unknown, address?: unknown }>, contacts?: ReadonlyArray<{ address?: unknown }> }} [among]
+ * @returns {boolean}
+ */
+export function knownCounterparty(address, { contacts = [], profiles = [] } = {}) {
+  /** @param {unknown} value */
+  const idOf = (value) => (typeof value === "string" ? value.trim() : "");
+  const id = idOf(address);
+
+  if (!id) return false;
+
+  /** @param {unknown} each */
+  const is = (each) => idOf(each) === id;
+
+  return profiles.some((profile) => is(profile?.account) || is(profile?.address)) || contacts.some((contact) => is(contact?.address));
+}
+
+/**
+ * @param {ActivityRow | null | undefined} row
+ * @param {{ profiles?: ReadonlyArray<{ account?: unknown, address?: unknown }>, contacts?: ReadonlyArray<{ address?: unknown }> }} [among]
+ * @returns {{ memo: string, from: string } | null}
+ */
+export function sendersMemo(row, among = {}) {
+  const memo = row?.memo ?? "";
+
+  // A payment that came in, with a memo: one the account sent, or made itself, is in its own words.
+  if (row?.category !== "received" || !memo.trim() || knownCounterparty(row.counterparty, among)) return null;
+
+  return { from: row.counterpartyName ? `From ${row.counterpartyName}` : MEMO_FROM_UNKNOWN, memo };
+}

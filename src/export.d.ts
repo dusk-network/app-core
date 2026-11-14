@@ -230,10 +230,10 @@ export declare function accountingCsv(options: ExportOptions): Promise<ExportRes
 
 /**
  * Rewards that reached the account, in whole lux, toward nothing: what's
- * under a lux is no reward; what unstaking took out, its deposit fees off, to
- * the nearest lux. And what they were worth in the currency `price` answers
- * in, each at its own time, to 8 decimals: the sum of those whose price is
- * known (null without a `price`), and how many aren't (`unpriced`).
+ * under a lux is no reward; Sozu's, their deposit fees off, to the nearest
+ * lux. And what they were worth in the currency `price` answers in, each at
+ * its own time, to 8 decimals: the sum of those whose price is known (null
+ * without a `price`), and how many aren't (`unpriced`).
  */
 export type RewardsSum = { lux: bigint; worth: string | null; unpriced: number };
 
@@ -257,16 +257,22 @@ export type YearRewards = {
   /**
    * Grown while held: what the stDUSK held that year grew by, as one
    * stDUSK's worth in DUSK rose, from the year's start, or its first stake,
-   * to its end, or now: at each stake and unstake at its own rate, and at
-   * each new year at the pool's after its last restake by then, read from
-   * the chain (`sozuPointAt` of `/sozu`); now at what the status says it's
-   * worth. Each part between two of those is worth what `price` says at its
-   * end: a new year's at the year's last moment. Every year's together are
-   * what the stake earned so far (`earned` of `sozuPosition`), but for a lux
-   * or so of the pool's rounding in each stake and unstake, and a stake all
-   * unstaked within a year grew what it took out. Null where a new year's
-   * rate can't be read, this year's worth isn't known (no `status`), or a
-   * stake or an unstake in it or before isn't known.
+   * to its end, or now, beyond what it cost: on the one cost basis `sozu`
+   * has, average cost with the deposit fees included, so each stake's
+   * deposit fee is off its year's, at its own moment and price, and what
+   * unstaking took out is part of it, a loss too. At each stake and unstake
+   * at its own rate, and at each new year at the pool's after its last
+   * restake by then, read from the chain (`sozuPointAt` of `/sozu`); now at
+   * what the status says it's worth. Each part between two of those is worth
+   * what `price` says at its end: a new year's at the year's last moment.
+   * Every year's together are what the stake earned so far (`earned` of
+   * `sozuPosition`, which leaves the deposit fees out, as Sozu's card shows
+   * them on their own), less those fees, but for a lux or so of the pool's
+   * rounding in each stake and unstake: what unstaking took out, and what's
+   * still held beyond what it cost. A stake all unstaked within a year grew
+   * what it took out: at one rate, the loss of its deposit fee in both. Null
+   * where a new year's rate can't be read, this year's worth isn't known (no
+   * `status`), or a stake or an unstake in it or before isn't known.
    */
   sozuGrown: RewardsSum | null;
   /**
@@ -290,9 +296,9 @@ export declare const REWARD_WORDS: Readonly<{ claimed: "Native staking, claimed"
 /**
  * The one line both wallets show under a year's rewards: that taken out by
  * unstaking is part of grown while held, not more on top of it, and how
- * it's counted: average cost, deposit fees included.
+ * both are counted: average cost, deposit fees included.
  */
-export declare const REWARDS_COUNTED: "Taken out by unstaking is part of grown while held: what came back, less that stDUSK's average cost, deposit fees included.";
+export declare const REWARDS_COUNTED: "Taken out by unstaking is part of grown while held: both count stDUSK at its average cost, deposit fees included.";
 
 /**
  * What a year's rewards were worth, a `RewardsSum`'s `worth`, in the words

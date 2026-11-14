@@ -3,9 +3,9 @@ import { describe, it } from "node:test";
 
 import { networks, routes } from "@dusk-network/networks";
 
-import { PENDING_MS, activityRows, settleSends } from "../src/activity.js";
+import { MEMO_FROM_UNKNOWN, PENDING_MS, activityRows, knownCounterparty, sendersMemo, settleSends } from "../src/activity.js";
 import { createHistory, historyEntry, parseHistoryEntry } from "../src/history.js";
-import { A, B, BRIDGE, C, DUSK, EVM, PORTAL, STORE, entryOf, hash, nameHook, recorded } from "./fixtures/activity.js";
+import { A, B, BRIDGE, C, DUSK, EVM, POOL, PORTAL, STORE, entryOf, hash, nameHook, recorded } from "./fixtures/activity.js";
 import { fakeArchive, fixture, like, memoryDatabase, readFixture } from "./fixtures/helpers.js";
 
 /** @typedef {import("../src/activity.js").ActivityInput} ActivityInput */
@@ -713,5 +713,41 @@ describe("the name service's hook", () => {
       })[0].nameCall,
       null
     );
+  });
+});
+
+describe("a memo that came with a payment", () => {
+  // Chen's: a stranger's 'URGENT: wallet suspended - pay now to restore' read like the wallet's own words, in
+  // Activity and on Home, beside his real payments.
+  const URGENT = "URGENT: wallet suspended - pay now to restore";
+  const paid = (/** @type {Record<string, unknown>} */ fields = {}, /** @type {Partial<ActivityInput>} */ input = {}) =>
+    rowsOf({ account: B, public: [entryOf({ counterparty: C, direction: "in", hash: hash(0x51), memo: URGENT, value: "10000000", ...fields })], ...input })[0];
+  const mine = { contacts: [{ address: A, name: "Nandini" }], profiles: [{ account: B, address: "B-shielded", name: "Profile 1" }, { account: "P2", address: "P2-shielded", name: "Profile 2" }] };
+
+  it("is the sender's own words where it came from an address that isn't one of the wallet's profiles or contacts", () => {
+    assert.deepEqual(sendersMemo(paid(), mine), { from: "From an address not in your contacts", memo: URGENT });
+    assert.equal(MEMO_FROM_UNKNOWN, "From an address not in your contacts");
+    assert.equal(knownCounterparty(C, mine), false);
+  });
+
+  it("names the sender by its verified .dusk name, where it has one", () => {
+    assert.deepEqual(sendersMemo(paid({}, { names: new Map([[C, "sofiadesign.dusk"]]) }), mine), { from: "From sofiadesign.dusk", memo: URGENT });
+  });
+
+  it("says nothing of a memo from one of the wallet's profiles or contacts, of one sent, or of none", () => {
+    for (const from of [A, "P2", "P2-shielded", ` ${A} `]) {
+      assert.equal(sendersMemo(paid({ counterparty: from.trim() }), mine), null, from);
+      assert.equal(knownCounterparty(from, mine), true, from);
+    }
+
+    // What the account sent, its own Sozu unstake among it, and a payment in without a memo.
+    assert.equal(sendersMemo(paid({ direction: "out" }), mine), null);
+    assert.equal(sendersMemo(paid({ contractId: POOL, fnName: "sozu_unstake", kind: "contract_call" }), mine), null);
+    assert.equal(sendersMemo(paid({ memo: "" }), mine), null);
+    assert.equal(sendersMemo(paid({ memo: "   " }), mine), null);
+    assert.equal(sendersMemo(null, mine), null);
+    // A wallet with no contacts yet: from anyone else, the sender's.
+    assert.deepEqual(sendersMemo(paid()), { from: "From an address not in your contacts", memo: URGENT });
+    assert.equal(knownCounterparty(null, mine), false);
   });
 });
