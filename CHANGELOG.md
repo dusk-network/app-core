@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/payment-links`: `requestMessage`, a request as both wallets share it: "sofiadesign.dusk asks you to pay 0,03 DUSK · Factura 33", then "Pay here:" and the link as it is
+- `/activity`: `sendersMemo`, a memo on a payment from an address that isn't one of the wallet's profiles or contacts (`knownCounterparty`), as the sender's words, with `MEMO_FROM_UNKNOWN`, "From an address not in your contacts", or the sender's .dusk name
 - `/names`: `nameDuskNames`, the .dusk names a profile's name holds, to look up before `profileNameCheck`: as written, and as they read in plain letters
 - `/gas`: `BLOCK_TRANSACTIONS` and `BLOCK_GAS`, what a block takes
 

@@ -374,3 +374,40 @@ export type SettleInput = {
  * throws for are in neither.
  */
 export declare function settleSends(input?: SettleInput): { keep: SentTransaction[]; drop: string[] };
+
+/** "From an address not in your contacts": what a memo on a payment from an address that isn't one of the wallet's profiles or contacts is shown under. */
+export declare const MEMO_FROM_UNKNOWN: "From an address not in your contacts";
+
+/**
+ * Whether an address is one of the wallet's own or a contact's: a profile's
+ * public account or shielded address (`account`, `address`), or the address
+ * a contact is saved with (`address`), as written. False for none.
+ */
+export declare function knownCounterparty<P extends { account?: unknown; address?: unknown }, C extends { address?: unknown }>(
+  address: unknown,
+  among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C> }
+): boolean;
+
+/**
+ * A row's memo where it's the sender's own words, for both wallets to show
+ * as such in Activity, on Home and in a payment's details: muted, in quotes,
+ * under `from`, never as a link or bold, as a stranger's "URGENT: wallet
+ * suspended - pay now to restore" otherwise reads like the wallet's own
+ * words; search finds it as any memo. A payment that came in (`category`
+ * "received") with a memo, from an address that isn't one of the wallet's
+ * profiles or contacts (`knownCounterparty`): `from` is "From " and its
+ * verified .dusk name, "From sofiadesign.dusk", or `MEMO_FROM_UNKNOWN`
+ * without one. Null for anything else: no memo, what the account sent or
+ * made itself, as its own Sozu unstake, and a payment from one of its
+ * profiles or contacts.
+ *
+ * @example
+ * ```js
+ * sendersMemo(row, { profiles, contacts });
+ * // { memo: "URGENT: wallet suspended - pay now to restore", from: "From an address not in your contacts" }
+ * ```
+ */
+export declare function sendersMemo<P extends { account?: unknown; address?: unknown }, C extends { address?: unknown }>(
+  row: ActivityRow | null | undefined,
+  among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C> }
+): { memo: string; from: string } | null;

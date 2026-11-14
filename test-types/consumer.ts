@@ -328,6 +328,14 @@ const wrong: ActivityStatus = "submitted";
 const noHash: SentTransaction = { kind: "transfer" };
 const tokenSend: SentTransaction = { asset: { decimals: 9, op: "transfer", symbol: "TKN", to: "account", type: "DRC20", valueUnits: "1" }, hash: "" };
 void tokenSend;
+
+// A memo from someone who isn't one of the wallet's profiles or contacts is the sender's own words.
+import { MEMO_FROM_UNKNOWN, knownCounterparty, sendersMemo } from "@dusk-network/app-core/activity";
+
+const sendersWords: { memo: string; from: string } | null = sendersMemo(first, { contacts: [{ address: "q", name: "Nandini" }], profiles: [{ account: "x", address: "y" }] });
+const fromUnknown: "From an address not in your contacts" = MEMO_FROM_UNKNOWN;
+const fromKnown: boolean = knownCounterparty(first?.counterparty, { contacts: [{ address: "q" }] });
+void [sendersWords, fromUnknown, fromKnown, sendersMemo(null), knownCounterparty("x")];
 void [wrong, noHash];
 
 // What happened on the other side of the bridge's routes.
