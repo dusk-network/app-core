@@ -620,6 +620,20 @@ const asSendReads: { field: string; lux: bigint | null; problem: string | null }
 const linkChoices: AmountRead["choices"] = linkAmount(sendRead?.link, "pl-PL").choices;
 void [asSendReads, linkChoices, linkAmount(null), linkAmount(readLink)];
 
+// What's pasted in Send's To: a link alone, or a request as both wallets share it.
+import { LINK_SEVERAL, LINK_UNCLEAR, readPastedLink, type PastedLinkRead } from "@dusk-network/app-core/payment-links";
+
+const pastedRead: PastedLinkRead | null = readPastedLink("x asks you to pay 1 DUSK\nPay here: dusk:public-x", { network: 2, walletUrl: "https://wallet.example" });
+const pastedReason: "" | "unreadable" | "two-amounts" | "other-network" | "several-links" | "words-after" | undefined = pastedRead?.reason;
+const pastedLinkText: string | undefined = pastedRead?.text;
+const pastedFills: PaymentLink | null | undefined = pastedRead?.link;
+const severalWords: "That has more than one payment link. Paste just the one to pay." = LINK_SEVERAL;
+const unclearWords: "The words after that link may be part of it. Paste the link alone." = LINK_UNCLEAR;
+const pastedAsRead: Omit<LinkRead, "reason"> | null = pastedRead;
+void [pastedReason, pastedLinkText, pastedFills, severalWords, unclearWords, pastedAsRead, readPastedLink(null)];
+// @ts-expect-error a link read alone is never refused for words after it
+void ((reason: LinkRead["reason"]) => reason)("words-after");
+
 // A request shared as a message, the same from both wallets.
 import { requestMessage } from "@dusk-network/app-core/payment-links";
 
@@ -680,6 +694,25 @@ const lookedUp: DuskNameOwners = new Map<string, DuskNameOwner>([["sofiadesign.d
 const takenName = profileNameCheck("sofiadesign.dusk", { owners: lookedUp, profiles: ownNames, self: "q" });
 const takenWords: string | undefined = takenName?.refused ? takenName.words : undefined;
 void [toLookUp, takenWords, profileNameCheck("x", { owners: { "x.dusk": null } })];
+// A contact's name that passes for a .dusk name it isn't saved from, as both wallets refuse it.
+import { passesForDuskName } from "@dusk-network/app-core/names";
+
+const passesForDusk: [boolean, boolean] = [passesForDuskName("sofiadesign.dusk"), passesForDuskName("Sofía", null)];
+void passesForDusk;
+
+// /recovery-words
+import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";
+
+const typedWords: [number, string][] = [[3, " Thank"], [1, "legal"]];
+const wordsChecked: boolean = recoveryWordsMatch("legal winner thank", typedWords);
+const wordsCheckedByMap: boolean = recoveryWordsMatch(["legal", "winner"], new Map([[2, "winner"]]));
+const wordsMismatch: "That doesn't match your recovery words. Check the words you wrote down." = RECOVERY_WORDS_MISMATCH;
+const wordsShown: "Show my recovery words" = RECOVERY_WORDS_SHOW;
+void [wordsChecked, wordsCheckedByMap, wordsMismatch, wordsShown];
+// @ts-expect-error a check says yes or no, and gives back nothing of the phrase
+void recoveryWordsMatch("legal", [[1, "legal"]]).length;
+// @ts-expect-error a word's place is its number on the screen
+void recoveryWordsMatch("legal", [["1", "legal"]]);
 
 // /prices
 import { PRICE_MAX_AGE_MS, PRICE_URL, duskPrice, inCurrency, type DuskPrice, type FetchLike as PriceFetch } from "@dusk-network/app-core/prices";
@@ -750,6 +783,11 @@ const yearRate: number | null = sozuRate(0.2, sozuStatus);
 const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2, provisioners: [{ amount: 1, eligibility: 1 }], status: sozuStatus, tipHeight: 1 });
 const worthThen: Promise<bigint | null> = sozuRead.then((facts) => stDuskWorth(facts.get("h")?.pool));
 void [sozuRead, earnedSoFar, year, yearRate, rateLine, worthThen];
+// The card's words, its rewards before deposit fees, which it shows on their own.
+import { POSITION_WORDS } from "@dusk-network/app-core/sozu";
+
+const cardWords: [string, string, string, string, "Deposit fees", "Deposit fees, about", "Rewards so far, before deposit fees"] = [POSITION_WORDS.putIn, POSITION_WORDS.takenOut, POSITION_WORDS.worthNow, POSITION_WORDS.stDusk, POSITION_WORDS.depositFees, POSITION_WORDS.depositFeesAbout, POSITION_WORDS.earned];
+void cardWords;
 
 import { GROWTH_MAX_AGE_MS, nativeRewards, sozuGrowth, type NativeRewards, type SozuGrowth, type SozuPoint } from "@dusk-network/app-core/sozu";
 
@@ -802,6 +840,9 @@ void [yearWorth, rewardWorth(null, { currency: "EUR" })];
 // @ts-expect-error a worth is in a currency
 void rewardWorth("1");
 void [yearReading, yearWords];
+// Grown while held, after deposit fees, as the card's rewards so far are before them.
+const grownWords: "Sozu, grown while held, after deposit fees" = REWARD_WORDS.sozuGrown;
+void grownWords;
 
 // /bridge's ledger
 import { transferLedger, type LedgerInput, type LedgerLine, type TransferLedger } from "@dusk-network/app-core/bridge";

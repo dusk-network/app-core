@@ -1,6 +1,6 @@
 {
   "name": "@dusk/app-core",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "license": "MPL-2.0",
   "exports": {
     "./amounts": "./src/amounts.js",
@@ -10,6 +10,7 @@
     "./prices": "./src/prices.js",
     "./gas": "./src/gas.js",
     "./names": "./src/names.js",
+    "./recovery-words": "./src/recovery-words.js",
     "./history": "./src/history.js",
     "./shielded": "./src/shielded.js",
     "./activity": "./src/activity.js",

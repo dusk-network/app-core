@@ -821,6 +821,21 @@ export async function nativeRewards({ archive, cache, days = GROWTH_DAYS, maxAge
 }
 
 /**
+ * What each figure of a position is called on Sozu's card, in the words both wallets show: what it earned so far
+ * says it's before deposit fees, which the card shows on their own, as rewards by year's grown while held says it's
+ * after them.
+ */
+export const POSITION_WORDS = Object.freeze({
+  depositFees: "Deposit fees",
+  depositFeesAbout: "Deposit fees, about",
+  earned: "Rewards so far, before deposit fees",
+  putIn: "Put in",
+  stDusk: "stDUSK",
+  takenOut: "Taken out",
+  worthNow: "Worth now",
+});
+
+/**
  * @param {{ rows?: Iterable<ActivityRow> | null, status?: SozuStatusLike | null, facts?: ReadonlyMap<string, SozuFact> | null, complete?: boolean }} [input]
  * @returns {SozuPosition}
  */

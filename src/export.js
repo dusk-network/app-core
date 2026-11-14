@@ -853,8 +853,8 @@ export async function accountingCsv({ approvals, bom = false, bridge, contactNam
 // Rewards by year
 // ---------------------------------------------------------------------------
 
-/** What each of a year's rewards is called, in the words both wallets show. */
-export const REWARD_WORDS = Object.freeze({ claimed: "Native staking, claimed", sozu: "Sozu, taken out by unstaking", sozuGrown: "Sozu, grown while held" });
+/** What each of a year's rewards is called, in the words both wallets show: grown while held is after deposit fees, as Sozu's card says its rewards so far are before them. */
+export const REWARD_WORDS = Object.freeze({ claimed: "Native staking, claimed", sozu: "Sozu, taken out by unstaking", sozuGrown: "Sozu, grown while held, after deposit fees" });
 
 /** The one line under them both wallets show: what taken out by unstaking is, and how both are counted. */
 export const REWARDS_COUNTED = "Taken out by unstaking is part of grown while held: both count stDUSK at its average cost, deposit fees included.";

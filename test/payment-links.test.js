@@ -5,7 +5,7 @@ import { networks } from "@dusk-network/networks";
 
 import { activityRows } from "../src/activity.js";
 import { amountForField, parseDusk, normalizeAmount, decimalSeparator, readAmount } from "../src/amounts.js";
-import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, MAX_MEMO_BYTES, chainLabel, linkAmount, makePaymentLink, networkMismatch, parsePaymentLink, readPaymentLink, recipientKind, requestMessage } from "../src/payment-links.js";
+import { LINK_BAD_ADDRESS, LINK_BAD_AMOUNT, LINK_SEVERAL, LINK_TWO_AMOUNTS, LINK_UNCLEAR, LINK_UNREADABLE, MAX_MEMO_BYTES, chainLabel, linkAmount, makePaymentLink, networkMismatch, parsePaymentLink, readPastedLink, readPaymentLink, recipientKind, requestMessage } from "../src/payment-links.js";
 import { A, B, recorded } from "./fixtures/activity.js";
 import { like } from "./fixtures/helpers.js";
 
@@ -330,6 +330,46 @@ describe("a link as Send reads it, pasted, scanned or opened", () => {
       like(readPaymentLink(`${testnetSend}?to=${A}&amount=${amount}`, { network: 2 }), { problem: "", reason: "" }, amount);
       like(readPaymentLink(`dusk:${A}?amount=${amount}`, { network: 2 })?.link, { amountDusk: amount, to: A }, amount);
     }
+  });
+
+  it("refuses any space in a link's amount as it's written, a tab or a line break too, which a browser's reading of the link drops: Marek's 0.001, a tab, 5", () => {
+    // Marek's: '0.001' + tab + '5' filled 0.0015 in both wallets, as the URL parser drops tabs and line breaks.
+    const badAmount = { link: null, problem: LINK_BAD_AMOUNT, reason: "unreadable" };
+
+    for (const space of ["\t", "\n", "\r", "\r\n", " ", "\u00a0", "\u202f", "\u2009", "\u3000", "\u2028", "\u0085", "\ufeff", "\u1680", "\u205f"]) {
+      for (const amount of [`0.001${space}5`, `1${space}000`, `0.03${space}`, `${space}0.03`]) {
+        for (const link of [`${testnetSend}?to=${A}&memo=x&amount=${amount}&network=testnet`, `${testnetSend}?to=${A}&amount=${amount}&memo=x`, `dusk:public-${A}@dusk:2?amount=${amount}&memo=x`]) {
+          like(readPaymentLink(link, { network: 2 }), badAmount, JSON.stringify(link));
+          like(readPastedLink(link, { network: 2 }), badAmount, JSON.stringify(link));
+        }
+      }
+
+      // An exact amount in lux, and an amount whose field's name has a tab in it too, which the browser drops from it.
+      like(readPaymentLink(`${testnetSend}?to=${A}&amountLux=1000${space}000&memo=x`, { network: 2 }), badAmount, JSON.stringify(space));
+      like(readPaymentLink(`${testnetSend}?to=${A}&am\tount=0.0${space}3&memo=x`, { network: 2 }), badAmount, JSON.stringify(space));
+    }
+
+    // What comes after the link's # is the browser's, as it always was; a space around the whole link isn't the amount's.
+    like(readPaymentLink(`${testnetSend}?to=${A}&amount=0.03#amount=1\t000`, { network: 2 })?.link, { amountDusk: "0.03" });
+    like(readPaymentLink(`\t${testnetSend}?to=${A}&memo=x&amount=0.03\r\n`, { network: 2 })?.link, { amountDusk: "0.03" });
+  });
+
+  it("names an https link's fields as a browser does, dropping its tabs and line breaks before it decodes them: Astra's %6, a tab, 1mount beside amountLux says two amounts", () => {
+    const twoAmounts = { link: null, problem: LINK_TWO_AMOUNTS, reason: "two-amounts" };
+
+    for (const query of [
+      "%6\t1mount=0.001&amountLux=1000000000000",
+      "%6\n1mount=0.001&amountLux=1000000000000",
+      "amount%4\tCux=1000000000000&amount=0.001",
+      "am\tount=0.001&amountLux=1000000000000",
+      // At the link's end, a control a browser drops with the spaces around a link: a bare amount beside amountLux.
+      "amountLux=1000000000000&amount\u0001",
+    ]) {
+      like(readPaymentLink(`${testnetSend}?to=${A}&${query}`, { network: 2 }), twoAmounts, JSON.stringify(query));
+    }
+
+    // Its value as it's written all the same: a tab in it is refused, its name read either way.
+    like(readPaymentLink(`${testnetSend}?to=${A}&%6\t1mount=0.0\t01`, { network: 2 }), { link: null, problem: LINK_BAD_AMOUNT, reason: "unreadable" });
   });
 
   it("refuses a link whose field names hide something, or read as a field they aren't, rather than dropping them", () => {
@@ -759,5 +799,112 @@ describe("a request shared as a message", () => {
 
   it("shows what can't be seen in a name or a memo as its codes, as on a screen", () => {
     assert.equal(requestMessage({ link: "L", lux: 1_000_000_000n, memo: "pay ‮0001‬", name: "Ali​ce" }), "Ali\\u200bce asks you to pay 1 DUSK · pay \\u202e0001\\u202c\nPay here: L");
+  });
+});
+
+describe("what's pasted in Send's To", () => {
+  // Amélie's, Sofía's, Lena's, Chen's, Nandini's and Marek's: the wallet's own request, shared as a message and pasted
+  // into the extension's or the app's Send, said "Not a valid address"; the web wallet's took the link out of it.
+  const testnetSend = `${networks.testnet.apps.wallet}/dashboard/send`;
+  const httpsLink = /** @type {string} */ (makePaymentLink({ amount: "0.03", language: "en", memo: "Factura 71", network: 2, to: A }).https);
+  const duskLink = `dusk:public-${A}@dusk:2?amount=0.03&memo=Factura+71`;
+  const filled = { amountDusk: "0.03", memo: "Factura 71", to: A };
+  /** @param {string} link @param {string | null} [name] */
+  const shared = (link, name = "sofiadesign.dusk") => requestMessage({ language: "en", link, lux: 30_000_000n, memo: "Factura 71", name, network: "Testnet" });
+  /** @param {string} problem @param {string} reason */
+  const refused = (problem, reason) => ({ chainId: "", link: null, network: "", problem, reason, text: "" });
+
+  it("takes the one link out of a request as both wallets share it, its line break there or dropped, as a phone's field drops it", () => {
+    for (const link of [httpsLink, duskLink]) {
+      for (const message of [shared(link), shared(link, null)]) {
+        for (const pasted of [message, message.replace("\n", ""), message.replace("\n", " "), `  ${message}\r\n`]) {
+          const read = readPastedLink(pasted, { network: 2 });
+
+          like(read, { problem: "", reason: "", text: link }, JSON.stringify(pasted));
+          // As the link alone is read, and nothing else.
+          assert.deepEqual({ ...read, text: undefined }, { ...readPaymentLink(link, { network: 2 }), text: undefined }, JSON.stringify(pasted));
+          like(read?.link, filled, JSON.stringify(pasted));
+        }
+      }
+    }
+  });
+
+  it("fills in what the link says, never what the words before it say: Marek's forged line", () => {
+    const link = `${testnetSend}?to=${A}&amount=0.15&memo=lunch&network=testnet`;
+    const read = readPastedLink(`Marek asks you to pay 0.001 DUSK · lunch\nPay here: ${link}`, { network: "testnet" });
+
+    like(read?.link, { amountDusk: "0.15", memo: "lunch", to: A });
+  });
+
+  it("reads a link pasted alone whole, spaces and all, as a link alone always was: never cut short at a space", () => {
+    for (const link of [httpsLink, duskLink]) {
+      // A space in its memo: the memo as it says it.
+      like(readPastedLink(link.replace("Factura+71", "Factura 71"), { network: 2 })?.link, filled, link);
+      // In its amount: refused, as it was, not 0 or 3 DUSK.
+      like(readPastedLink(link.replace("amount=0.03", "amount=0 .03"), { network: 2 }), { link: null, problem: LINK_BAD_AMOUNT, reason: "unreadable" }, link);
+    }
+  });
+
+  it("asks nothing where words after the link may be part of it, and says so: a chat page's time, a thanks, a memo cut at its space", () => {
+    for (const pasted of [
+      `Pay here: ${httpsLink.replace("Factura+71", "Factura 71")}`,
+      `Pay here: ${duskLink} thanks!`,
+      // Sofía's: the bubble of her chat page copied whole, its time after the link.
+      `${shared(httpsLink)} 06:50`,
+      `${shared(httpsLink)}\nthanks, Marek`,
+    ]) {
+      assert.deepEqual(readPastedLink(pasted, { network: 2 }), refused(LINK_UNCLEAR, "words-after"), pasted);
+    }
+  });
+
+  it("asks nothing with two links in it, wherever they are, and says so: a link's memo carries no other link", () => {
+    assert.deepEqual(readPastedLink(`Pay here: ${duskLink} or here: ${httpsLink}`, { network: 2 }), refused(LINK_SEVERAL, "several-links"));
+    assert.deepEqual(readPastedLink(`${shared(httpsLink)}\nOr this one: ${httpsLink.replace("0.03", "0.3")}`, { network: 2 }), refused(LINK_SEVERAL, "several-links"));
+    // Text that starts with a link: read whole, it took the second link into the first one's memo, and paid Alice.
+    for (const pasted of [
+      `${duskLink} ${httpsLink}`,
+      "dusk:public-alice.dusk?amount=1&memo=x dusk:public-bob.dusk",
+      `${testnetSend}?to=${A}&amount=0.03&memo=pay dusk:public-bob.dusk`,
+      `${testnetSend}?to=${A}&amount=0.03&memo=or\n${httpsLink}`,
+    ]) {
+      assert.deepEqual(readPastedLink(pasted, { network: 2 }), refused(LINK_SEVERAL, "several-links"), pasted);
+    }
+    // One link, spaces in its memo, and words in it that are no payment link: read whole, as ever.
+    like(readPastedLink(`${testnetSend}?to=${A}&amount=0.03&memo=see https://example.com/invoice 71`, { network: 2 })?.link, { memo: "see https://example.com/invoice 71", to: A });
+  });
+
+  it("refuses what the link alone refuses, as the link alone says it, and gives a link for another network to the page that takes it", () => {
+    const cut = `${testnetSend}?to=${A.slice(0, 40)}&amount=0.03&network=testnet`;
+
+    like(readPastedLink(shared(cut), { network: 2 }), { link: null, problem: LINK_BAD_ADDRESS, reason: "unreadable", text: cut });
+
+    const mainnet = /** @type {string} */ (makePaymentLink({ amount: "0.03", memo: "Factura 71", network: 1, to: A }).https);
+
+    assert.deepEqual(readPastedLink(requestMessage({ link: mainnet, lux: 30_000_000n, memo: "Factura 71" }), { network: 2 }), {
+      chainId: "dusk:1",
+      link: null,
+      network: "Mainnet",
+      problem: "This request is for Mainnet. You are on Testnet.",
+      reason: "other-network",
+      text: mainnet,
+    });
+  });
+
+  it("reads a link to the app's own address where it's told it, as readPaymentLink does", () => {
+    const own = `http://localhost:5900/wallet/dashboard/send?to=${A}&amount=0.03&memo=Factura+71`;
+
+    like(readPastedLink(shared(own), { walletUrl: "http://localhost:5900/wallet" })?.link, filled);
+    assert.equal(readPastedLink(shared(own)), null);
+  });
+
+  it("is no link without one, as an address, a name or words: Send reads it as a recipient", () => {
+    for (const pasted of [A, "sofiadesign.dusk", "Pay me back tomorrow", "", "   ", "https://example.com/pay?to=x", `Pay here: https://example.com/send?to=${A}`, null, undefined]) {
+      assert.equal(readPastedLink(pasted, { network: 2 }), null, String(pasted));
+    }
+  });
+
+  it("says why it fills in nothing in both wallets' words", () => {
+    assert.equal(LINK_SEVERAL, "That has more than one payment link. Paste just the one to pay.");
+    assert.equal(LINK_UNCLEAR, "The words after that link may be part of it. Paste the link alone.");
   });
 });

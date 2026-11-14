@@ -2,6 +2,23 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.16.0]
+
+### Added
+
+- `/recovery-words`: `recoveryWordsMatch`, whether the recovery words typed are the phrase's at the places asked, yes or no and nothing else, in any case and spacing, with `RECOVERY_WORDS_MISMATCH`, all a mismatch says, and `RECOVERY_WORDS_SHOW`, in both wallets' words
+- `/payment-links`: `readPastedLink`, what text pasted in Send's To asks of Send, the same in every wallet: a link alone read whole, a request shared as a message read by its one link, its line break there or not, and refused with two links (`LINK_SEVERAL`) or words after it (`LINK_UNCLEAR`)
+- `/sozu`: `POSITION_WORDS`, what Sozu's card calls each figure in both wallets, its rewards "Rewards so far, before deposit fees"
+- `/names`: `passesForDuskName`, whether a contact's name passes for a .dusk name it isn't saved from, read in plain letters: "sofiadesign.ᴅᴜꜱᴋ" does
+
+### Changed
+
+- `/export`: `REWARD_WORDS.sozuGrown` says it's after deposit fees: "Sozu, grown while held, after deposit fees"
+- `/names`: names look alike with any thin upright stroke for another, an i, an l, a 1, a ! or a |: "Davld" and "Dav!d" like "David", "ian" like "lan"
+- `/names`: names look alike with a $ for an s, an @ for an a and a € for an e, and in circled, white-on-black, squared or small capital letters: "ⓓⓐⓥⓘⓓ" like "David"
+- `/names`: `nameDuskNames` and `profileNameCheck` read a .dusk name in small capitals or circled letters as one: "sofiadesign.ᴅᴜꜱᴋ" is sofiadesign.dusk
+- `/payment-links`: `readPaymentLink` refuses a tab or a line break in a link's amount as it's written, which a browser drops from an https link: "0.001", a tab and "5" isn't 0.0015
+
 ## [0.15.0]
 
 ### Added

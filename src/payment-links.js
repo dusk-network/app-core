@@ -19,6 +19,7 @@ import { displayText } from "./text.js";
 /** @typedef {import("./payment-links.js").PaymentRequest} PaymentRequest */
 /** @typedef {import("./payment-links.js").MadePaymentLink} MadePaymentLink */
 /** @typedef {import("./payment-links.js").LinkRead} LinkRead */
+/** @typedef {import("./payment-links.js").PastedLinkRead} PastedLinkRead */
 /** @typedef {import("@dusk-network/networks").Network} Network */
 
 export const MAX_MEMO_BYTES = 512;
@@ -56,6 +57,9 @@ export const LINK_TWO_AMOUNTS = "This link asks for two different amounts. Ask f
 export const LINK_BAD_ADDRESS = "This link's address isn't valid. Ask for a new one.";
 export const LINK_BAD_AMOUNT = "This link's amount can't be read. Ask for a new one.";
 export const LINK_MEMO_LINE_BREAK = "This link's memo has a line break. Ask for a new one.";
+/** Why pasted text fills in nothing, in the words both wallets use. */
+export const LINK_SEVERAL = "That has more than one payment link. Paste just the one to pay.";
+export const LINK_UNCLEAR = "The words after that link may be part of it. Paste the link alone.";
 const LINK_NO_RECIPIENT = "This link doesn't say who to pay. Ask for a new one.";
 const LINK_USER_PART = "This link has something before the site's address. Ask for a new one.";
 const LINK_NETWORK_UNREAD = "This link's network can't be read. Ask for a new one.";
@@ -393,26 +397,44 @@ export function parsePaymentLink(input, { walletUrl } = {}) {
   return read && "link" in read ? read.link : null;
 }
 
+// A tab or a line break, which the URL parser drops from anywhere in a link.
+const DROPPED = /[\t\n\r]/g;
+// A control or a space at either end of a link, which the URL parser drops too.
+const LINK_ENDS = /^[\u0000-\u0020]+|[\u0000-\u0020]+$/g;
+
 /**
- * A link's query, as its form reads it, its fields named in any case: all
- * after the `?` of a `dusk:` link, up to a `#`, which its reading refuses;
- * an https link's search.
+ * A link's query as it's written, its fields named in any case: all after
+ * its first `?` up to its first `#`, which a `dusk:` link's reading refuses
+ * and an https link's fragment is. An https link's is read as the URL parser
+ * reads it, but for the tabs and line breaks in its values, which it drops,
+ * so joining what's around them: an amount of "0.001", a tab and "5" is
+ * 0.0015 to it, and here it's as written. Its fields' names are the
+ * parser's, what it drops dropped before they're decoded, so a name it reads
+ * as a field's, as "%6", a tab and "1mount" for `amount`, is that field's
+ * here too.
  *
  * @param {string} raw
  */
 function queryOf(raw) {
-  if (/^dusk:/i.test(raw)) {
-    const [link] = raw.split("#");
-    const q = link.indexOf("?");
+  const dusk = /^dusk:/i.test(raw);
+  const [link] = (dusk ? raw : raw.replace(LINK_ENDS, "")).split("#");
+  const q = link.indexOf("?");
+  const query = q >= 0 ? link.slice(q + 1) : "";
 
-    return fieldsOf(new URLSearchParams(q >= 0 ? link.slice(q + 1) : ""));
-  }
+  if (dusk) return fieldsOf(new URLSearchParams(query));
 
-  try {
-    return fieldsOf(new URL(raw).searchParams);
-  } catch {
-    return new URLSearchParams();
-  }
+  // Each field's name without what the parser drops; the tabs and line breaks in its value kept, encoded.
+  const written = query
+    .split("&")
+    .map((field) => {
+      const is = field.indexOf("=");
+
+      return is < 0 ? field.replace(DROPPED, "") : `${field.slice(0, is).replace(DROPPED, "")}=${field.slice(is + 1).replace(DROPPED, encodeURIComponent)}`;
+    })
+    .join("&");
+
+  // An empty fragment after it, so the parser keeps what's at the query's end, as in the link it's read from.
+  return fieldsOf(new URL(`https://link.invalid/?${written}#`).searchParams);
 }
 
 /**
@@ -474,6 +496,47 @@ export function readPaymentLink(input, { network, walletUrl } = {}) {
   const otherNetwork = networkMismatch(chainId, network);
 
   return said(otherNetwork ? { chainId, link: null, problem: otherNetwork, reason: "other-network" } : { chainId, link, problem: "", reason: "" });
+}
+
+// Text that starts as a link does: read whole.
+const LINK_START = /^(dusk:|https?:\/\/)/i;
+
+/**
+ * A link read from what was pasted, with the link as it's written there.
+ *
+ * @param {LinkRead | null} read
+ * @param {string} text
+ * @returns {PastedLinkRead | null}
+ */
+const readFrom = (read, text) => read && { ...read, text };
+
+/**
+ * What pasted text refused for `problem` fills in: nothing, from no link.
+ *
+ * @param {string} problem
+ * @param {"several-links" | "words-after"} reason
+ * @returns {PastedLinkRead}
+ */
+const pasteRefused = (problem, reason) => ({ chainId: "", link: null, network: "", problem, reason, text: "" });
+
+/**
+ * @param {unknown} input
+ * @param {{ network?: unknown, walletUrl?: string }} [options]
+ * @returns {PastedLinkRead | null}
+ */
+export function readPastedLink(input, options = {}) {
+  const pasted = textOf(input);
+  const words = pasted.split(/\s+/);
+  const links = words.filter((word) => readPaymentLink(word, options));
+
+  // Two links, wherever they are: one read whole would carry the other in its memo.
+  if (links.length > 1) return pasteRefused(LINK_SEVERAL, "several-links");
+  // A link, as the text starts with one, is read whole, spaces and all, as a link alone always was; so is text no
+  // word of which is a link, which is one whole or none.
+  if (LINK_START.test(pasted) || !links.length) return readFrom(readPaymentLink(pasted, options), pasted);
+
+  // Its one link, as the last words of a request shared whole, read alone: words after it may be part of it.
+  return words[words.length - 1] === links[0] ? readFrom(readPaymentLink(links[0], options), links[0]) : pasteRefused(LINK_UNCLEAR, "words-after");
 }
 
 /**

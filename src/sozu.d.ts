@@ -114,6 +114,25 @@ export type SozuPosition = {
 };
 
 /**
+ * What each figure of a position is called on Sozu's card, in the words both
+ * wallets show, by `SozuPosition`'s names: "Put in", "Taken out", "Worth
+ * now", "stDUSK", "Deposit fees" (or "Deposit fees, about" where they're
+ * worked out at today's rate, `feesExact` false), and "Rewards so far, before
+ * deposit fees" (`earned`): rewards by year's grown while held is after them
+ * (`REWARD_WORDS` of `/export`), so what the card says, less the deposit fees
+ * it shows, is what the year table counts.
+ */
+export declare const POSITION_WORDS: Readonly<{
+  putIn: "Put in";
+  takenOut: "Taken out";
+  worthNow: "Worth now";
+  stDusk: "stDUSK";
+  depositFees: "Deposit fees";
+  depositFeesAbout: "Deposit fees, about";
+  earned: "Rewards so far, before deposit fees";
+}>;
+
+/**
  * The position from the account's rows, all of them, as `/activity` gives
  * them, and the status read. `complete`: whether the rows hold all of the
  * account's history (`read()`'s `complete` in `/history`), or `earned` can't be
