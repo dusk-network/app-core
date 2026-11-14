@@ -669,6 +669,14 @@ const gasMedian: bigint | null = gasNow.median;
 const gasWords: "The network is busy. You can raise the gas price for it to go out sooner." = GAS_PRICE_BUSY;
 const gasBounds: [1n, 5n] = [GAS_PRICE_MINIMUM, GAS_PRICE_CEILING_TIMES];
 void [gasPrice, gasBusy, gasMedian, gasWords, gasBounds, defaultGasPrice(), defaultGasPrice({ median: 2 })];
+// From what waits in the mempool, as the node's GraphQL lists it.
+import { BLOCK_GAS, BLOCK_TRANSACTIONS } from "@dusk-network/app-core/gas";
+
+const fromMempool: DefaultGasPrice = defaultGasPrice({ mempool: [{ gasLimit: 6000000, gasPrice: 2 }, { gasLimit: "1", gasPrice: 1n }], minimum: 1n });
+const blockBounds: [1000, 3000000000n] = [BLOCK_TRANSACTIONS, BLOCK_GAS];
+void [fromMempool, blockBounds, defaultGasPrice({ mempool: null })];
+// @ts-expect-error what waits is a list of transactions, not the node's whole answer
+void defaultGasPrice({ mempool: { mempoolTxs: [] } });
 // @ts-expect-error a median is a whole number of lux, not a node's whole answer
 void defaultGasPrice({ median: { median: 2n } });
 

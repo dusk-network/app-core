@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { GAS_PRICE_BUSY, GAS_PRICE_CEILING_TIMES, GAS_PRICE_MINIMUM, defaultGasPrice } from "../src/gas.js";
+import { BLOCK_GAS, BLOCK_TRANSACTIONS, GAS_PRICE_BUSY, GAS_PRICE_CEILING_TIMES, GAS_PRICE_MINIMUM, defaultGasPrice } from "../src/gas.js";
 
 describe("the default gas price", () => {
   it("follows the mempool's median, from the network's minimum up to its ceiling", () => {
@@ -57,5 +57,39 @@ describe("the default gas price", () => {
     }
 
     assert.deepEqual(defaultGasPrice({ median: 2 }), defaultGasPrice({ median: "2" }));
+  });
+
+  it("is the minimum while what waits fits in the next block: Lena's unstake, read with Sozu's own activation waiting alone", () => {
+    // On testnet, Sozu's operator sends stake_activate at gas price 2, limit 6,000,000, a block or two after every
+    // stake (blocks 4,849,930 and 4,849,999 after Lena's stakes in 4,849,928 and 4,849,997). The extension read the
+    // median at its unstake's Review while that waited alone, and paid 2; the web wallet had read its price before
+    // the stake, and paid 1. Both read it now as a block that takes it, and every transaction at 1, would.
+    const activation = { gasLimit: 6_000_000, gasPrice: 2 };
+
+    assert.deepEqual(defaultGasPrice({ mempool: [activation], minimum: 1n }), { busy: false, ceiling: 5n, median: 2n, minimum: 1n, price: 1n });
+    assert.deepEqual(defaultGasPrice({ mempool: [], minimum: 1n }), { busy: false, ceiling: 5n, median: null, minimum: 1n, price: 1n });
+    // Marek's: a few transactions at a high price, far from a block's worth, can't raise every default fee.
+    const spam = Array.from({ length: BLOCK_TRANSACTIONS - 1 }, () => ({ gasLimit: 2_500_000, gasPrice: 1_000_000 }));
+
+    assert.deepEqual(defaultGasPrice({ mempool: spam }), { busy: false, ceiling: 5n, median: 1_000_000n, minimum: 1n, price: 1n });
+    assert.deepEqual([BLOCK_TRANSACTIONS, BLOCK_GAS], [1000, 3_000_000_000n]);
+  });
+
+  it("follows the median of what waits once more waits than a block takes, by count or by gas, up to the ceiling", () => {
+    const many = (/** @type {number} */ count, /** @type {number} */ gasPrice, gasLimit = 2_500_000) => Array.from({ length: count }, () => ({ gasLimit, gasPrice }));
+
+    // A block's thousand transactions.
+    assert.deepEqual(defaultGasPrice({ mempool: many(1000, 3) }), { busy: false, ceiling: 5n, median: 3n, minimum: 1n, price: 3n });
+    // A block's gas: 61 shielded sends of 50,000,000 each.
+    assert.deepEqual(defaultGasPrice({ mempool: many(61, 4, 50_000_000) }), { busy: false, ceiling: 5n, median: 4n, minimum: 1n, price: 4n });
+    assert.equal(defaultGasPrice({ mempool: many(59, 4, 50_000_000) }).price, 1n);
+    // Over the ceiling: the ceiling, and Review says the network is busy.
+    assert.deepEqual(defaultGasPrice({ mempool: many(1000, 1_000_000) }), { busy: true, ceiling: 5n, median: 1_000_000n, minimum: 1n, price: 5n });
+    // The node's own median: the middle one, or the mean of the two middle ones, rounded down.
+    assert.equal(defaultGasPrice({ mempool: [...many(500, 2), ...many(500, 5)] }).median, 3n);
+    assert.equal(defaultGasPrice({ mempool: [...many(500, 2), ...many(501, 5)] }).median, 5n);
+    // As a node's GraphQL gives each, a number, or as text or a bigint; one without a price still takes room in the block.
+    assert.equal(defaultGasPrice({ mempool: [...many(999, 3), { gasLimit: "2500000", gasPrice: "3" }] }).price, 3n);
+    assert.equal(defaultGasPrice({ mempool: [...many(998, 4), { gasLimit: 2_500_000n, gasPrice: 4n }, { gasLimit: 1 }] }).price, 4n);
   });
 });

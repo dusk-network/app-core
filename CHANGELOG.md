@@ -2,6 +2,16 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `/gas`: `BLOCK_TRANSACTIONS` and `BLOCK_GAS`, what a block takes
+
+### Changed
+
+- `/gas`: `defaultGasPrice` takes what waits in the mempool (`mempool`) and is the network's minimum while it fits in the next block, else its median up to the ceiling
+
 ## [0.14.0]
 
 ### Added
