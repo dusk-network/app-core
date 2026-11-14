@@ -478,11 +478,14 @@ export function readPaymentLink(input, { network, walletUrl } = {}) {
 /**
  * @param {PaymentLink | null | undefined} link
  * @param {string} [language] The browser's, unless given
- * @returns {{ field: string, lux: bigint | null, problem: string | null }}
+ * @returns {{ field: string } & import("./amounts.js").AmountRead}
  */
 export function linkAmount(link, language) {
-  // As Send's field holds it once filled in from the link, and reads it back.
-  const field = link?.amountDusk ? amountForField(link.amountDusk, decimalSeparator(language)) : "";
+  const decimal = decimalSeparator(language);
+  // As Send's field holds it once filled in from the link, and reads it back, as typing reads it: an amount in DUSK as
+  // the link writes it, its point the language's mark, so "2.125" asks as typed 2.125 does; an exact one in lux as
+  // the amount it is, which a fourth decimal keeps from asking.
+  const field = !link?.amountDusk ? "" : PLAIN_LUX.test(textOf(link.amountLux)) ? amountForField(link.amountDusk, decimal) : link.amountDusk.replace(".", decimal);
 
   return { field, ...readAmount(field, language) };
 }
@@ -549,7 +552,8 @@ export function makePaymentLink({ amount, amountLux, label, language, memo, netw
 
   /** @type {[string, string][]} */
   const asked = [
-    ["amount", read.lux === null ? "" : formatDuskPlain(read.lux)],
+    // Read as typing reads it, as Send reads a link's: three decimals have a fourth, a zero, so 2.125 isn't asked about.
+    ["amount", read.lux === null ? "" : amountForField(formatDuskPlain(read.lux), ".")],
     ["memo", message],
     ["label", textOf(label)],
   ];

@@ -14,6 +14,9 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/gas`: `defaultGasPrice` takes what waits in the mempool (`mempool`) and is the network's minimum while it fits in the next block, else its median up to the ceiling
 - `/names`: `profileNameCheck` refuses a .dusk name the name service says is another account's (`owners`): "sofiadesign.dusk belongs to another account. Choose another name.", and asks nothing of one that's the profile's own
 - `/names`: names look alike with digits for letters, a 1 for an i or an l, a 0 for an o and a 5 for an s, and a v for a y: "Dav1d" like "David", "Wendv" like "Wendy"
+- `/amounts`: `readAmount` gives its question's two readings to choose from (`choices`), each as the field reads it back without the question, and the question alone (`question`)
+- `/payment-links`: `linkAmount` reads a link's amount as typing reads it: `amount=2.125` asks "Is that 2.1250 or 2125?", as typed 2.125 does
+- `/payment-links`: `makePaymentLink` writes an amount of three decimals with a fourth, as `2.1250`, which Send reads without the question
 
 ## [0.14.0]
 

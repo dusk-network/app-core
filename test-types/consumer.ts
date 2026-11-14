@@ -552,6 +552,14 @@ void [shownAmount, plainAmount, readLux, eitherAmount];
 const weiShown: { text: string; exact: string } = formatAmount(10n ** 18n, { decimals: 18, locale: "en", mode: "exact", round: "down" });
 const hint: string = amountExample("10.5", "fr-FR");
 const readTyped: { lux: bigint | null; problem: string | null } = readAmount("1 000,5", "fr-FR");
+// Where it could be two, the question and the two, for a button each.
+import type { AmountChoice, AmountRead } from "@dusk-network/app-core/amounts";
+
+const readAsked: AmountRead = readAmount("2.125", "en-SG");
+const readChoices: [AmountChoice, AmountChoice] | undefined = readAsked.choices;
+const readQuestion: string | undefined = readAsked.question;
+const choiceFacts: [bigint | undefined, string | undefined] = [readAsked.choices?.[0].lux, readAsked.choices?.[1].field];
+void [readChoices, readQuestion, choiceFacts];
 const readFrench: string = normalizeAmount("1 000", ",", "fr-FR");
 void [weiShown, hint, readTyped, readFrench];
 
@@ -601,7 +609,8 @@ const badAmount: "This link's amount can't be read. Ask for a new one." = LINK_B
 const memoBreak: "This link's memo has a line break. Ask for a new one." = LINK_MEMO_LINE_BREAK;
 void [sendReason, sendFills, sendWords, badAddress, badAmount, memoBreak];
 const asSendReads: { field: string; lux: bigint | null; problem: string | null } = linkAmount(sendRead?.link, "pl-PL");
-void [asSendReads, linkAmount(null), linkAmount(readLink)];
+const linkChoices: AmountRead["choices"] = linkAmount(sendRead?.link, "pl-PL").choices;
+void [asSendReads, linkChoices, linkAmount(null), linkAmount(readLink)];
 
 // /names
 import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ContactNameCheck, type ProfileNameCheck } from "@dusk-network/app-core/names";

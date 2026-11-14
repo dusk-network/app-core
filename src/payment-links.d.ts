@@ -25,13 +25,15 @@
  *
  * // Its amount as Send fills it in and reads it, for a preview to say the same: here amount=1.000.
  * linkAmount(readPaymentLink(opened, { network: 2 })?.link, "pl-PL");
- * // { field: "1,000", lux: null, problem: "Is that 1 or 1000? Write the one you mean." }
+ * // { field: "1,000", lux: null, problem: "Is that 1 or 1000? Write the one you mean.", question: "Is that 1 or 1000?",
+ * //   choices: [{ field: "1", lux: 1_000_000_000n }, { field: "1000", lux: 1_000_000_000_000n }] }
  * ```
  *
  * @module
  */
 
 import type { Network } from "@dusk-network/networks";
+import type { AmountRead } from "./amounts.js";
 
 /** The longest memo the network takes, in bytes. */
 export declare const MAX_MEMO_BYTES: 512;
@@ -47,7 +49,7 @@ export type PaymentLink = {
   to: string;
   /** The network it's for, "dusk:1": a wallet's link says its network's. */
   chainId: string;
-  /** The amount in plain DUSK, as the link says it; `amountForField` writes it for a field. */
+  /** The amount in plain DUSK, as the link says it; `linkAmount` writes it for a field, as Send reads it. */
   amountDusk: string;
   /** An exact amount in lux, when the link says one: then `amountDusk` is what it comes to. */
   amountLux: string;
@@ -178,17 +180,19 @@ export declare function readPaymentLink(input: unknown, options?: { network?: un
 /**
  * A link's amount as Send reads it, in `language` (the browser's, unless
  * given), the same in a preview before a wallet opens: what Send's amount
- * field holds once it's filled in from the link (`field`, as
- * `amountForField` of `/amounts` writes `amountDusk`), and what the field
- * reads (`readAmount`): the amount in lux, or the question it asks of one
- * that could mean two, as "1.000" (`problem`: "Is that 1 or 1000? Write the
- * one you mean."), or what's wrong with one Send won't take ("Enter an
- * amount greater than 0."). Never one of the two amounts for the other: a
- * preview shows `problem` where there's one, not `link.lux`. A link without
- * an amount, or none, is `{ field: "", lux: null, problem: null }`: any
- * amount.
+ * field holds once it's filled in from the link (`field`: `amountDusk` as
+ * the link writes it, its point the language's mark; an exact amount in lux
+ * as `amountForField` of `/amounts` writes it), and what the field reads, as
+ * typing reads it (`readAmount`): the amount in lux, or the question it asks
+ * of one that could mean two, as "1.000" or "2.125" (`problem`: "Is that
+ * 2.1250 or 2125? Write the one you mean.", with `question` and the two
+ * `choices`, for a button each), or what's wrong with one Send won't take
+ * ("Enter an amount greater than 0."). Never one of the two amounts for the
+ * other: a preview shows the question where there's one, not `link.lux`. A
+ * link `makePaymentLink` made asks nothing. A link without an amount, or
+ * none, is `{ field: "", lux: null, problem: null }`: any amount.
  */
-export declare function linkAmount(link: PaymentLink | null | undefined, language?: string): { field: string; lux: bigint | null; problem: string | null };
+export declare function linkAmount(link: PaymentLink | null | undefined, language?: string): { field: string } & AmountRead;
 
 /** What `makePaymentLink` takes. */
 export type PaymentRequest = {
@@ -223,6 +227,8 @@ export type MadePaymentLink = {
 /**
  * Both links for a request, once it's one a payer can use. An amount and a
  * memo are optional, and a request can be made from what's typed as it's typed.
+ * An amount with three decimals has a fourth, a zero, as "2.1250", so Send
+ * reads it as it is, without the question typing "2.125" asks.
  */
 export declare function makePaymentLink(request: PaymentRequest): MadePaymentLink;
 
