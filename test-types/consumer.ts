@@ -620,6 +620,20 @@ const asSendReads: { field: string; lux: bigint | null; problem: string | null }
 const linkChoices: AmountRead["choices"] = linkAmount(sendRead?.link, "pl-PL").choices;
 void [asSendReads, linkChoices, linkAmount(null), linkAmount(readLink)];
 
+// What's pasted in Send's To: a link alone, or a request as both wallets share it.
+import { LINK_SEVERAL, LINK_UNCLEAR, readPastedLink, type PastedLinkRead } from "@dusk-network/app-core/payment-links";
+
+const pastedRead: PastedLinkRead | null = readPastedLink("x asks you to pay 1 DUSK\nPay here: dusk:public-x", { network: 2, walletUrl: "https://wallet.example" });
+const pastedReason: "" | "unreadable" | "two-amounts" | "other-network" | "several-links" | "words-after" | undefined = pastedRead?.reason;
+const pastedLinkText: string | undefined = pastedRead?.text;
+const pastedFills: PaymentLink | null | undefined = pastedRead?.link;
+const severalWords: "That has more than one payment link. Paste just the one to pay." = LINK_SEVERAL;
+const unclearWords: "The words after that link may be part of it. Paste the link alone." = LINK_UNCLEAR;
+const pastedAsRead: Omit<LinkRead, "reason"> | null = pastedRead;
+void [pastedReason, pastedLinkText, pastedFills, severalWords, unclearWords, pastedAsRead, readPastedLink(null)];
+// @ts-expect-error a link read alone is never refused for words after it
+void ((reason: LinkRead["reason"]) => reason)("words-after");
+
 // A request shared as a message, the same from both wallets.
 import { requestMessage } from "@dusk-network/app-core/payment-links";
 

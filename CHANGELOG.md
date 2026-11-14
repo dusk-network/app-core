@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/recovery-words`: `recoveryWordsMatch`, whether the recovery words typed are the phrase's at the places asked, yes or no and nothing else, in any case and spacing, with `RECOVERY_WORDS_MISMATCH`, all a mismatch says, and `RECOVERY_WORDS_SHOW`, in both wallets' words
+- `/payment-links`: `readPastedLink`, what text pasted in Send's To asks of Send, the same in every wallet: a link alone read whole, a request shared as a message read by its one link, its line break there or not, and refused with two links (`LINK_SEVERAL`) or words after it (`LINK_UNCLEAR`)
 
 ## [0.15.0]
 

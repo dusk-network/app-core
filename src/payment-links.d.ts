@@ -23,6 +23,10 @@
  * readPaymentLink(pasted, { network: 2 });
  * // { link: null, problem: "This request is for Mainnet. You are on Testnet.", reason: "other-network", chainId: "dusk:1", network: "Mainnet" }
  *
+ * // What's pasted in To: a link alone, or a request as both wallets share it, its link taken out.
+ * readPastedLink("sofiadesign.dusk asks you to pay 0,03 DUSK · Factura 71\nPay here: https://…", { network: 2 });
+ * // { link: { to, amountDusk: "0.03", memo: "Factura 71", … }, problem: "", reason: "", chainId: "dusk:2", network: "Testnet", text: "https://…" }
+ *
  * // Its amount as Send fills it in and reads it, for a preview to say the same: here amount=1.000.
  * linkAmount(readPaymentLink(opened, { network: 2 })?.link, "pl-PL");
  * // { field: "1,000", lux: null, problem: "Is that 1 or 1000? Write the one you mean.", question: "Is that 1 or 1000?",
@@ -176,6 +180,46 @@ export type LinkRead = {
  * preview of it, as before a wallet opens, says why and nothing else.
  */
 export declare function readPaymentLink(input: unknown, options?: { network?: unknown; walletUrl?: string }): LinkRead | null;
+
+/** "That has more than one payment link. Paste just the one to pay.": pasted text with two payment links or more, as `readPastedLink` refuses it. */
+export declare const LINK_SEVERAL: "That has more than one payment link. Paste just the one to pay.";
+
+/** "The words after that link may be part of it. Paste the link alone.": pasted text with words after its link, as `readPastedLink` refuses it. */
+export declare const LINK_UNCLEAR: "The words after that link may be part of it. Paste the link alone.";
+
+/** What's pasted in Send's To as Send reads it: a link as `readPaymentLink` reads it, or why the text fills in nothing. */
+export type PastedLinkRead = Omit<LinkRead, "reason"> & {
+  /**
+   * As `readPaymentLink`'s, and "several-links": the text has more than one
+   * payment link (`LINK_SEVERAL`); "words-after": words after its link may
+   * be part of it (`LINK_UNCLEAR`). For those two, `link` is null, and
+   * `chainId`, `network` and `text` are "".
+   */
+  reason: LinkRead["reason"] | "several-links" | "words-after";
+  /** The link read, as it's written in what was pasted: the whole text where it starts with the link, else its last words. */
+  text: string;
+};
+
+/**
+ * What text pasted in Send's To asks of Send, the same in every wallet's
+ * Send, as `readPaymentLink` reads a link: what it fills in, or why it fills
+ * in nothing. Text with more than one payment link is refused, wherever
+ * they are (`LINK_SEVERAL`): read whole, one link's memo would carry the
+ * other. Text that starts with a link (`dusk:`, `https://`) is read whole,
+ * spaces and all, as a link alone always was. Else, where it's a request as
+ * both wallets share it (`requestMessage`): a line saying what it asks, then
+ * "Pay here:" and the link, its line break there or dropped, as a phone's
+ * one-line field drops it ("… · Factura 71Pay here: https://…"), its one
+ * payment link, its last words, is read alone, and fills in what the link
+ * says, never what the words before it say. Text with words after its link,
+ * which may be part of it, as a chat page's time copied with its message,
+ * is refused (`LINK_UNCLEAR`). Null for text with no link, as an address, a
+ * `.dusk` name or words: Send reads it as a recipient. `network` and
+ * `walletUrl` are `readPaymentLink`'s. `text` is the link read, for a wallet
+ * that does more with it, as opening a link for another network on that
+ * network's wallet.
+ */
+export declare function readPastedLink(input: unknown, options?: { network?: unknown; walletUrl?: string }): PastedLinkRead | null;
 
 /**
  * A link's amount as Send reads it, in `language` (the browser's, unless
