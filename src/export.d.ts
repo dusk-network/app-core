@@ -288,10 +288,13 @@ export type YearRewards = {
 
 /**
  * What each of a year's rewards is called, in the words both wallets show:
- * "Native staking, claimed" (`claimed`), "Sozu, grown while held"
- * (`sozuGrown`) and "Sozu, taken out by unstaking" (`sozu`).
+ * "Native staking, claimed" (`claimed`), "Sozu, grown while held, after
+ * deposit fees" (`sozuGrown`) and "Sozu, taken out by unstaking" (`sozu`).
+ * Grown while held says it's after deposit fees, as Sozu's card says its
+ * rewards so far are before them and shows the fees on their own
+ * (`POSITION_WORDS` of `/sozu`), so the two figures explain each other.
  */
-export declare const REWARD_WORDS: Readonly<{ claimed: "Native staking, claimed"; sozuGrown: "Sozu, grown while held"; sozu: "Sozu, taken out by unstaking" }>;
+export declare const REWARD_WORDS: Readonly<{ claimed: "Native staking, claimed"; sozuGrown: "Sozu, grown while held, after deposit fees"; sozu: "Sozu, taken out by unstaking" }>;
 
 /**
  * The one line both wallets show under a year's rewards: that taken out by

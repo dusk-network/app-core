@@ -8,6 +8,11 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 - `/recovery-words`: `recoveryWordsMatch`, whether the recovery words typed are the phrase's at the places asked, yes or no and nothing else, in any case and spacing, with `RECOVERY_WORDS_MISMATCH`, all a mismatch says, and `RECOVERY_WORDS_SHOW`, in both wallets' words
 - `/payment-links`: `readPastedLink`, what text pasted in Send's To asks of Send, the same in every wallet: a link alone read whole, a request shared as a message read by its one link, its line break there or not, and refused with two links (`LINK_SEVERAL`) or words after it (`LINK_UNCLEAR`)
+- `/sozu`: `POSITION_WORDS`, what Sozu's card calls each figure in both wallets, its rewards "Rewards so far, before deposit fees"
+
+### Changed
+
+- `/export`: `REWARD_WORDS.sozuGrown` says it's after deposit fees: "Sozu, grown while held, after deposit fees"
 
 ## [0.15.0]
 

@@ -778,6 +778,11 @@ const yearRate: number | null = sozuRate(0.2, sozuStatus);
 const rateLine: string | null = sozuRateLine({ locale: "de-DE", nativeRate: 0.2, provisioners: [{ amount: 1, eligibility: 1 }], status: sozuStatus, tipHeight: 1 });
 const worthThen: Promise<bigint | null> = sozuRead.then((facts) => stDuskWorth(facts.get("h")?.pool));
 void [sozuRead, earnedSoFar, year, yearRate, rateLine, worthThen];
+// The card's words, its rewards before deposit fees, which it shows on their own.
+import { POSITION_WORDS } from "@dusk-network/app-core/sozu";
+
+const cardWords: [string, string, string, string, "Deposit fees", "Deposit fees, about", "Rewards so far, before deposit fees"] = [POSITION_WORDS.putIn, POSITION_WORDS.takenOut, POSITION_WORDS.worthNow, POSITION_WORDS.stDusk, POSITION_WORDS.depositFees, POSITION_WORDS.depositFeesAbout, POSITION_WORDS.earned];
+void cardWords;
 
 import { GROWTH_MAX_AGE_MS, nativeRewards, sozuGrowth, type NativeRewards, type SozuGrowth, type SozuPoint } from "@dusk-network/app-core/sozu";
 
@@ -830,6 +835,9 @@ void [yearWorth, rewardWorth(null, { currency: "EUR" })];
 // @ts-expect-error a worth is in a currency
 void rewardWorth("1");
 void [yearReading, yearWords];
+// Grown while held, after deposit fees, as the card's rewards so far are before them.
+const grownWords: "Sozu, grown while held, after deposit fees" = REWARD_WORDS.sozuGrown;
+void grownWords;
 
 // /bridge's ledger
 import { transferLedger, type LedgerInput, type LedgerLine, type TransferLedger } from "@dusk-network/app-core/bridge";

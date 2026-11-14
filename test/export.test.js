@@ -1241,7 +1241,9 @@ describe("staking rewards by calendar year", () => {
   });
 
   it("says what each year's rewards are, and how taken out is counted, in the words both wallets show", () => {
-    assert.deepEqual(REWARD_WORDS, { claimed: "Native staking, claimed", sozu: "Sozu, taken out by unstaking", sozuGrown: "Sozu, grown while held" });
+    // Lena's: the card's 'Rewards so far' 0,0519 and the year's 'grown while held' 0,0302 differed by her deposit fees,
+    // and neither said so: grown while held says it's after them, as the card says it's before them.
+    assert.deepEqual(REWARD_WORDS, { claimed: "Native staking, claimed", sozu: "Sozu, taken out by unstaking", sozuGrown: "Sozu, grown while held, after deposit fees" });
     // The method named, the one cost basis of both: average cost, the deposit fees counted as cost.
     assert.equal(REWARDS_COUNTED, "Taken out by unstaking is part of grown while held: both count stDUSK at its average cost, deposit fees included.");
     assert.equal(FACTS_WAIT_MS, 600_000);

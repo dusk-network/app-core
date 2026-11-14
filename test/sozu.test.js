@@ -6,7 +6,7 @@ import { nativeRateEstimate, sozuRateEstimate } from "@dusk-network/networks/rat
 import { sozuFee, sozuStake } from "@dusk-network/networks/sozu";
 
 import { activityRows } from "../src/activity.js";
-import { GROWTH_MAX_AGE_MS, nativeRewards, stDuskWorth, sozuFacts, sozuGrowth, sozuPointAt, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
+import { GROWTH_MAX_AGE_MS, POSITION_WORDS, nativeRewards, stDuskWorth, sozuFacts, sozuGrowth, sozuPointAt, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "../src/sozu.js";
 import { DUSK, POOL, entryFrom, entryOf, hash } from "./fixtures/activity.js";
 import { readFixture } from "./fixtures/helpers.js";
 import { chainArchive, newYear } from "./fixtures/sozu.js";
@@ -249,6 +249,27 @@ describe("a position with Sozu", () => {
     assert.equal(position.feesExact, true);
     assert.equal(position.worthNow, worthNow);
     assert.equal(/** @type {bigint} */ (position.earned) + position.putIn - /** @type {bigint} */ (position.depositFees), worthNow + position.takenOut);
+  });
+
+  it("names each figure in the words both wallets show on the card: rewards so far before deposit fees, the fees on their own", async () => {
+    // Lena's: 'Rewards so far 0,0519' beside the year table's 'grown while held 0,0302', her deposit fees of 0,0217
+    // between them, and neither said which counted them.
+    assert.deepEqual(POSITION_WORDS, {
+      depositFees: "Deposit fees",
+      depositFeesAbout: "Deposit fees, about",
+      earned: "Rewards so far, before deposit fees",
+      putIn: "Put in",
+      stDusk: "stDUSK",
+      takenOut: "Taken out",
+      worthNow: "Worth now",
+    });
+
+    // What the card says before deposit fees, less the fees it shows, is what was put in, taken out and is worth now
+    // come to: what the year table counts after them.
+    const facts = await sozuFacts({ account: OTHER, archive: archiveOf(recording.round), rows: ROUND });
+    const position = sozuPosition({ facts, rows: ROUND, status: { position: { balance: 6_000n * DUSK, stDusk: 1n } } });
+
+    assert.equal(/** @type {bigint} */ (position.earned) - /** @type {bigint} */ (position.depositFees), /** @type {bigint} */ (position.worthNow) + position.takenOut - position.putIn);
   });
 
   it("says nothing of what it earned until the history is whole", () => {
