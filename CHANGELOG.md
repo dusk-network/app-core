@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `/recovery-words`: `recoveryWordsMatch`, whether the recovery words typed are the phrase's at the places asked, yes or no and nothing else, in any case and spacing, with `RECOVERY_WORDS_MISMATCH`, all a mismatch says, and `RECOVERY_WORDS_SHOW`, in both wallets' words
+
 ## [0.15.0]
 
 ### Added

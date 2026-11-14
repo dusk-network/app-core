@@ -681,6 +681,20 @@ const takenName = profileNameCheck("sofiadesign.dusk", { owners: lookedUp, profi
 const takenWords: string | undefined = takenName?.refused ? takenName.words : undefined;
 void [toLookUp, takenWords, profileNameCheck("x", { owners: { "x.dusk": null } })];
 
+// /recovery-words
+import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";
+
+const typedWords: [number, string][] = [[3, " Thank"], [1, "legal"]];
+const wordsChecked: boolean = recoveryWordsMatch("legal winner thank", typedWords);
+const wordsCheckedByMap: boolean = recoveryWordsMatch(["legal", "winner"], new Map([[2, "winner"]]));
+const wordsMismatch: "That doesn't match your recovery words. Check the words you wrote down." = RECOVERY_WORDS_MISMATCH;
+const wordsShown: "Show my recovery words" = RECOVERY_WORDS_SHOW;
+void [wordsChecked, wordsCheckedByMap, wordsMismatch, wordsShown];
+// @ts-expect-error a check says yes or no, and gives back nothing of the phrase
+void recoveryWordsMatch("legal", [[1, "legal"]]).length;
+// @ts-expect-error a word's place is its number on the screen
+void recoveryWordsMatch("legal", [["1", "legal"]]);
+
 // /prices
 import { PRICE_MAX_AGE_MS, PRICE_URL, duskPrice, inCurrency, type DuskPrice, type FetchLike as PriceFetch } from "@dusk-network/app-core/prices";
 

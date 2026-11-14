@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
-const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./prices", "./gas", "./names", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
+const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./prices", "./gas", "./names", "./recovery-words", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
 const SHARED = ["./src/bridge-common.js", "./src/bridge-evm.js", "./src/bridge-ledger.js", "./src/bridge-status.js", "./src/confusables.js", "./src/moved.js"];
 /** The shared modules that need nothing: data, and one rule. */
 const DATA = ["./src/confusables.js", "./src/moved.js"];
 /** The entry points that need nothing from anywhere. */
-const SELF_CONTAINED = ["./amounts", "./text", "./gas"];
+const SELF_CONTAINED = ["./amounts", "./text", "./gas", "./recovery-words"];
 /** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
 const VIEM_ENTRY = "./duskevm-withdrawals";
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -127,6 +127,11 @@ describe("the package", () => {
 
     assert.equal(looksAlike("Bob", "Bօb"), true);
     assert.equal(nameClash("x"), null);
+
+    const { RECOVERY_WORDS_MISMATCH, recoveryWordsMatch } = await import("@dusk-network/app-core/recovery-words");
+
+    assert.equal(recoveryWordsMatch("legal winner", [[2, "Winner"]]), true);
+    assert.match(RECOVERY_WORDS_MISMATCH, /doesn't match your recovery words/);
 
     const { matchRequests, sentAlready } = await import("@dusk-network/app-core/requests");
 
@@ -272,6 +277,8 @@ describe("the package", () => {
       "src/payment-links.js",
       "src/prices.d.ts",
       "src/prices.js",
+      "src/recovery-words.d.ts",
+      "src/recovery-words.js",
       "src/requests.d.ts",
       "src/requests.js",
       "src/shielded.d.ts",
