@@ -13,7 +13,7 @@ import { shortAccount } from "@dusk-network/networks/format";
 import { CONFUSABLES } from "./confusables.js";
 import { displayText } from "./text.js";
 
-/** @typedef {{ same: string, written: string, paired: string, lower: string }} NameKeys */
+/** @typedef {{ same: string, written: string, paired: string, lower: string, digits: string }} NameKeys */
 
 /** @type {Map<number, string> | null} */
 let looksLike = null;
@@ -43,6 +43,12 @@ const NOT_LETTER_OR_DIGIT = /[^\p{L}\p{N}]/gu;
 const PAIRS = /[wWd]/g;
 /** @type {Readonly<Record<string, string>>} */
 const PAIRED = Object.freeze({ W: "VV", d: "cl", w: "vv" });
+// The digits that stand in for letters, a 0 for an o and a 5 for an s; a 1 stands in for an i or an l, each 1 on its own.
+const DIGITS = /[05]/g;
+/** @type {Readonly<Record<string, string>>} */
+const DIGIT_LETTERS = Object.freeze({ 0: "o", 5: "s" });
+/** What a 1 in a name's digits key can stand in for, where the other name has it: an i, an l, or a 1. */
+const ONE = new Set(["1", "i", "l"]);
 
 /** What an app says of a name it refuses for what can't be seen in it. */
 export const NAME_HIDES = "This name has hidden characters. Type it again without them.";
@@ -88,12 +94,47 @@ const folded = (text) => text.normalize("NFD").replace(UNSEEN, "").replace(NOT_L
 const paired = (shape) => shape.replace(PAIRS, (char) => PAIRED[char]);
 
 /**
- * A name's four keys: as a person reads it, and by what it looks like, as
- * written, as written with its letter pairs, and in lower case, where a
- * capital that looks like another letter is the small one. The pairs are a
- * key of their own beside the written one, never in its place: "daIe" with
- * a capital I looks like "Dale" as written, though its d makes a pair the
- * capital D doesn't.
+ * A name's skeleton with its digits as the letters they stand in for, a 0
+ * as an o and a 5 as an s, and each small y as the v it looks like, as
+ * written: "Ro5a" as "Rosa", "Wendv" as "Wendy". A capital Y stays: "Yan"
+ * isn't "Van". Each 1 stays a 1, which Unicode's table would make an l: it
+ * stands in for an i or an l, each on its own (`digitsAlike`).
+ *
+ * @param {string} text
+ */
+const digitShape = (text) =>
+  text
+    .replace(DIGITS, (digit) => DIGIT_LETTERS[digit])
+    .split("1")
+    .map((part) => nameSkeleton(part))
+    .join("1")
+    .replace(/y/g, "v");
+
+/**
+ * Whether two names' digits keys (or words of them) look alike: the same,
+ * but where one has a 1 the other may have an i or an l, each 1 on its own,
+ * as "L11ian" reads as "Lilian" and "Dav1d" as "David"; a written i and l
+ * stay apart, as "Lilian" and "Liiian" do.
+ *
+ * @param {string} a
+ * @param {string} b
+ */
+function digitsAlike(a, b) {
+  if (a === b) return a !== "";
+
+  const [x, y] = [Array.from(a), Array.from(b)];
+
+  return x.length > 0 && x.length === y.length && x.every((char, i) => char === y[i] || (char === "1" && ONE.has(y[i])) || (y[i] === "1" && ONE.has(char)));
+}
+
+/**
+ * A name's five keys: as a person reads it, and by what it looks like, as
+ * written, as written with its letter pairs, in lower case, where a capital
+ * that looks like another letter is the small one, and with its digits as
+ * the letters they stand in for. The pairs and the digits are keys of their
+ * own beside the written one, never in its place: "daIe" with a capital I
+ * looks like "Dale" as written, though its d makes a pair the capital D
+ * doesn't.
  *
  * @param {unknown} name
  * @returns {NameKeys}
@@ -102,15 +143,20 @@ function keysOf(name) {
   const text = String(name ?? "");
   const written = nameSkeleton(text);
 
-  return { lower: folded(nameSkeleton(text.toLowerCase())), paired: folded(paired(written)), same: folded(text), written: folded(written) };
+  return {
+    digits: folded(digitShape(text)),
+    lower: folded(nameSkeleton(text.toLowerCase())),
+    paired: folded(paired(written)),
+    same: folded(text),
+    written: folded(written),
+  };
 }
 
 /**
  * @param {NameKeys} a
  * @param {NameKeys} b
  */
-const alike = (a, b) =>
-  (a.same !== "" && a.same === b.same) || (a.written !== "" && a.written === b.written) || (a.paired !== "" && a.paired === b.paired) || (a.lower !== "" && a.lower === b.lower);
+const alike = (a, b) => /** @type {(keyof NameKeys)[]} */ (["same", "written", "paired", "lower"]).some((key) => a[key] !== "" && a[key] === b[key]) || digitsAlike(a.digits, b.digits);
 
 /**
  * @param {unknown} a
@@ -207,8 +253,8 @@ const wordsOf = (text) =>
 
 /**
  * A name's words as a person reads them, and by what they look like, as
- * written, as written with its letter pairs, and in lower case, as `keysOf`
- * reads the whole name.
+ * written, as written with its letter pairs, in lower case, and with its
+ * digits as letters, as `keysOf` reads the whole name.
  *
  * @param {unknown} name
  * @returns {string[][]}
@@ -217,16 +263,22 @@ function wordKeys(name) {
   const text = String(name ?? "");
   const written = nameSkeleton(text);
 
-  return [wordsOf(text), wordsOf(written), wordsOf(paired(written)), wordsOf(nameSkeleton(text.toLowerCase()))];
+  return [wordsOf(text), wordsOf(written), wordsOf(paired(written)), wordsOf(nameSkeleton(text.toLowerCase())), wordsOf(digitShape(text))];
 }
 
+/** Which of `wordKeys`' lists is its digits', whose words are compared by `digitsAlike`. */
+const DIGIT_WORDS = 4;
+
 /**
- * Whether the words of one are the first words of the other, which has more.
+ * Whether the words of one are the first words of the other, which has more:
+ * each the same, or for the digits' words (`digits`), alike by `digitsAlike`.
  *
  * @param {string[]} short
  * @param {string[]} long
+ * @param {boolean} [digits]
  */
-const begins = (short, long) => short.length > 0 && short.length < long.length && short.every((word, i) => word === long[i]);
+const begins = (short, long, digits = false) =>
+  short.length > 0 && short.length < long.length && short.every((word, i) => (digits ? digitsAlike(word, long[i]) : word === long[i]));
 
 /**
  * @template {{ name?: unknown, duskName?: unknown, account?: unknown, address?: unknown }} P
@@ -244,7 +296,7 @@ export function nameStarts(name, { contacts = [], profiles = [], self } = {}) {
       for (const each of namesOf(entry, kind)) {
         const theirs = wordKeys(each);
 
-        if (keys.some((words, i) => begins(words, theirs[i]) || begins(theirs[i], words))) return /** @type {any} */ ({ entry, kind, name: String(each) });
+        if (keys.some((words, i) => begins(words, theirs[i], i === DIGIT_WORDS) || begins(theirs[i], words, i === DIGIT_WORDS))) return /** @type {any} */ ({ entry, kind, name: String(each) });
       }
     }
   }
@@ -277,29 +329,61 @@ const WORD_EDGES = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
  */
 const plainShape = (shape) => shape.normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "").toLowerCase();
 
+// What renders as nothing, which a name is read without; a control, as a line break, parts words.
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
+
 /**
- * The words of a name that read as .dusk names, as they're written, without
- * the punctuation around them, by the look-alike rules: in any case, in
- * letters or points that look like a .dusk name's, with marks over its
- * letters, and with the letter pairs that look like one, as
- * "SofiaDesign.DUSK", "ѕofia.dusk" with a Cyrillic ѕ, "sofia．dusk" with a
- * fullwidth point, "sofia.𝐃𝐔𝐒𝐊" in mathematical bold, "sofia.dúsk" or
- * "sofia.clusk".
+ * Whether a character can be part of a .dusk name as a person reads one: a
+ * letter, a digit or a mark over one, and a point or a hyphen, or what reads
+ * as one, as a fullwidth point. Spaces and other punctuation part names, as
+ * the comma in "alice.dusk,bob.dusk".
+ *
+ * @param {string} char
+ */
+const inDuskName = (char) => /^[\p{L}\p{N}\p{M}]$/u.test(char) || [char.normalize("NFKC"), nameSkeleton(char)].some((shape) => shape === "." || shape === "-");
+
+/**
+ * The words of a name that read as .dusk names, as they're written, split
+ * at what can't be in one and without the punctuation around them, by the
+ * look-alike rules: in any case, in letters or points that look like a .dusk
+ * name's, with marks over its letters, with the letter pairs that look like
+ * one, and with digits for letters, as "SofiaDesign.DUSK", "ѕofia.dusk" with
+ * a Cyrillic ѕ, "sofia．dusk" with a fullwidth point, "sofia.𝐃𝐔𝐒𝐊" in
+ * mathematical bold, "sofia.dúsk", "sofia.clusk" or "sofia.du5k"; and each
+ * of "alice.dusk,bob.dusk".
  *
  * @param {unknown} name
  * @returns {string[]}
  */
-const duskNamesIn = (name) =>
-  String(name ?? "")
-    .split(/\s+/u)
-    .map((word) => word.replace(WORD_EDGES, ""))
-    .filter((word) => {
-      if (word === "") return false;
+function duskNamesIn(name) {
+  /** @type {string[]} */
+  const words = [];
+  let word = "";
 
-      const written = nameSkeleton(word);
+  for (const char of String(name ?? "").replace(INVISIBLE, "")) {
+    if (inDuskName(char)) {
+      word += char;
+    } else {
+      words.push(word);
+      word = "";
+    }
+  }
 
-      return [nameSkeleton(word.toLowerCase()), written].some((shape) => DUSK_ENDING.test(plainShape(shape))) || PAIRED_DUSK_ENDING.test(plainShape(paired(written)));
+  words.push(word);
+
+  return words
+    .map((each) => each.replace(WORD_EDGES, ""))
+    .filter((each) => {
+      if (each === "") return false;
+
+      const written = nameSkeleton(each);
+
+      return (
+        [nameSkeleton(each.toLowerCase()), written, digitShape(each)].some((shape) => DUSK_ENDING.test(plainShape(shape))) ||
+        PAIRED_DUSK_ENDING.test(plainShape(paired(written)))
+      );
     });
+}
 
 /**
  * A .dusk name as the name service tells one from another: trimmed, its
@@ -311,6 +395,133 @@ const duskNamesIn = (name) =>
  */
 const domainOf = (name) => String(name ?? "").trim().replace(/[A-Z]/g, (char) => char.toLowerCase());
 
+// A .dusk name as the name service can register one, in lower case: labels of letters, digits and hyphens.
+const REGISTRABLE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.dusk$/;
+
+/**
+ * A skeleton as a plain spelling compares it: without the marks over its
+ * letters, in lower case.
+ *
+ * @param {string} shape
+ */
+const bare = (shape) => shape.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+/** @type {Map<string, string> | null} */
+let plainBySkeleton = null;
+
+/**
+ * The letter, digit, point or hyphen a skeleton is of, as Unicode's table
+ * gives "rn" for an m, a letter before a digit: "o" for "O", not "0".
+ *
+ * @param {string} shape A character's skeleton, `bare`
+ */
+function plainOf(shape) {
+  if (!plainBySkeleton) {
+    plainBySkeleton = new Map();
+
+    for (const char of "0123456789.-abcdefghijklmnopqrstuvwxyz") plainBySkeleton.set(bare(nameSkeleton(char)), char);
+  }
+
+  return plainBySkeleton.get(shape);
+}
+
+/**
+ * A character as a plain one where it's written in one that looks like it:
+ * ASCII as it is, in lower case; another as the letter, digit, point or
+ * hyphen Unicode's table reads it as, where it reads as one, so a Cyrillic ѕ
+ * is an s and what looks like an m (Unicode's "rn") an m; else as it is.
+ *
+ * @param {string} char
+ */
+const plainChar = (char) => {
+  if (/^[\x21-\x7e]$/.test(char)) return char.toLowerCase();
+
+  const shape = bare(nameSkeleton(char));
+
+  return plainOf(shape) ?? (/^[a-z0-9.-]+$/.test(shape) ? shape : char);
+};
+
+/**
+ * The .dusk name a word that reads as one reads as, in plain letters: its
+ * styled letters as their ordinary ones (NFKC: mathematical bold, fullwidth),
+ * then what's before its last point, its look-alike letters and points as
+ * the ones they look like, and ".dusk", as "ѕofiadesign.dusk" with a Cyrillic
+ * ѕ, "sofiadesign.clusk" or "𝐬𝐨𝐟𝐢𝐚𝐝𝐞𝐬𝐢𝐠𝐧.dusk" is sofiadesign.dusk; "" where
+ * it doesn't read as one the name service can register.
+ *
+ * @param {string} word As `duskNamesIn` gives it
+ */
+function readingOf(word) {
+  const chars = [...word.normalize("NFKC").normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "")].map(plainChar);
+  const point = chars.lastIndexOf(".");
+  const reading = point > 0 ? `${chars.slice(0, point).join("")}.dusk` : "";
+
+  return REGISTRABLE.test(reading) ? reading : "";
+}
+
+/**
+ * Each .dusk name word of a name, as the name service names it (`written`),
+ * and as it reads in plain letters (`reading`): "" for one it can't register.
+ *
+ * @param {unknown} name
+ */
+const duskWordsOf = (name) =>
+  duskNamesIn(name).map((word) => {
+    const written = domainOf(word);
+
+    return { reading: readingOf(word), word, written: REGISTRABLE.test(written) ? written : "" };
+  });
+
+/**
+ * @param {unknown} name
+ * @returns {string[]}
+ */
+export function nameDuskNames(name) {
+  /** @type {string[]} */
+  const names = [];
+
+  for (const { reading, written } of duskWordsOf(name)) {
+    for (const each of [written, reading]) if (each && !names.includes(each)) names.push(each);
+  }
+
+  return names;
+}
+
+/**
+ * What `owners` says a .dusk name is registered to: the accounts and
+ * addresses it resolves to; null where it isn't registered; undefined where
+ * it says nothing, as for one that wasn't looked up, or whose lookup failed.
+ *
+ * @param {unknown} owners A `Map`, or an object, by the names `nameDuskNames` gives
+ * @param {string} dusk
+ * @returns {Set<string> | null | undefined}
+ */
+function ownerOf(owners, dusk) {
+  if (!dusk || !owners || typeof owners !== "object") return undefined;
+
+  const map = /** @type {{ has?: unknown, get?: unknown }} */ (owners);
+  /** @type {unknown} */
+  let owner;
+
+  if (typeof map.has === "function" && typeof map.get === "function") {
+    if (!map.has(dusk)) return undefined;
+
+    owner = map.get(dusk);
+  } else {
+    if (!Object.hasOwn(owners, dusk)) return undefined;
+
+    owner = /** @type {Record<string, unknown>} */ (owners)[dusk];
+  }
+
+  if (owner === null) return null;
+
+  const said = /** @type {{ account?: unknown, address?: unknown }} */ (owner);
+  const ids = typeof owner === "string" ? [owner] : owner && typeof owner === "object" ? [said.account, said.address] : [];
+  const found = new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean));
+
+  return found.size ? found : undefined;
+}
+
 /**
  * Whether one name's words are the first words of the other's, either way,
  * as the look-alike rules read them.
@@ -321,17 +532,17 @@ const domainOf = (name) => String(name ?? "").trim().replace(/[A-Z]/g, (char) =>
 const startsAs = (keys, other) => {
   const theirs = wordKeys(other);
 
-  return keys.some((words, i) => begins(words, theirs[i]) || begins(theirs[i], words));
+  return keys.some((words, i) => begins(words, theirs[i], i === DIGIT_WORDS) || begins(theirs[i], words, i === DIGIT_WORDS));
 };
 
 /**
  * @template {{ name?: unknown, duskName?: unknown, account?: unknown, address?: unknown }} P
  * @template {{ name?: unknown, duskName?: unknown, address?: unknown }} C
  * @param {unknown} name
- * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, self?: unknown }} [among]
+ * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, self?: unknown, owners?: unknown }} [among]
  * @returns {import("./names.js").ProfileNameCheck<P, C> | null}
  */
-export function profileNameCheck(name, { contacts = [], profiles = [], self } = {}) {
+export function profileNameCheck(name, { contacts = [], owners, profiles = [], self } = {}) {
   if (nameHides(name)) return { dusk: false, entry: null, kind: "hides", name: "", refused: true, words: NAME_HIDES };
 
   const clash = profileNameClash(name, { contacts, profiles, self });
@@ -351,36 +562,74 @@ export function profileNameCheck(name, { contacts = [], profiles = [], self } = 
   }
 
   const others = othersThan({ contacts, profiles, self });
-  const keys = keysOf(name);
-  const words = wordKeys(name);
   /** @param {C} contact */
   const duskOf = (contact) => (contact?.duskName === undefined || contact.duskName === null || contact.duskName === "" ? "" : String(contact.duskName));
+  // The profile's own: its verified .dusk name, that of a contact saved with its address, and those the name
+  // service says are registered to it (`owners`), as each is written in the name.
+  const mine = new Set([self, others.self?.account, others.self?.address].map((id) => String(id ?? "").trim()).filter(Boolean));
+  const own = [others.self?.duskName, ...contacts.filter((each) => !others.contacts.includes(each)).map(duskOf)].filter((each) => each !== undefined && each !== null && each !== "");
+
+  // A .dusk name in it the name service says is registered to another account, or one it looks like: refused,
+  // as History would show this profile by that account's name.
+  for (const { reading, written } of duskWordsOf(name)) {
+    const writtenOwner = ownerOf(owners, written);
+
+    if (writtenOwner && [...writtenOwner].some((id) => mine.has(id))) {
+      own.push(written);
+      continue;
+    }
+
+    for (const [dusk, owner] of /** @type {const} */ ([[written, writtenOwner], [reading, reading === written ? undefined : ownerOf(owners, reading)]])) {
+      if (!owner || [...owner].some((id) => mine.has(id))) continue;
+
+      const theirs = others.profiles.find((each) => owner.has(String(each?.account ?? "")) || owner.has(String(each?.address ?? "")));
+      const known = theirs ? undefined : others.contacts.find((each) => owner.has(String(each?.address ?? "").trim()));
+      const as = shown(dusk);
+      const same = dusk === written;
+      const words = theirs
+        ? same
+          ? `Your other profile is called ${as}. Choose another name.`
+          : `That looks like ${as}, one of your other profiles. Choose another name.`
+        : known
+          ? same
+            ? `You have a contact called ${shown(known.name)}, at ${as}. Choose another name.`
+            : `That looks like ${as}, your contact ${shown(known.name)}'s. Choose another name.`
+          : same
+            ? `${as} belongs to another account. Choose another name.`
+            : `That looks like ${as}, which belongs to another account. Choose another name.`;
+
+      return /** @type {any} */ ({ dusk: true, entry: theirs ?? known ?? null, kind: theirs ? "profile" : known ? "contact" : "dusk", name: dusk, refused: true, words });
+    }
+  }
+
+  /** @param {unknown} dusk */
+  const isOwn = (dusk) => own.some((each) => domainOf(each) === domainOf(dusk));
+  const keys = keysOf(name);
+  const words = wordKeys(name);
   /** @param {C} contact @param {string} dusk */
   const contactAt = (contact, dusk) => /** @type {any} */ ({ dusk: true, entry: contact, kind: "contact", name: dusk, refused: false, words: `You have a contact called ${shown(contact.name)}, at ${shown(dusk)}. Is this someone else?` });
   /** @param {P} profile */
   const profileAt = (profile) => /** @type {any} */ ({ dusk: true, entry: profile, kind: "profile", name: String(profile.duskName), refused: false, words: `Your other profile is called ${shown(profile.duskName)}. Is this someone else?` });
 
   // A contact's .dusk name it is, or looks like: the contact it is, by name, as History shows that name for them.
-  const named = others.contacts.find((contact) => duskOf(contact) !== "" && alike(keys, keysOf(duskOf(contact))));
+  // Not one the profile's own: the name service says whose that is.
+  const named = others.contacts.find((contact) => duskOf(contact) !== "" && !isOwn(duskOf(contact)) && alike(keys, keysOf(duskOf(contact))));
 
   if (named) return contactAt(named, duskOf(named));
 
   // A .dusk name it starts as, or that starts as it, word for word: another profile's, then a contact's.
-  const profile = others.profiles.find((each) => each?.duskName && startsAs(words, each.duskName));
+  const profile = others.profiles.find((each) => each?.duskName && !isOwn(each.duskName) && startsAs(words, each.duskName));
 
   if (profile) return profileAt(profile);
 
-  const at = others.contacts.find((contact) => duskOf(contact) !== "" && startsAs(words, duskOf(contact)));
+  const at = others.contacts.find((contact) => duskOf(contact) !== "" && !isOwn(duskOf(contact)) && startsAs(words, duskOf(contact)));
 
   if (at) return contactAt(at, duskOf(at));
 
   // Any other .dusk name it holds, but the profile's own: whose it is where the wallet knows, else anyone's, as
-  // History would show this profile by the name it shows that name's owner by. Its own are its verified one and
-  // that of a contact saved with its address.
-  const own = [others.self?.duskName, ...contacts.filter((each) => !others.contacts.includes(each)).map(duskOf)].filter((each) => each !== undefined && each !== null && each !== "");
-
+  // History would show this profile by the name it shows that name's owner by.
   for (const dusk of duskNamesIn(name)) {
-    if (own.some((each) => domainOf(each) === domainOf(dusk))) continue;
+    if (isOwn(dusk)) continue;
 
     const theirs = keysOf(dusk);
     const other = others.profiles.find((each) => each?.duskName && alike(theirs, keysOf(each.duskName)));

@@ -6,11 +6,14 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 ### Added
 
+- `/names`: `nameDuskNames`, the .dusk names a profile's name holds, to look up before `profileNameCheck`: as written, and as they read in plain letters
 - `/gas`: `BLOCK_TRANSACTIONS` and `BLOCK_GAS`, what a block takes
 
 ### Changed
 
 - `/gas`: `defaultGasPrice` takes what waits in the mempool (`mempool`) and is the network's minimum while it fits in the next block, else its median up to the ceiling
+- `/names`: `profileNameCheck` refuses a .dusk name the name service says is another account's (`owners`): "sofiadesign.dusk belongs to another account. Choose another name.", and asks nothing of one that's the profile's own
+- `/names`: names look alike with digits for letters, a 1 for an i or an l, a 0 for an o and a 5 for an s, and a v for a y: "Dav1d" like "David", "Wendv" like "Wendy"
 
 ## [0.14.0]
 

@@ -8,16 +8,21 @@
  *
  * @example
  * ```js
- * import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameHides, nameStarts, profileNameCheck, profileNameClash } from "@dusk/app-core/names";
+ * import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameStarts, profileNameCheck, profileNameClash } from "@dusk/app-core/names";
  *
  * nameHides("\u202eecilA"); // true: it reads as "Alice". Refuse it, saying NAME_HIDES
  * looksAlike("Bob", "Bօb"); // true: an Armenian օ
  * looksAlike("Wendy", "VVendy"); // true: two v's for a w
+ * looksAlike("David", "Dav1d"); // true: a 1 for an i
  * profileNameCheck("alice.dusk", { profiles, contacts: [{ name: "Wendy", duskName: "alice.dusk", address }], self });
  * // { refused: false, kind: "contact", dusk: true, name: "alice.dusk", entry, words: "You have a contact called Wendy, at alice.dusk. Is this someone else?" }:
  * // not saved until it's answered, with NAME_SAVE_YES
  * profileNameCheck("sofiadesign.dusk", { profiles, contacts, self });
  * // { refused: false, kind: "dusk", dusk: true, name: "sofiadesign.dusk", entry: null, words: "sofiadesign.dusk is a .dusk name. Is it this profile's?" }
+ * // Looked up first, as Send looks a name up: refused where it's another account's.
+ * nameDuskNames("sofiadesign.dusk"); // ["sofiadesign.dusk"]
+ * profileNameCheck("sofiadesign.dusk", { profiles, contacts, self, owners: new Map([["sofiadesign.dusk", { account: sofias }]]) });
+ * // { refused: true, kind: "dusk", dusk: true, name: "sofiadesign.dusk", entry: null, words: "sofiadesign.dusk belongs to another account. Choose another name." }
  * contactNameCheck("Lucas", { profiles, contacts: [{ id: "c1", name: "Lucas (petit-fils)", address }], address: other });
  * // { refused: false, kind: "contact", dusk: false, name: "Lucas (petit-fils)", entry, words: "You have a contact called Lucas (petit-fils), at 23zcbk…hjmd3E. Is this someone else?" }
  * nameClash("Profile 2", { profiles, contacts, except: editedId });
@@ -70,6 +75,9 @@ export declare const NAME_HIDES: "This name has hidden characters. Type it again
  * "Yes, save it": what answers the question a name asks at Save
  * (`profileNameCheck`, `contactNameCheck`), in both wallets. A name asked
  * about isn't saved until it's answered so; changed, it's checked again.
+ * Only a click or a tap on it answers it: the question and its button never
+ * take the focus, and Enter in the name's field (or a second Save) asks
+ * again, so a habit's Enter, Enter can't say yes.
  */
 export declare const NAME_SAVE_YES: "Yes, save it";
 
@@ -83,7 +91,12 @@ export declare const NAME_SAVE_YES: "Yes, save it";
  * "Dale"):
  * "VVendy" looks like "Wendy", "Davicl" like "David", and "Ernma" like
  * "Emma", as Unicode's table has it; "Clara" and "Dara" don't, as their
- * capitals tell them apart. The other checks here read names so too.
+ * capitals tell them apart. So do the digits that stand in for letters, a 1
+ * for an i or an l, each 1 on its own, a 0 for an o and a 5 for an s, and a
+ * small v for a y: "Dav1d" looks like "David", "A1ice" like "Alice",
+ * "L11ian" like "Lilian", "Ro5a" like "Rosa" and "Wendv" like "Wendy"; "ian"
+ * and "lan" don't, nor "Lilian" and "Liiian", nor "Yan" and "Van". The other
+ * checks here read names so too.
  */
 export declare function looksAlike(a: unknown, b: unknown): boolean;
 
@@ -152,6 +165,21 @@ export declare function nameStarts<P extends { name?: unknown; duskName?: unknow
  *   1, one of your other profiles. Choose another name.", "You have a contact
  *   called Alice. Choose another name." or "That looks like your contact
  *   Alice. Choose another name.";
+ * - one with a .dusk name in it that the name service says is registered to
+ *   another account (`owners`), as written or as it reads in plain letters
+ *   (`nameDuskNames`): refused, as Marek's Profile 2 named
+ *   "sofiadesign.dusk", Sofía's, which History then showed his own transfers
+ *   by: "sofiadesign.dusk belongs to another account. Choose another name.",
+ *   or written in look-alike letters, as with a Cyrillic ѕ, "That looks like
+ *   sofiadesign.dusk, which belongs to another account. Choose another
+ *   name."; naming whose where the wallet knows (`kind` "profile" or
+ *   "contact", `entry` that one): "Your other profile is called
+ *   sofiadesign.dusk. Choose another name.", "You have a contact called
+ *   Sofía, at sofiadesign.dusk. Choose another name.", "That looks like
+ *   sofiadesign.dusk, your contact Sofía's. Choose another name."; and one
+ *   it says is registered to this profile (to `self`, or to its account or
+ *   shielded address) is its own, as its verified .dusk name is, and asks
+ *   nothing;
  * - one that is, or looks like, a contact's .dusk name (`duskName`, the name
  *   a contact was saved from), as Marek's profile named "alice.dusk", his
  *   contact Wendy's: asked, naming the contact it is, "You have a contact
@@ -166,9 +194,10 @@ export declare function nameStarts<P extends { name?: unknown; duskName?: unknow
  *   marks over them, or in the letter pairs that look like one ("sofia.𝐃𝐔𝐒𝐊",
  *   "sofia.dúsk", "sofia.clusk") (`kind` "dusk", `entry` null), as Marek's
  *   profile named "sofiadesign.dusk", the name of someone he paid and History
- *   shows by it: asked, "sofiadesign.dusk is a .dusk name. Is it this
- *   profile's?"; where it's another profile's .dusk name or a contact's, as
- *   above, naming them;
+ *   shows by it, where the name service doesn't say whose it is (not looked
+ *   up, the lookup failed, or not registered): asked, "sofiadesign.dusk is a
+ *   .dusk name. Is it this profile's?"; where it's another profile's .dusk
+ *   name or a contact's, as above, naming them;
  * - one that starts as a contact's name, or is the start of it: asked, "You
  *   have a contact called Lucas (petit-fils). Is this someone else?".
  *
@@ -178,16 +207,44 @@ export declare function nameStarts<P extends { name?: unknown; duskName?: unknow
  * in any case, so "ali-ce.dusk" or "al.ice.dusk" for a profile that is
  * "alice.dusk" asks. The names in the words show what can't be seen in them
  * as codes.
+ *
+ * `owners` is what the wallet's name lookup said of each name
+ * `nameDuskNames` gives for this one, by that name (a `Map`, or an object):
+ * what it resolves to, its public account and shielded address
+ * (`{ account, address }`, or the account alone, as text), or null where it
+ * isn't registered (absent or expired). Leave out a name whose lookup
+ * failed, or that has no address: it's asked about, as without `owners`.
  */
 export declare function profileNameCheck<P extends { name?: unknown; duskName?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; duskName?: unknown; address?: unknown }>(
   name: unknown,
-  among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; self?: unknown }
+  among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; self?: unknown; owners?: DuskNameOwners }
 ): ProfileNameCheck<P, C> | null;
+
+/** What a wallet's name lookup said of a .dusk name: what it resolves to, or null where it isn't registered. */
+export type DuskNameOwner = { account?: string | null; address?: string | null } | string | null;
+
+/** `DuskNameOwner`s by the names `nameDuskNames` gives: one left out wasn't looked up, or its lookup failed. */
+export type DuskNameOwners = ReadonlyMap<string, DuskNameOwner> | Readonly<Record<string, DuskNameOwner>>;
+
+/**
+ * The .dusk names a profile's name holds, to look up before
+ * `profileNameCheck` says whose they are (`owners`), as the name service
+ * names them: each that reads as one, parted from the rest at spaces and at
+ * punctuation that can't be in one ("alice.dusk,bob.dusk" holds two), as
+ * it's written, in lower case, where the name service could register it
+ * ("SofiaDesign.DUSK" is "sofiadesign.dusk"), and as it reads in plain
+ * letters, where it's written in styled letters or in letters or points
+ * that look like others ("E𝐦𝐦a.dusk" in mathematical bold is "emma.dusk";
+ * "ѕofiadesign.dusk" with a Cyrillic ѕ, "sofiadesign.clusk" and
+ * "sofiadesign.du5k" are "sofiadesign.dusk"). Each once; none for a name
+ * without one.
+ */
+export declare function nameDuskNames(name: unknown): string[];
 
 /** What `profileNameCheck` says of a profile's name: refused or asked, in words, and whose name it's about. */
 export type ProfileNameCheck<P, C> =
   | { refused: true; words: "This name has hidden characters. Type it again without them."; kind: "hides"; entry: null; name: ""; dusk: false }
-  | { refused: false; words: string; kind: "dusk"; entry: null; name: string; dusk: true }
+  | { refused: boolean; words: string; kind: "dusk"; entry: null; name: string; dusk: true }
   | { refused: boolean; words: string; kind: "profile"; entry: P; name: string; dusk: boolean }
   | { refused: boolean; words: string; kind: "contact"; entry: C; name: string; dusk: boolean };
 

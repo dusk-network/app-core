@@ -646,6 +646,15 @@ const startsAccount: string | undefined = starts?.kind === "profile" ? starts.en
 // @ts-expect-error a name that starts as another is asked about, never said to be the same
 void starts?.same;
 void [clashKind, clashAccount, alikeHere, nameChecks, hiddenName, hiddenWords, profileClashName, clashTaken, ownNameTaken, startsName, startsAccount];
+// The .dusk names a profile's name holds, looked up, and what the lookup said of each.
+import { nameDuskNames, type DuskNameOwner, type DuskNameOwners } from "@dusk-network/app-core/names";
+
+const toLookUp: string[] = nameDuskNames("sofiadesign.dusk");
+const sofiasName: DuskNameOwner = { account: "sofia", address: null };
+const lookedUp: DuskNameOwners = new Map<string, DuskNameOwner>([["sofiadesign.dusk", sofiasName], ["bob.dusk", null], ["x.dusk", "account"]]);
+const takenName = profileNameCheck("sofiadesign.dusk", { owners: lookedUp, profiles: ownNames, self: "q" });
+const takenWords: string | undefined = takenName?.refused ? takenName.words : undefined;
+void [toLookUp, takenWords, profileNameCheck("x", { owners: { "x.dusk": null } })];
 
 // /prices
 import { PRICE_MAX_AGE_MS, PRICE_URL, duskPrice, inCurrency, type DuskPrice, type FetchLike as PriceFetch } from "@dusk-network/app-core/prices";
