@@ -232,6 +232,28 @@ export type MadePaymentLink = {
  */
 export declare function makePaymentLink(request: PaymentRequest): MadePaymentLink;
 
+/**
+ * A request as both wallets share it, by Share and Copy alike: a line a
+ * person reads, then the link, unchanged. "<name> asks you to pay <amount>
+ * DUSK · <memo>", then "Pay here: <link>": `name` the requesting profile's
+ * verified .dusk name, else the name the person gave it ("You're asked to
+ * pay …" without one); the amount in lux (`lux`), written as every reader
+ * reads it as that amount, in the decimal mark of `language` (the browser's,
+ * unless given), without groups and with three decimals as four ("2,1250
+ * DUSK"), or "asks you for a payment in DUSK" where the request names none;
+ * " on Testnet" where `network`, a test network's name, is given; the memo
+ * only where there is one. Right-to-left words in the name and the memo are
+ * set apart, and what can't be seen in them shows as its codes, as on a
+ * screen (`displayText` of `/text`).
+ *
+ * @example
+ * ```js
+ * requestMessage({ name: "sofiadesign.dusk", lux: 30_000_000n, memo: "Factura F-2026-071", link: made.https, language: "es-ES" });
+ * // "sofiadesign.dusk asks you to pay 0,03 DUSK · Factura F-2026-071\nPay here: https://apps.dusk.network/wallet/dashboard/send?…"
+ * ```
+ */
+export declare function requestMessage(request: { link: string; name?: string | null; lux?: bigint | number | string | null; memo?: string | null; network?: string | null; language?: string }): string;
+
 /** A chain by its network's name: "Mainnet", "Local" for 0, "Chain 42" for one there's no file for, and "" for what isn't "dusk:" and a number. */
 export declare function chainLabel(chain: unknown): string;
 

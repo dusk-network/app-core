@@ -5,7 +5,7 @@ import { networks } from "@dusk-network/networks";
 
 import { activityRows } from "../src/activity.js";
 import { amountForField, parseDusk, normalizeAmount, decimalSeparator, readAmount } from "../src/amounts.js";
-import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, MAX_MEMO_BYTES, chainLabel, linkAmount, makePaymentLink, networkMismatch, parsePaymentLink, readPaymentLink, recipientKind } from "../src/payment-links.js";
+import { LINK_TWO_AMOUNTS, LINK_UNREADABLE, MAX_MEMO_BYTES, chainLabel, linkAmount, makePaymentLink, networkMismatch, parsePaymentLink, readPaymentLink, recipientKind, requestMessage } from "../src/payment-links.js";
 import { A, B, recorded } from "./fixtures/activity.js";
 import { like } from "./fixtures/helpers.js";
 
@@ -715,5 +715,49 @@ describe("the network a link is for", () => {
     assert.equal(networkMismatch("dusk:1", "dusk:1"), "");
     assert.equal(networkMismatch("", "dusk:1"), "");
     assert.equal(networkMismatch("dusk:1", null), "");
+  });
+});
+
+describe("a request shared as a message", () => {
+  // Sofía's: Copy request link gave her client a 270-character blob; Chen's: Share gave his friends a bare link.
+  const sofias = makePaymentLink({ amount: "0,03", language: "es-ES", memo: "Factura F-2026-071 – rediseño web", network: 2, to: A });
+
+  it("says who asks for what, its memo, then the link as it is: in both wallets' words", () => {
+    assert.equal(
+      requestMessage({ language: "es-ES", link: /** @type {string} */ (sofias.https), lux: sofias.lux, memo: "Factura F-2026-071 – rediseño web", name: "sofiadesign.dusk" }),
+      `sofiadesign.dusk asks you to pay 0,03 DUSK · Factura F-2026-071 – rediseño web\nPay here: ${sofias.https}`
+    );
+    // The memo only where there is one.
+    assert.equal(requestMessage({ language: "en-SG", link: "https://example/send?x", lux: 20_000_000n, name: "Chen" }), "Chen asks you to pay 0.02 DUSK\nPay here: https://example/send?x");
+  });
+
+  it("writes the amount so any reader reads it as that amount, in the person's own decimal mark", () => {
+    const of = (/** @type {bigint} */ lux, /** @type {string} */ language) => requestMessage({ language, link: "L", lux, name: "Lena" }).split("\n")[0];
+
+    // No groups, which a reader of another language takes for decimals, and three decimals with a fourth, a zero.
+    assert.equal(of(1000n * 1_000_000_000n, "de-DE"), "Lena asks you to pay 1000 DUSK");
+    assert.equal(of(2_125_000_000n, "de-DE"), "Lena asks you to pay 2,1250 DUSK");
+    assert.equal(of(2_125_000_000n, "en-GB"), "Lena asks you to pay 2.1250 DUSK");
+    assert.equal(of(1_234_500_000_000n, "fr-FR"), "Lena asks you to pay 1234,5 DUSK");
+    assert.equal(of(1n, "en-GB"), "Lena asks you to pay 0.000000001 DUSK");
+
+    for (const language of ["en-GB", "de-DE", "fr-FR", "pl-PL", "es-ES"]) {
+      for (const lux of [1_000_000_000_000n, 2_125_000_000n, 12_050_000_000n, 999_999_000_000n]) {
+        const said = /** @type {string} */ (/asks you to pay (\S+) DUSK/.exec(of(lux, language))?.[1]);
+
+        assert.deepEqual(readAmount(said, language), { lux, problem: null }, `${language}: ${said}`);
+      }
+    }
+  });
+
+  it("asks for any amount where the request names none, and says so without a name, and on a test network", () => {
+    assert.equal(requestMessage({ link: "L", lux: null, memo: "chicken rice", name: "Chen" }), "Chen asks you for a payment in DUSK · chicken rice\nPay here: L");
+    assert.equal(requestMessage({ link: "L", lux: 20_000_000n }), "You're asked to pay 0.02 DUSK\nPay here: L");
+    assert.equal(requestMessage({ link: "L" }), "You're asked for a payment in DUSK\nPay here: L");
+    assert.equal(requestMessage({ link: "L", lux: "20000000", name: "Chen", network: "Testnet" }), "Chen asks you to pay 0.02 DUSK on Testnet\nPay here: L");
+  });
+
+  it("shows what can't be seen in a name or a memo as its codes, as on a screen", () => {
+    assert.equal(requestMessage({ link: "L", lux: 1_000_000_000n, memo: "pay ‮0001‬", name: "Ali​ce" }), "Ali\\u200bce asks you to pay 1 DUSK · pay \\u202e0001\\u202c\nPay here: L");
   });
 });

@@ -612,6 +612,14 @@ const asSendReads: { field: string; lux: bigint | null; problem: string | null }
 const linkChoices: AmountRead["choices"] = linkAmount(sendRead?.link, "pl-PL").choices;
 void [asSendReads, linkChoices, linkAmount(null), linkAmount(readLink)];
 
+// A request shared as a message, the same from both wallets.
+import { requestMessage } from "@dusk-network/app-core/payment-links";
+
+const shareText: string = requestMessage({ language: "es-ES", link: madeLink ?? "", lux: madeLinks.lux, memo: "Factura 33", name: "sofiadesign.dusk", network: null });
+void [shareText, requestMessage({ link: "x" }), requestMessage({ link: "x", lux: "20000000", network: "Testnet" })];
+// @ts-expect-error a message ends with its link
+void requestMessage({ name: "Chen" });
+
 // /names
 import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameHides, nameSkeleton, nameStarts, profileNameCheck, profileNameClash, sameName, type ContactNameCheck, type ProfileNameCheck } from "@dusk-network/app-core/names";
 

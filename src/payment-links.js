@@ -13,6 +13,7 @@ import { decodeBase58, isAccount } from "@dusk-network/networks/account";
 
 import { amountForField, decimalSeparator, formatDuskPlain, parseDusk, readAmount } from "./amounts.js";
 import { looksAlike } from "./names.js";
+import { displayText } from "./text.js";
 
 /** @typedef {import("./payment-links.js").PaymentLink} PaymentLink */
 /** @typedef {import("./payment-links.js").PaymentRequest} PaymentRequest */
@@ -565,4 +566,21 @@ export function makePaymentLink({ amount, amountLux, label, language, memo, netw
   const wallet = new URLSearchParams([["to", recipient], ...says, ["network", net?.name ?? chainId]]);
 
   return { dusk, https: walletAt && chainId ? `${trimmed(walletAt)}${SEND_PATH}?${wallet}` : null, lux: read.lux, ok: true, problems };
+}
+
+/**
+ * @param {{ link: string, name?: string | null, lux?: bigint | number | string | null, memo?: string | null, network?: string | null, language?: string }} request
+ * @returns {string}
+ */
+export function requestMessage({ language, link, lux, memo, name, network }) {
+  const amount = typeof lux === "bigint" || (typeof lux === "number" && Number.isSafeInteger(lux)) || (typeof lux === "string" && /^\d+$/.test(lux.trim())) ? BigInt(typeof lux === "string" ? lux.trim() : lux) : null;
+  // As a field writes it, which every reader reads as that amount: no groups, and three decimals with a fourth, a zero.
+  const asked = amount !== null && amount > 0n ? `${amountForField(formatDuskPlain(amount), decimalSeparator(language))} DUSK` : "";
+  // Right-to-left words set apart, and what can't be seen as its codes, as on a screen.
+  const who = displayText(textOf(name), { isolate: true }).text;
+  const on = textOf(network) ? ` on ${textOf(network)}` : "";
+  const asks = who ? (asked ? `${who} asks you to pay ${asked}` : `${who} asks you for a payment in DUSK`) : asked ? `You're asked to pay ${asked}` : "You're asked for a payment in DUSK";
+  const words = textOf(memo) ? ` · ${displayText(textOf(memo), { isolate: true }).text}` : "";
+
+  return `${asks}${on}${words}\nPay here: ${textOf(link)}`;
 }
