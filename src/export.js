@@ -856,8 +856,8 @@ export async function accountingCsv({ approvals, bom = false, bridge, contactNam
 /** What each of a year's rewards is called, in the words both wallets show. */
 export const REWARD_WORDS = Object.freeze({ claimed: "Native staking, claimed", sozu: "Sozu, taken out by unstaking", sozuGrown: "Sozu, grown while held" });
 
-/** The one line under them both wallets show: what taken out by unstaking is, and how it's counted. */
-export const REWARDS_COUNTED = "Taken out by unstaking is part of grown while held: what came back, less that stDUSK's average cost, deposit fees included.";
+/** The one line under them both wallets show: what taken out by unstaking is, and how both are counted. */
+export const REWARDS_COUNTED = "Taken out by unstaking is part of grown while held: both count stDUSK at its average cost, deposit fees included.";
 
 /** The minus sign amounts are shown with, as `/amounts` writes a negative one. */
 const MINUS = "\u2212";
@@ -984,6 +984,10 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
   // known; and from when what's held isn't, as from the first of them where the history isn't whole.
   /** @type {{ at: number, held: bigint, pool: Pool }[]} */
   const moves = [];
+  // The deposit fee each of those stakes paid, at its moment: what grown while held counts off, as part of what
+  // stDUSK cost, as taken out by unstaking does.
+  /** @type {{ at: number, fine: bigint }[]} */
+  const fees = [];
   /** @type {number | null} */
   let unknownFrom = null;
   const all = [...(rows ?? [])];
@@ -1048,8 +1052,11 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
     }
 
     // One without the pool's figures says nothing of the rate.
-    if (known && pool) moves.push({ at, held, pool });
-    else unknownFrom ??= at;
+    if (known && pool) {
+      moves.push({ at, held, pool });
+
+      if (row.sozu === "stake" && fact) fees.push({ at, fine: -fact.fee * FINE });
+    } else unknownFrom ??= at;
   }
 
   // What the stDUSK held grew, in each year: between each two moments its rate is known, its stakes and
@@ -1107,14 +1114,23 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
       grown.set(year, then && after ? [...parts, { at: to.yearEnd ? to.at - 1 : to.at, fine: fineWorth(from.held, after) - fineWorth(from.held, then) }] : null);
     }
 
+    // Each stake's deposit fee off its year's, at its own moment: grown while held is what the stDUSK grew beyond what it
+    // cost, its deposit fees among it, as taken out by unstaking is, so what that took out is part of it, a loss too.
+    for (const fee of fees) {
+      const year = yearAt(fee.at);
+      const parts = grownIn(year);
+
+      if (parts !== null) grown.set(year, [...parts, fee].sort((a, b) => a.at - b.at));
+    }
+
     for (const year of grown.keys()) if (!years.has(year)) years.set(year, { claimed: [], reading: 0, sozu: [] });
   }
 
   /**
    * A year's rewards in whole lux, toward nothing: what's under a lux is no reward, as the pool's rounding in a
-   * stake or an unstake is none. What unstaking took out, its deposit fees off, is to the nearest lux: a stake and
-   * its unstake at one rate lost their fee, the pool's rounding either way aside. Each part brings the lux it takes
-   * the year's to, and is worth those at its price.
+   * stake or an unstake is none. Sozu's, its deposit fees off, are to the nearest lux: a stake and its unstake at
+   * one rate lost their fee, the pool's rounding either way aside, and what grew while held is what they took out.
+   * Each part brings the lux it takes the year's to, and is worth those at its price.
    *
    * @param {Reward[]} list
    * @param {boolean} [nearest]
@@ -1152,7 +1168,7 @@ export async function rewardsByYear({ archive, cache, complete = true, facts, no
       .map(async ([year, { claimed, reading, sozu }]) => {
         const parts = year >= lost ? null : grownIn(year);
 
-        return { claimed: await sumOf(claimed), reading, sozu: sozu && (await sumOf(sozu, true)), sozuGrown: parts && (await sumOf(parts)), year };
+        return { claimed: await sumOf(claimed), reading, sozu: sozu && (await sumOf(sozu, true)), sozuGrown: parts && (await sumOf(parts, true)), year };
       })
   );
 }

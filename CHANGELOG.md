@@ -17,6 +17,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 - `/amounts`: `readAmount` gives its question's two readings to choose from (`choices`), each as the field reads it back without the question, and the question alone (`question`)
 - `/payment-links`: `linkAmount` reads a link's amount as typing reads it: `amount=2.125` asks "Is that 2.1250 or 2125?", as typed 2.125 does
 - `/payment-links`: `makePaymentLink` writes an amount of three decimals with a fourth, as `2.1250`, which Send reads without the question
+- `/export`: `rewardsByYear` counts each stake's deposit fee off what Sozu's stDUSK grew while held, as taken out by unstaking does, both to the nearest lux, and `REWARDS_COUNTED` says both: "…both count stDUSK at its average cost, deposit fees included."
 
 ## [0.14.0]
 
