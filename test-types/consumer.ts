@@ -701,7 +701,7 @@ const passesForDusk: [boolean, boolean] = [passesForDuskName("sofiadesign.dusk")
 void passesForDusk;
 
 // /recovery-words
-import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";
+import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, isRecoveryWord, recoveryWordsMatch, wordSuggestions } from "@dusk-network/app-core/recovery-words";
 
 const typedWords: [number, string][] = [[3, " Thank"], [1, "legal"]];
 const wordsChecked: boolean = recoveryWordsMatch("legal winner thank", typedWords);
@@ -713,6 +713,19 @@ void [wordsChecked, wordsCheckedByMap, wordsMismatch, wordsShown];
 void recoveryWordsMatch("legal", [[1, "legal"]]).length;
 // @ts-expect-error a word's place is its number on the screen
 void recoveryWordsMatch("legal", [["1", "legal"]]);
+// Suggestions and the mark for a word typed, from the list the app passes in, as @scure/bip39 gives it.
+declare const englishList: string[];
+const suggested: string[] = wordSuggestions("ab", englishList);
+const suggestedTwo: string[] = wordSuggestions("ab", englishList, 2);
+const suggestedFromFrozen: string[] = wordSuggestions("ab", Object.freeze(["abandon", "ability"]));
+const isWord: boolean = isRecoveryWord("abandon", englishList);
+void [suggested, suggestedTwo, suggestedFromFrozen, isWord];
+// @ts-expect-error the list is the app's, as an array: never a Set
+void wordSuggestions("ab", new Set(englishList));
+// @ts-expect-error a word is checked against a list
+void isRecoveryWord("abandon");
+// @ts-expect-error a count of suggestions is a number
+void wordSuggestions("ab", englishList, "4");
 
 // /prices
 import { PRICE_MAX_AGE_MS, PRICE_URL, duskPrice, inCurrency, type DuskPrice, type FetchLike as PriceFetch } from "@dusk-network/app-core/prices";

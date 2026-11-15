@@ -2,6 +2,17 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.17.0]
+
+### Added
+
+- `/recovery-words`: `wordSuggestions`, the words of the wallet's own BIP-39 list that start with what's typed in a recovery-word box, from two letters, up to four in the list's order, read in any case, spacing and accents
+- `/recovery-words`: `isRecoveryWord`, whether a word typed is one of the list's, read the same way
+
+### Changed
+
+- `/recovery-words`: `recoveryWordsMatch` reads a word typed with accents as the word without them: "légal" is "legal"
+
 ## [0.16.0]
 
 ### Added

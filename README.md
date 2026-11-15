@@ -1,6 +1,6 @@
 # @dusk-network/app-core
 
-Shared logic for the Dusk apps: amounts and what they're worth in a person's currency, text a person must trust, payment links and requests, names that look alike, recovery words checked, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, DuskEVM withdrawals, and the default gas price.
+Shared logic for the Dusk apps: amounts and what they're worth in a person's currency, text a person must trust, payment links and requests, names that look alike, recovery words suggested and checked, public and shielded history, activity rows, an accountant's export, Sozu positions and growth, bridge arrivals, ledgers and status, DuskEVM withdrawals, and the default gas price.
 
 It has no framework and runs in a browser extension's service worker. Each part is its own entry point, so an app loads only what it uses. Apps pass in their own fetch, batching and storage; the package never chooses storage keys.
 
@@ -31,7 +31,7 @@ The entry points are the same on both, under each registry's name: `@dusk-networ
 | `@dusk-network/app-core/text` | Text a person must trust, as a memo or a message to sign, with what hides in it made visible (`displayText`) and what its numbers ask a person to check (`numbersNote`); and text as a search compares it, without accents or case (`searchKey`) |
 | `@dusk-network/app-core/payment-links` | Payment links, `dusk:` and https to the web wallet's Send: reading both (`parsePaymentLink`), as Send reads them on the wallet's network (`readPaymentLink`), and as pasted in Send, alone or in a request shared as a message (`readPastedLink`), and their amount as Send reads it (`linkAmount`), making them only for what Send takes (`makePaymentLink`), a request as both wallets share it (`requestMessage`), and the network they're for (`chainLabel`, `networkMismatch`) |
 | `@dusk-network/app-core/names` | Names a person gives, as a contact's: whether two read as the same name (`sameName`) or look alike in other letters (`looksAlike`, `nameSkeleton`), by Unicode's confusables; whether one holds what can't be seen, to refuse it (`nameHides`, `NAME_HIDES`); the name a contact's takes (`nameClash`), or a profile's (`profileNameClash`), a profile's .dusk name among them; the name one starts as, to ask about (`nameStarts`); what a profile's or a contact's name says at Save, in the wallets' words (`profileNameCheck`, `contactNameCheck`), the .dusk names a profile's name holds, to look up first (`nameDuskNames`), and what answers its question (`NAME_SAVE_YES`); a contact's name that passes for a .dusk name it isn't saved from, to refuse (`passesForDuskName`); and which in a list to show with their address (`lookAlikes`) |
-| `@dusk-network/app-core/recovery-words` | Checking the recovery words a person wrote down: whether the words typed are the phrase's at the places asked, yes or no and nothing else (`recoveryWordsMatch`), and what both wallets say of a mismatch, and of showing the words apart from a check (`RECOVERY_WORDS_MISMATCH`, `RECOVERY_WORDS_SHOW`) |
+| `@dusk-network/app-core/recovery-words` | Recovery words as they're typed: the words of the wallet's own BIP-39 list that start with what's in a box (`wordSuggestions`), and whether a word is one of them (`isRecoveryWord`). Checking the recovery words a person wrote down: whether the words typed are the phrase's at the places asked, yes or no and nothing else (`recoveryWordsMatch`), and what both wallets say of a mismatch, and of showing the words apart from a check (`RECOVERY_WORDS_MISMATCH`, `RECOVERY_WORDS_SHOW`) |
 | `@dusk-network/app-core/requests` | Payment requests: what came in for each request a wallet made (`matchRequests`), a payment that paid one again, sent back (`refundOf`), and the payment a send would make again (`sentAlready`) |
 | `@dusk-network/app-core/prices` | What one DUSK is worth now in a person's currency, from the price source both wallets use, on mainnet alone (`duskPrice`), and what an amount comes to at it, with the time of that price (`inCurrency`) |
 | `@dusk-network/app-core/gas` | The gas price both wallets start every transaction from, by one rule: the network's minimum while what waits in the node's mempool fits in the next block, else its median up to a ceiling, and whether the network is busy (`defaultGasPrice`, `GAS_PRICE_BUSY`, `BLOCK_TRANSACTIONS`, `BLOCK_GAS`) |
@@ -165,7 +165,15 @@ contactNameCheck("Lucas", { profiles, contacts, except: editedId, address });
 ## Recovery words
 
 ```js
-import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
+import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, isRecoveryWord, recoveryWordsMatch, wordSuggestions } from "@dusk-network/app-core/recovery-words";
+
+// As a word is typed in its box: chips under it, and its mark.
+wordSuggestions("a", wordlist); // []: not before two letters
+wordSuggestions("ab", wordlist); // ["abandon", "ability", "able", "about"]
+wordSuggestions("act", wordlist); // ["act", "action", "actor", "actress"]
+wordSuggestions("Zoo ", wordlist); // ["zoo"]: the word typed, alone, needs no chip
+isRecoveryWord("sausag", wordlist); // false: "Not a recovery word"
 
 // Words 3, 7 and 10, as the screen numbers them, as typed in their boxes.
 recoveryWordsMatch(phrase, [[3, " Thank"], [7, "worth"], [10, "WINNER"]]); // true
@@ -173,7 +181,8 @@ recoveryWordsMatch(phrase, [[3, "maison"], [7, "velo"], [10, "gateau"]]); // fal
 ```
 
 - A check says yes or no, and nothing else. A wrong answer, one slip of the pen or three made-up words, shows no word and doesn't say which word was wrong: both wallets say `RECOVERY_WORDS_MISMATCH`, "That doesn't match your recovery words. Check the words you wrote down.", with Try again. Showing the words, to rewrite the paper, is `RECOVERY_WORDS_SHOW`, "Show my recovery words": apart from the check, never its answer, and behind the password, as showing them always is.
-- `phrase` is the recovery phrase as text, or its words in order, and `typed` each word typed by its place as the screen numbers it, from 1: pairs, or a `Map`. Words are compared as BIP-39 reads them (NFKD), in any case, the spaces around them aside. A place that isn't the phrase's, one given twice, a word left empty or nothing typed is no match. It never throws, keeps nothing and logs nothing.
+- `phrase` is the recovery phrase as text, or its words in order, and `typed` each word typed by its place as the screen numbers it, from 1: pairs, or a `Map`. Words are compared as BIP-39 reads them (NFKD), accents aside ("légal" is "legal"), in any case, the spaces around them aside. A place that isn't the phrase's, one given twice, a word left empty or nothing typed is no match. It never throws, keeps nothing and logs nothing.
+- `wordSuggestions(prefix, wordlist, limit = 4)` gives the words of `wordlist` that start with what's typed, from two letters, in the list's order, `limit` at most, as the list has them; `isRecoveryWord(word, wordlist)` says whether a word is one of them. Both read what's typed as BIP-39 reads a word: in compatibility forms (NFKD: "ａｂ" is "ab"), accents aside ("abá" starts "abandon"), in any case, the spaces around it aside. The list is the app's, `wordlist` from `@scure/bip39/wordlists/english.js`, the one it makes and reads phrases with: suggestions never come from the phone's keyboard, which learns what's typed. In BIP-39's lists, in alphabetical order, a word typed in full comes first, and alone when it starts no other ("zoo"), so its box needs no chip. A word typed with an accent is the list's without it: what's handed on is the list's word, `wordSuggestions(word, wordlist, 1)[0]`. Neither throws, keeps, logs or sends anything; what isn't text, or a list that isn't an array, gives nothing.
 
 ## Requests
 

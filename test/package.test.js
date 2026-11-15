@@ -128,10 +128,12 @@ describe("the package", () => {
     assert.equal(looksAlike("Bob", "Bօb"), true);
     assert.equal(nameClash("x"), null);
 
-    const { RECOVERY_WORDS_MISMATCH, recoveryWordsMatch } = await import("@dusk-network/app-core/recovery-words");
+    const { RECOVERY_WORDS_MISMATCH, isRecoveryWord, recoveryWordsMatch, wordSuggestions } = await import("@dusk-network/app-core/recovery-words");
 
     assert.equal(recoveryWordsMatch("legal winner", [[2, "Winner"]]), true);
     assert.match(RECOVERY_WORDS_MISMATCH, /doesn't match your recovery words/);
+    assert.deepEqual(wordSuggestions("Le", ["legal", "lemon", "winner"]), ["legal", "lemon"]);
+    assert.equal(isRecoveryWord("Winner", ["legal", "winner"]), true);
 
     const { matchRequests, sentAlready } = await import("@dusk-network/app-core/requests");
 
