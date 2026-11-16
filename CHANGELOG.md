@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `/names`: `nameDuskNames`, `profileNameCheck` and `passesForDuskName` read any point as a full stop: "sofiadesign·dusk" with a middle dot, a bullet or an ideographic full stop is sofiadesign.dusk
+
 ## [0.17.0]
 
 ### Added

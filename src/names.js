@@ -413,6 +413,29 @@ const plainShape = (shape) => shape.normalize("NFD").replace(UNSEEN, "").replace
 // What renders as nothing, which a name is read without; a control, as a line break, parts words.
 const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 
+// What Unicode's table reads a full stop, a middle dot and an ideographic full stop as: ".", "·" and "˳".
+const DOT_SHAPES = new Set([".", "\u00b7", "\u02f3"]);
+// A raised dot and an Arabic full stop, which it reads as nothing else, and as a hyphen.
+const DOTS_TOO = new Set(["\u2e33", "\u06d4"]);
+
+/**
+ * Whether a character reads as a point between a name's labels: a full stop,
+ * a middle dot or an ideographic full stop, or what Unicode's table or NFKC
+ * reads as one, as "．", "·", "•", "‧", "∙", "⋅", "・", "。" and "｡", and a
+ * raised dot "⸳" and an Arabic full stop "۔".
+ *
+ * @param {string} char
+ */
+const dotLike = (char) => DOTS_TOO.has(char) || DOT_SHAPES.has(nameSkeleton(char)) || DOT_SHAPES.has(nameSkeleton(char.normalize("NFKC")));
+
+/**
+ * Text with each character that reads as a point (`dotLike`) as a point:
+ * "sofiadesign·dusk" as "sofiadesign.dusk".
+ *
+ * @param {string} text
+ */
+const dotted = (text) => Array.from(text, (char) => (char !== "." && dotLike(char) ? "." : char)).join("");
+
 /**
  * Whether a character can be part of a .dusk name as a person reads one: a
  * letter, a digit or a mark over one, or a symbol styled as a letter, as a
@@ -425,25 +448,18 @@ const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 const inDuskName = (char) => /^\p{M}$/u.test(char) || letterLike(char) || [lettersOf(char), nameSkeleton(char)].some((shape) => shape === "." || shape === "-");
 
 /**
- * The words of a name that read as .dusk names, as they're written, split
- * at what can't be in one and without the punctuation around them, by the
- * look-alike rules: in any case, in letters or points that look like a .dusk
- * name's, with marks over its letters, with the letter pairs that look like
- * one, and with digits for letters, as "SofiaDesign.DUSK", "ѕofia.dusk" with
- * a Cyrillic ѕ, "sofia．dusk" with a fullwidth point, "sofia.𝐃𝐔𝐒𝐊" in
- * mathematical bold, "sofia.dúsk", "sofia.clusk" or "sofia.du5k"; and each
- * of "alice.dusk,bob.dusk".
+ * A name's words, parted at each character that can't be in one.
  *
- * @param {unknown} name
- * @returns {string[]}
+ * @param {string} text
+ * @param {(char: string) => boolean} inWord
  */
-function duskNamesIn(name) {
+function wordsOfName(text, inWord) {
   /** @type {string[]} */
   const words = [];
   let word = "";
 
-  for (const char of String(name ?? "").replace(INVISIBLE, "")) {
-    if (inDuskName(char)) {
+  for (const char of text) {
+    if (inWord(char)) {
       word += char;
     } else {
       words.push(word);
@@ -453,18 +469,39 @@ function duskNamesIn(name) {
 
   words.push(word);
 
-  return words
-    .map(withoutEdges)
-    .filter((each) => {
-      if (each === "") return false;
+  return words;
+}
 
-      const written = nameSkeleton(each);
+/**
+ * The words of a name that read as .dusk names, as they're written, split
+ * at what can't be in one and without the punctuation around them, by the
+ * look-alike rules: in any case, in letters or points that look like a .dusk
+ * name's, with marks over its letters, with the letter pairs that look like
+ * one, and with digits for letters, as "SofiaDesign.DUSK", "ѕofia.dusk" with
+ * a Cyrillic ѕ, "sofia．dusk" with a fullwidth point, "sofia·dusk" with a
+ * middle dot or any other point (`dotLike`), "sofia.𝐃𝐔𝐒𝐊" in mathematical
+ * bold, "sofia.dúsk", "sofia.clusk" or "sofia.du5k"; and each of
+ * "alice.dusk,bob.dusk". A point that isn't a full stop parts words too, as
+ * it did: "sofia.dusk·Diseño" holds sofia.dusk.
+ *
+ * @param {unknown} name
+ * @returns {string[]}
+ */
+function duskNamesIn(name) {
+  const text = String(name ?? "").replace(INVISIBLE, "");
+  const words = [...wordsOfName(text, inDuskName), ...wordsOfName(text, (char) => inDuskName(char) || dotLike(char))];
 
-      return (
-        [nameSkeleton(each.toLowerCase()), written, digitShape(each)].some((shape) => DUSK_ENDING.test(plainShape(shape))) ||
-        PAIRED_DUSK_ENDING.test(plainShape(paired(written)))
-      );
-    });
+  return [...new Set(words.map(withoutEdges))].filter((each) => {
+    if (each === "") return false;
+
+    const plain = dotted(each);
+    const written = nameSkeleton(plain);
+
+    return (
+      [nameSkeleton(plain.toLowerCase()), written, digitShape(plain)].some((shape) => DUSK_ENDING.test(plainShape(shape))) ||
+      PAIRED_DUSK_ENDING.test(plainShape(paired(written)))
+    );
+  });
 }
 
 /**
@@ -526,15 +563,17 @@ const plainChar = (char) => {
 /**
  * The .dusk name a word that reads as one reads as, in plain letters: its
  * styled letters as their ordinary ones (NFKC: mathematical bold, fullwidth),
- * then what's before its last point, its look-alike letters and points as
- * the ones they look like, and ".dusk", as "ѕofiadesign.dusk" with a Cyrillic
- * ѕ, "sofiadesign.clusk" or "𝐬𝐨𝐟𝐢𝐚𝐝𝐞𝐬𝐢𝐠𝐧.dusk" is sofiadesign.dusk; "" where
- * it doesn't read as one the name service can register.
+ * each point as a full stop (`dotted`), then what's before its last point,
+ * its look-alike letters and points as the ones they look like, and ".dusk",
+ * as "ѕofiadesign.dusk" with a Cyrillic ѕ, "sofiadesign.clusk",
+ * "sofiadesign·dusk" with a middle dot or "𝐬𝐨𝐟𝐢𝐚𝐝𝐞𝐬𝐢𝐠𝐧.dusk" is
+ * sofiadesign.dusk; "" where it doesn't read as one the name service can
+ * register.
  *
  * @param {string} word As `duskNamesIn` gives it
  */
 function readingOf(word) {
-  const chars = [...lettersOf(word).normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "")].map(plainChar);
+  const chars = [...dotted(lettersOf(word)).normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "")].map(plainChar);
   const point = chars.lastIndexOf(".");
   const reading = point > 0 ? `${chars.slice(0, point).join("")}.dusk` : "";
 
@@ -575,8 +614,9 @@ export function nameDuskNames(name) {
  * @returns {boolean}
  */
 export function passesForDuskName(name, duskName) {
-  // In plain letters, so a .dusk in small capitals or circled letters, or after a fullwidth point, ends it too.
-  const typed = lettersOf(String(name ?? "")).trim().toLowerCase().replace(/\.$/, "");
+  // In plain letters and points, so a .dusk in small capitals or circled letters, or after a fullwidth point or a
+  // middle dot, ends it too.
+  const typed = dotted(lettersOf(String(name ?? ""))).trim().toLowerCase().replace(/\.$/, "");
 
   return typed.endsWith(".dusk") && typed !== String(duskName ?? "").trim().toLowerCase();
 }
