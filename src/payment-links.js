@@ -11,8 +11,9 @@
 import { blockedReason, networkFor, networks } from "@dusk-network/networks";
 import { decodeBase58, isAccount } from "@dusk-network/networks/account";
 
-import { amountForField, decimalSeparator, formatDuskPlain, parseDusk, readAmount } from "./amounts.js";
-import { looksAlike } from "./names.js";
+import { amountForField, decimalSeparator, formatDuskPlain, parseDusk, readAmount, unclearAmount } from "./amounts.js";
+import { looksAlike, nameDuskNames, sameName } from "./names.js";
+import { ownerOf } from "./owners.js";
 import { displayText } from "./text.js";
 
 /** @typedef {import("./payment-links.js").PaymentLink} PaymentLink */
@@ -60,6 +61,7 @@ export const LINK_MEMO_LINE_BREAK = "This link's memo has a line break. Ask for 
 /** Why pasted text fills in nothing, in the words both wallets use. */
 export const LINK_SEVERAL = "That has more than one payment link. Paste just the one to pay.";
 export const LINK_UNCLEAR = "The words after that link may be part of it. Paste the link alone.";
+export const LINK_DISAGREES = "The message and its link don't agree.";
 const LINK_NO_RECIPIENT = "This link doesn't say who to pay. Ask for a new one.";
 const LINK_USER_PART = "This link has something before the site's address. Ask for a new one.";
 const LINK_NETWORK_UNREAD = "This link's network can't be read. Ask for a new one.";
@@ -498,8 +500,31 @@ export function readPaymentLink(input, { network, walletUrl } = {}) {
   return said(otherNetwork ? { chainId, link: null, problem: otherNetwork, reason: "other-network" } : { chainId, link, problem: "", reason: "" });
 }
 
-// Text that starts as a link does: read whole.
-const LINK_START = /^(dusk:|https?:\/\/)/i;
+// A space or a line break of any kind, which ends a link in text, as a chat ends one: a next line (U+0085) among
+// them, which `\s` leaves out.
+const SPACES = /[\s\u0085]+/;
+const SPACE = /^[\s\u0085]$/;
+// A line break of any kind, Windows' among them.
+const LINES = /\r\n|[\n\v\f\r\u0085\u2028\u2029]/;
+// "You're", as a request's line starts without a name, with a typographic apostrophe too.
+const YOURE = /^you['\u2019]re$/i;
+// The isolates a line sets right-to-left words apart with (`displayText`), which a chat may drop.
+const ISOLATES = /[\u2066-\u2069]/g;
+
+/**
+ * Text without the spaces and line breaks of any kind at its ends.
+ *
+ * @param {string} text
+ */
+function withinSpaces(text) {
+  let start = 0;
+  let end = text.length;
+
+  while (start < end && SPACE.test(text[start])) start += 1;
+  while (end > start && SPACE.test(text[end - 1])) end -= 1;
+
+  return text.slice(start, end);
+}
 
 /**
  * A link read from what was pasted, with the link as it's written there.
@@ -514,29 +539,316 @@ const readFrom = (read, text) => read && { ...read, text };
  * What pasted text refused for `problem` fills in: nothing, from no link.
  *
  * @param {string} problem
- * @param {"several-links" | "words-after"} reason
+ * @param {"several-links" | "words-after" | "disagrees"} reason
  * @returns {PastedLinkRead}
  */
 const pasteRefused = (problem, reason) => ({ chainId: "", link: null, network: "", problem, reason, text: "" });
 
 /**
+ * Pasted text's one payment link, its last word, as it's written there, and
+ * the words before it; why it's refused, with two links or more, or with
+ * words after its one, which a space or a line break of any kind parts from
+ * it, as a chat parts them; null for none.
+ *
  * @param {unknown} input
- * @param {{ network?: unknown, walletUrl?: string }} [options]
+ * @param {{ walletUrl?: string }} options
+ * @returns {{ before: string, link: string } | { refused: PastedLinkRead } | null}
+ */
+function pastedParts(input, { walletUrl }) {
+  const pasted = textOf(input);
+  const words = pasted.split(SPACES).filter(Boolean);
+  const links = words.filter((word) => readPaymentLink(word, { walletUrl }));
+
+  // Two links, wherever they are: read whole, one would carry the other in its memo.
+  if (links.length > 1) return { refused: pasteRefused(LINK_SEVERAL, "several-links") };
+  if (!links.length) return null;
+  // A link ends at a space: what's after it may be part of it, or words that aren't, never its memo's or its network's.
+  if (words[words.length - 1] !== links[0]) return { refused: pasteRefused(LINK_UNCLEAR, "words-after") };
+
+  return { before: pasted.slice(0, pasted.lastIndexOf(links[0])), link: links[0] };
+}
+
+/**
+ * Text without "Pay here:" at its end, as a shared request has it before its
+ * link (`requestMessage`), in any case and spacing: "Pay", a space or a line
+ * break of any kind, "here", and a colon, a space before it or not; and
+ * without the spaces before it.
+ *
+ * @param {string} text Without spaces at its end
+ */
+function withoutPayHere(text) {
+  let end = text.length - 1;
+
+  if (text[end] !== ":") return text;
+
+  while (end > 0 && SPACE.test(text[end - 1])) end -= 1;
+
+  let at = end - 4;
+
+  if (at < 0 || text.slice(at, end).toLowerCase() !== "here") return text;
+
+  const here = at;
+
+  while (at > 0 && SPACE.test(text[at - 1])) at -= 1;
+
+  return at < here && at >= 3 && text.slice(at - 3, at).toLowerCase() === "pay" ? withinSpaces(text.slice(0, at - 3)) : text;
+}
+
+/**
+ * The words of the line of a request as both wallets share it
+ * (`requestMessage`), from the words before its link: its last line, without
+ * "Pay here:", in NFC and without the isolates that set right-to-left words
+ * apart, which a chat may drop; null for none.
+ *
+ * @param {string} before
+ * @returns {string[] | null}
+ */
+function lineWords(before) {
+  const lines = withoutPayHere(withinSpaces(before)).split(LINES);
+  const words = lines[lines.length - 1].normalize("NFC").replace(ISOLATES, "").split(SPACES).filter(Boolean);
+
+  return words.length ? words : null;
+}
+
+// How many ways a line can be the wallet's own for its link: a name holding "asks you to pay … DUSK on …" makes
+// one more each time it does. A line read in more ways than this is no line the wallet writes.
+const READINGS = 4;
+// How many words a known network's name has at most: "Testnet", "Chain 2". A longer one names no network known.
+const NAMED_WORDS = Math.max(2, ...Object.values(networks).flatMap((net) => [net.label, net.name].map((name) => String(name).trim().split(/\s+/).length)));
+
+/**
+ * Whether a line's words are a request's as both wallets share it, read in
+ * any of the ways they can be: "<name> asks you to pay <amount> DUSK" or
+ * "<name> asks you for a payment in DUSK", or "You're asked …" without a
+ * name, then " on <network>" and " · <memo>" where it says them, in any case
+ * and spacing. A name or a memo may hold any of those words: "Alice asks you
+ * to pay asks you to pay 0.03 DUSK" is one, from a profile named "Alice asks
+ * you to pay".
+ *
+ * @param {string[]} words
+ */
+function isSharedLine(words) {
+  const said = words.map((word) => word.toLowerCase());
+  const count = said.length;
+  // What may follow what's asked: nothing, a network, or a memo.
+  const ends = (/** @type {number} */ at) => at >= count || said[at] === "\u00b7" || (said[at] === "on" && at + 1 < count && said[at + 1] !== "\u00b7");
+  // Whether a "DUSK" at or after a word ends what's asked, for each word.
+  const duskFrom = Array.from({ length: count + 2 }, () => false);
+
+  for (let at = count - 1; at >= 0; at -= 1) duskFrom[at] = duskFrom[at + 1] || (said[at] === "dusk" && ends(at + 1));
+
+  /** @param {number} at */
+  const asks = (at) => (said[at] === "to" && said[at + 1] === "pay" && duskFrom[at + 3]) || (["for", "a", "payment", "in", "dusk"].every((word, i) => said[at + i] === word) && ends(at + 5));
+
+  return (YOURE.test(words[0]) && said[1] === "asked" && asks(2)) || said.some((word, at) => at > 0 && word === "asks" && said[at + 1] === "you" && asks(at + 2));
+}
+
+/**
+ * The names a line's words give who asks by, read the one way that's the
+ * wallet's own line for a link: its memo as the line shows it, its last
+ * words; the network it's paid on, by its name, or none, before; and its
+ * amount, or any amount, before that. Each name is what's before "asks you",
+ * "" for "You're asked"; none where no reading says what the link does, and
+ * more than `READINGS` where it can be read in more ways than the wallet's
+ * own line is.
+ *
+ * @param {string[]} words
+ * @param {PaymentLink} link
+ * @param {string} paidOn The chain it's paid on, "dusk:2", or ""
+ * @returns {string[]}
+ */
+function namesSaying(words, link, paidOn) {
+  const said = words.map((word) => word.toLowerCase());
+  const shown = shownAs(displayText(link.memo, { isolate: true }).text);
+  const memo = shown ? shown.split(" ") : [];
+  const end = memo.length ? words.length - memo.length - 1 : words.length;
+
+  if (end < 0 || (memo.length && (words[end] !== "\u00b7" || memo.some((word, i) => words[end + 1 + i] !== word)))) return [];
+
+  const asked = PLAIN_LUX.test(link.amountLux) ? [BigInt(link.amountLux)] : link.amountDusk ? amountsIn(link.amountDusk) : [];
+  /** @type {string[]} */
+  const names = [];
+
+  // Where what's asked ends: at the memo, or before " on " and a network's name, of any length, with no " · " in it.
+  for (let on = end; on >= 1; on -= 1) {
+    if (on < end && said[on] === "\u00b7") break;
+    if ((on < end && (said[on] !== "on" || on + 1 === end)) || said[on - 1] !== "dusk") continue;
+    if (on < end && end - on - 1 <= NAMED_WORDS && otherNetwork(words.slice(on + 1, end).join(" "), paidOn)) continue;
+
+    // "to pay <amount> DUSK", or "for a payment in DUSK", and what's before it.
+    for (const [from, amount] of /** @type {const} */ ([[on - 4, words[on - 2]], [on - 5, null]])) {
+      const asks = amount === null ? ["for", "a", "payment", "in"].every((word, i) => said[from + i] === word) : said[from] === "to" && said[from + 1] === "pay";
+      const fits = amount === null ? asked.length === 0 : sameAmount(amountsIn(amount), asked);
+
+      if (!asks || !fits) continue;
+      if (from === 2 && YOURE.test(words[0]) && said[1] === "asked") names.push("");
+      if (from >= 3 && said[from - 2] === "asks" && said[from - 1] === "you") names.push(words.slice(0, from - 2).join(" "));
+      if (names.length > READINGS) return names;
+    }
+  }
+
+  return names;
+}
+
+/**
+ * The amounts in lux an amount as it's written can be: one, or two where a
+ * lone point or comma could mark decimals or part thousands, as "1.000"
+ * (`unclearAmount`); null for one that isn't a plain amount.
+ *
+ * @param {string} text
+ * @returns {(bigint | null)[]}
+ */
+function amountsIn(text) {
+  const plain = textOf(text);
+
+  if (!PLAIN_AMOUNT.test(plain)) return [null];
+
+  const either = unclearAmount(plain, ".");
+
+  return either ? [parseDusk(either.grouped), parseDusk(either.decimal)] : [parseDusk(plain.replace(",", "."))];
+}
+
+/**
+ * Whether two lists of amounts (`amountsIn`) say one and the same amount, or
+ * both none.
+ *
+ * @param {(bigint | null)[]} a
+ * @param {(bigint | null)[]} b
+ */
+const sameAmount = (a, b) => (a.length === 0 && b.length === 0) || (a.length === 1 && b.length === 1 && a[0] !== null && a[0] === b[0]);
+
+/**
+ * Text as a line of a shared request shows it, for comparing: in NFC,
+ * without the isolates that set right-to-left words apart, its spaces as one.
+ *
+ * @param {string} text
+ */
+const shownAs = (text) => text.normalize("NFC").replace(ISOLATES, "").replace(/[\s\u0085]+/g, " ").trim();
+
+/**
+ * The chain a network's name in a line names, "2" for "Testnet", by a
+ * network's own name or label, "Local" or "Chain 2", in any case; "" for a
+ * name of no network known, as a node's.
+ *
+ * @param {string} said
+ */
+function chainNamed(said) {
+  const named = said.trim().toLowerCase();
+  const net = Object.values(networks).find((each) => each.label.toLowerCase() === named || each.name.toLowerCase() === named);
+
+  return net ? String(net.chainId) : named === "local" ? "0" : (/^chain (0|[1-9]\d{0,31})$/.exec(named)?.[1] ?? "");
+}
+
+/**
+ * Whether a line names another network than the one it's paid on: the
+ * link's, or for a link that names none, the wallet's, by which network it
+ * is, not what it's called: "Chain 2" is Testnet. A name of no network
+ * known says nothing, and nor does a network not known to be paid on.
+ *
+ * @param {string} said
+ * @param {string} chainId Where it's paid, "dusk:2"
+ */
+function otherNetwork(said, chainId) {
+  const named = chainNamed(said);
+  const paidOn = referenceOf(chainId);
+
+  return named !== "" && paidOn !== "" && named !== paidOn;
+}
+
+/**
+ * Whether a line's name is another than its link's: the link's label it
+ * isn't, as written or in any case, spacing or accents; a .dusk name it pays that isn't
+ * among the line's; or, for an account or a shielded address it pays, the
+ * .dusk names in the line as the name service says whose they are (`owners`):
+ * another account's or address's of that kind, or no one's, and none of
+ * them its own. A name that isn't looked up says nothing.
+ *
+ * @param {string} name
+ * @param {PaymentLink} link
+ * @param {unknown} owners
+ */
+function otherName(name, link, owners) {
+  if (!shownAs(name)) return false;
+  const label = shownAs(displayText(link.label, { isolate: true }).text);
+
+  // As written, though it has no letters or digits to compare, as an emoji's; else as the look-alike rules read it.
+  if (label && shownAs(name) !== label && !sameName(shownAs(name), label)) return true;
+
+  const named = DUSK_NAME.test(link.to);
+
+  // Its .dusk names say something only of a .dusk name it pays, or as the name service says whose they are.
+  if (!named && (!owners || typeof owners !== "object")) return false;
+
+  const dusk = nameDuskNames(name);
+
+  if (!dusk.length) return false;
+  if (named) return !dusk.includes(link.to.toLowerCase());
+
+  const kind = recipientKind(link.to);
+  let other = false;
+
+  for (const each of dusk) {
+    const owner = ownerOf(owners, each);
+    // What it resolves to of the link's recipient's kind: a shielded address for a shielded one.
+    const same = owner ? [...owner].filter((id) => recipientKind(id) === kind) : [];
+
+    if (same.includes(link.to)) return false;
+
+    other ||= owner === null || same.length > 0;
+  }
+
+  return other;
+}
+
+/**
+ * The link pasted text's line is checked against: the one it fills in, or
+ * one for another network, which the wallet of that network would; null for
+ * one the link alone refuses.
+ *
+ * @param {LinkRead | null} read
+ * @param {string} text The link
+ * @param {string | undefined} walletUrl
+ */
+const linkSaid = (read, text, walletUrl) => read?.link ?? (read?.reason === "other-network" ? parsePaymentLink(text, { walletUrl }) : null);
+
+/**
+ * @param {unknown} input
+ * @param {{ network?: unknown, walletUrl?: string, owners?: unknown }} [options]
  * @returns {PastedLinkRead | null}
  */
-export function readPastedLink(input, options = {}) {
-  const pasted = textOf(input);
-  const words = pasted.split(/\s+/);
-  const links = words.filter((word) => readPaymentLink(word, options));
+export function readPastedLink(input, { network, owners, walletUrl } = {}) {
+  const parts = pastedParts(input, { walletUrl });
 
-  // Two links, wherever they are: one read whole would carry the other in its memo.
-  if (links.length > 1) return pasteRefused(LINK_SEVERAL, "several-links");
-  // A link, as the text starts with one, is read whole, spaces and all, as a link alone always was; so is text no
-  // word of which is a link, which is one whole or none.
-  if (LINK_START.test(pasted) || !links.length) return readFrom(readPaymentLink(pasted, options), pasted);
+  if (!parts || "refused" in parts) return parts?.refused ?? null;
 
-  // Its one link, as the last words of a request shared whole, read alone: words after it may be part of it.
-  return words[words.length - 1] === links[0] ? readFrom(readPaymentLink(links[0], options), links[0]) : pasteRefused(LINK_UNCLEAR, "words-after");
+  const read = readPaymentLink(parts.link, { network, walletUrl });
+  const words = parts.before ? lineWords(parts.before) : null;
+  // What the link alone refuses, it refuses as the link alone says it; one that can be paid, here or on its own
+  // network's wallet, only where its line, if it's a request's, is the wallet's own for it: another amount, network,
+  // memo or name refuses it.
+  const link = linkSaid(read, parts.link, walletUrl);
+  const names = words && link && isSharedLine(words) ? namesSaying(words, link, link.chainId || chainIdOf(network)) : null;
+  const disagrees = names && link && (names.length > READINGS || !names.some((name) => !otherName(name, link, owners)));
+
+  return disagrees ? pasteRefused(LINK_DISAGREES, "disagrees") : readFrom(read, parts.link);
+}
+
+/**
+ * @param {unknown} input
+ * @param {{ network?: unknown, walletUrl?: string }} [options]
+ * @returns {string[]}
+ */
+export function pastedDuskNames(input, { network, walletUrl } = {}) {
+  const parts = pastedParts(input, { walletUrl });
+
+  if (!parts || "refused" in parts || !parts.before) return [];
+
+  const words = lineWords(parts.before);
+  const link = linkSaid(readPaymentLink(parts.link, { network, walletUrl }), parts.link, walletUrl);
+
+  const names = words && link && isSharedLine(words) ? namesSaying(words, link, link.chainId || chainIdOf(network)) : [];
+
+  return names.length > READINGS ? [] : [...new Set(names.flatMap((name) => nameDuskNames(name)))];
 }
 
 /**

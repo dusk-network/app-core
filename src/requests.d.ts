@@ -25,7 +25,12 @@
 
 import type { ActivityRow } from "./activity.js";
 
-/** How far a device's clock can be out from a block's: a payment this long before a request can be for it, 5 minutes, in milliseconds. */
+/**
+ * How far a device's clock can be out from a block's, 5 minutes, in
+ * milliseconds: how far before a request an app reads what came in. A
+ * payment made before the request was asked is never its own
+ * (`matchRequests`).
+ */
 export declare const CLOCK_SKEW_MS: 300000;
 
 /** How long after it went out a payment just like another, memo aside, is the same one again: 10 minutes, in milliseconds. */
@@ -100,10 +105,12 @@ export type RequestMatch = {
  * outcome isn't read may yet fail), by what its transfer paid, without a gas
  * refund its transaction paid with it, to the address a request asked on (a
  * public payment for a request on the account, a shielded one for a request
- * on the shielded address), from 5 minutes before it was asked on. Each
- * payment answers one request: one with all of a request goes to the oldest
- * request it pays in full, before any matches less, and a request already
- * paid keeps its payment.
+ * on the shielded address), made once it was asked (`at`), never before,
+ * however little. A payment whose memo is another of `requests`' memos, and
+ * not this one's, names that other request: it's never this one's, as paid,
+ * to check or paid again. Each payment answers one request: one with all of
+ * a request goes to the oldest request it pays in full, before any matches
+ * less, and a request already paid keeps its payment.
  */
 export declare function matchRequests(requests: ReadonlyArray<KeptRequest>, rows: ReadonlyArray<ActivityRow>): Map<string, RequestMatch>;
 

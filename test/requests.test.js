@@ -78,6 +78,50 @@ describe("what came in for each request", () => {
     }
   });
 
+  it("counts no payment made before the request was asked, however little before: Amélie's 0,01 two minutes before Lucas asked", () => {
+    // Lucas's new request for 0,01 said "Check it's this one" about Mamie's 0,01 from 21:40:47, asked at 21:42; and
+    // about hers from 21:51:17, asked in the same minute.
+    for (const before of [73_000, 13_000, 1_000, 1]) {
+      for (const row of [payment({ memo: "Wi-Fi coupé r35", time: NOW - before }), payment({ time: NOW - before }), payment({ memo: "", time: NOW - before })]) {
+        assert.deepEqual(matchRequests([asked()], [row]).get("a"), { state: "waiting" }, `${before} ms before, memo ${row.memo}`);
+      }
+      // Nor as what paid it, or what else came in for it.
+      const paid = matchRequests([asked()], [payment({ hash: "h0", time: NOW - before }), payment()]).get("a");
+
+      like(paid, { hash: "h1", state: "paid" });
+      assert.equal(paid?.more, undefined);
+    }
+
+    // One made as it was asked, or after, counts.
+    like(matchRequests([asked()], [payment({ time: NOW })]).get("a"), { hash: "h1", state: "paid" });
+    like(matchRequests([asked()], [payment({ memo: "Wi-Fi coupé r35", time: NOW + 1 })]).get("a"), { matched: "amount", state: "check" });
+  });
+
+  it("never counts a payment whose memo is another of the requests' for this one: Sofía's F-2026-101, checked for F-2026-102's payment", () => {
+    // Sofía's two invoices: F-2026-101, older, unpaid, and F-2026-102, which her client paid with its memo, at the
+    // first one's amount.
+    const first = asked({ id: "101", lux: "30000000", memo: "Factura F-2026-101 – rediseño web" });
+    const second = asked({ at: NOW + 1, id: "102", lux: "50000000", memo: "Factura F-2026-102 – logotipo" });
+    const forSecond = payment({ memo: "Factura F-2026-102 – logotipo", value: 30_000_000n });
+    const matches = matchRequests([first, second], [forSecond]);
+
+    assert.deepEqual(matches.get("101"), { state: "waiting" });
+    // It's the other request's to check: its memo, another amount.
+    like(matches.get("102"), { hash: "h1", matched: "memo", state: "check" });
+
+    // Nor as what else came in for the first once it's paid, or for one asking no amount or no memo.
+    const paidFirst = matchRequests([first, second], [payment({ hash: "h0", memo: first.memo, value: 30_000_000n }), forSecond]);
+
+    like(paidFirst.get("101"), { hash: "h0", state: "paid" });
+    assert.equal(paidFirst.get("101")?.more, undefined);
+    assert.deepEqual(matchRequests([asked({ id: "101", lux: "30000000", memo: "" }), second], [forSecond]).get("101"), { state: "waiting" });
+    assert.deepEqual(matchRequests([asked({ id: "101", lux: null, memo: "" }), second], [forSecond]).get("101"), { state: "waiting" });
+
+    // A memo none of the requests has is still one to check, and one two requests share is each one's.
+    like(matchRequests([first, second], [payment({ memo: "logo invoice", value: 30_000_000n })]).get("101"), { matched: "amount", state: "check" });
+    like(matchRequests([first, asked({ at: NOW + 1, id: "again", lux: "50000000", memo: first.memo })], [payment({ memo: first.memo, value: 30_000_000n })]).get("101"), { state: "paid" });
+  });
+
   it("reads a memo of bytes as no text, which no request's memo is", () => {
     // Codex's: byte 00 comes as the memo "0x00", marked as bytes.
     const bytes = payment({ entry: { memoBinary: true }, memo: "0x00" });

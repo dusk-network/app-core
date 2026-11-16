@@ -534,6 +534,31 @@ describe("a profile's name at Save", () => {
     }
   });
 
+  it("reads a .dusk name with a dot-like point as one: Marek's Profile 2 named sofiadesign·dusk, Sofía's, with a middle dot", () => {
+    // Saved without a word in the web wallet, and History then filed his own Profile 2's transfers under it, right
+    // above Sofía's real sofiadesign.dusk.
+    const his = [{ account: "p1", address: "s1", name: "Profile 1" }, { account: "p2", address: "s2", name: "Profile 2" }];
+    const owners = new Map([["sofiadesign.dusk", { account: "sofia" }]]);
+    const taken = { dusk: true, entry: null, kind: "dusk", name: "sofiadesign.dusk", refused: true, words: "That looks like sofiadesign.dusk, which belongs to another account. Choose another name." };
+
+    // A middle dot, a bullet, a fullwidth, ideographic or halfwidth full stop, a hyphenation point, a bullet
+    // operator, a dot operator, a katakana middle dot, a raised dot and an Arabic full stop.
+    for (const dot of ["·", "•", "．", "。", "｡", "‧", "∙", "⋅", "・", "･", "⸳", "۔", "·", "⸱"]) {
+      for (const name of [`sofiadesign${dot}dusk`, `SofiaDesign${dot}DUSK`, `Mi cliente (sofiadesign${dot}dusk)`, `sofiadesign${dot}dusk${dot}`]) {
+        assert.deepEqual(nameDuskNames(name), ["sofiadesign.dusk"], name);
+        assert.deepEqual(profileNameCheck(name, { owners, profiles: his, self: "p2" }), taken, name);
+        // Not looked up: asked about, as any .dusk name is.
+        like(profileNameCheck(name, { profiles: his, self: "p2" }), { dusk: true, kind: "dusk", refused: false }, name);
+      }
+    }
+
+    // Between a name's labels too, and a .dusk name set apart by one still reads as it did.
+    assert.deepEqual(nameDuskNames("pay·sofiadesign。dusk"), ["pay.sofiadesign.dusk"]);
+    assert.deepEqual(nameDuskNames("sofiadesign.dusk·Diseño"), ["sofiadesign.dusk"]);
+    // A dot that isn't between a name and .dusk makes none.
+    for (const name of ["Sofía · Diseño", "Profile • 2", "dusk·", "·dusk", "Hello。"]) assert.deepEqual(nameDuskNames(name), [], name);
+  });
+
   it("gives the .dusk names a profile's name holds, to look up as the name service names them", () => {
     assert.deepEqual(nameDuskNames("Profile 2"), []);
     assert.deepEqual(nameDuskNames("sofiadesign.dusk y bob.dusk"), ["sofiadesign.dusk", "bob.dusk"]);
@@ -602,6 +627,17 @@ describe("a contact's name at Save", () => {
     assert.equal(passesForDuskName("\u0455ofiadesign.dusk", "sofiadesign.dusk"), true);
     // Nor what doesn't end as one.
     for (const name of ["Sof\u00eda", "Estudio dusk", "dusk", "Mi cliente (sofiadesign.dusk)", "", null]) assert.equal(passesForDuskName(name), false, String(name));
+  });
+
+  it("passes for a .dusk name with a dot-like point too: Marek's sofiadesign\u00b7dusk with a middle dot", () => {
+    for (const dot of ["\u00b7", "\u2022", "\uff0e", "\u3002", "\uff61", "\u2027", "\u2219", "\u22c5", "\u30fb", "\u2e33", "\u06d4"]) {
+      assert.equal(passesForDuskName(`sofiadesign${dot}dusk`), true, dot);
+      assert.equal(passesForDuskName(`sofiadesign${dot}DUSK${dot}`, "bob.dusk"), true, dot);
+      // The .dusk name it's saved from, so written, is its own.
+      assert.equal(passesForDuskName(`sofiadesign${dot}dusk`, "sofiadesign.dusk"), false, dot);
+    }
+
+    for (const name of ["Sof\u00eda \u00b7 Dise\u00f1o", "Estudio\u2022", "dusk\u00b7"]) assert.equal(passesForDuskName(name), false, name);
   });
 
   // Amélie's: her grandson saved as "Lucas (petit-fils)"; the "new phone, new account" message asks her to save

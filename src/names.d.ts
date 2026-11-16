@@ -245,8 +245,14 @@ export type DuskNameOwners = ReadonlyMap<string, DuskNameOwner> | Readonly<Recor
  * that look like others ("E𝐦𝐦a.dusk" in mathematical bold is "emma.dusk";
  * "sofiadesign.ᴅᴜꜱᴋ" in small capitals, "ⓢⓞⓕⓘⓐⓓⓔⓢⓘⓖⓝ.dusk" in circled
  * letters, "ѕofiadesign.dusk" with a Cyrillic ѕ, "sofiadesign.clusk" and
- * "sofiadesign.du5k" are "sofiadesign.dusk"). Each once; none for a name
- * without one.
+ * "sofiadesign.du5k" are "sofiadesign.dusk"). Any point is read as a full
+ * stop: a middle dot, a bullet, a fullwidth, ideographic or halfwidth full
+ * stop, a hyphenation point, a dot operator, a katakana middle dot, a raised
+ * dot, an Arabic full stop, and what Unicode's table reads as one of them
+ * ("sofiadesign·dusk", "sofiadesign•dusk" and "sofiadesign。dusk" are
+ * "sofiadesign.dusk"), and a point that isn't a full stop still parts what's
+ * around it ("sofiadesign.dusk·Diseño" holds "sofiadesign.dusk"). Each once;
+ * none for a name without one.
  */
 export declare function nameDuskNames(name: unknown): string[];
 
@@ -254,11 +260,11 @@ export declare function nameDuskNames(name: unknown): string[];
  * Whether a contact's name passes for a .dusk name it isn't saved from, as
  * both wallets refuse it at Save ("That looks like a .dusk name."): one that
  * ends with ".dusk", in any case, a last point aside, read in plain letters
- * first, so a .dusk in small capitals, circled or mathematical letters, or
- * after a fullwidth point, counts too: "sofiadesign.ᴅᴜꜱᴋ",
- * "ⓢⓞⓕⓘⓐⓓⓔⓢⓘⓖⓝ.dusk", "sofiadesign．dusk". `duskName` is the .dusk name
- * the contact is saved from, if any: its own name, so written, doesn't pass
- * for another.
+ * and points first, so a .dusk in small capitals, circled or mathematical
+ * letters, or after any point `nameDuskNames` reads as a full stop, counts
+ * too: "sofiadesign.ᴅᴜꜱᴋ", "ⓢⓞⓕⓘⓐⓓⓔⓢⓘⓖⓝ.dusk", "sofiadesign．dusk",
+ * "sofiadesign·dusk". `duskName` is the .dusk name the contact is saved
+ * from, if any: its own name, so written, doesn't pass for another.
  */
 export declare function passesForDuskName(name: unknown, duskName?: unknown): boolean;
 
