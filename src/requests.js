@@ -16,7 +16,11 @@ import { MAX_MEMO_BYTES, recipientKind } from "./payment-links.js";
 /** @typedef {import("./requests.js").RequestPayment} RequestPayment */
 /** @typedef {"amount" | "amount-memo" | "memo"} Matched */
 
-/** How far a device's clock can be out from a block's: a payment this long before a request can be for it. */
+/**
+ * How far a device's clock can be out from a block's: how far before a
+ * request an app reads what came in, for the rows to hold all that can be its
+ * own. A payment before the request is never its own (`matchRequests`).
+ */
 export const CLOCK_SKEW_MS = 5 * 60_000;
 
 /** How long after it went out a payment just like another is the same one again. */
@@ -27,30 +31,33 @@ const memoOf = (memo) => (memo ?? "").trim();
 
 /**
  * What a payment has of what a request asked: null for nothing, for a payment
- * that came before it, or for one to the profile's other address: a request
- * asks on its public account or on its shielded address, not on both. A
- * request of no amount asks for its memo with any amount: its memo is all of it.
- * A payment of nothing, or of a gas refund alone, pays no request: a memo costs
- * a sender nothing.
+ * made before it was asked, however little before, for one whose memo is
+ * another of the requests' (`memos`), which it names, or for one to the
+ * profile's other address: a request asks on its public account or on its
+ * shielded address, not on both. A request of no amount asks for its memo
+ * with any amount: its memo is all of it. A payment of nothing, or of a gas
+ * refund alone, pays no request: a memo costs a sender nothing.
  *
  * @param {KeptRequest} request
  * @param {ActivityRow} row
+ * @param {ReadonlySet<string>} memos The memos of all the requests
  * @returns {Matched | null}
  */
-function matchOf(request, row) {
+function matchOf(request, row, memos) {
   const askedOn = recipientKind(request.to) === "shielded" ? "shielded" : "public";
 
-  if (row.privacy !== askedOn || row.time === null || row.time === undefined || row.time < request.at - CLOCK_SKEW_MS) return null;
+  if (row.privacy !== askedOn || row.time === null || row.time === undefined || row.time < request.at) return null;
 
   const moved = movedBy(row);
+  // As its link sends it: without the spaces around it.
+  const asked = memoOf(request.memo);
+  const said = memoTextOf(row);
 
-  if (moved <= 0n) return null;
+  if (moved <= 0n || (said !== null && said !== asked && memos.has(said))) return null;
 
   const anyAmount = request.lux === null;
   const sameAmount = request.lux !== null && moved === BigInt(request.lux);
-  // As its link sends it: without the spaces around it.
-  const asked = memoOf(request.memo);
-  const sameMemo = asked !== "" && memoTextOf(row) === asked;
+  const sameMemo = asked !== "" && said === asked;
 
   return (sameAmount || anyAmount) && sameMemo ? "amount-memo" : sameAmount ? "amount" : sameMemo ? "memo" : null;
 }
@@ -73,6 +80,8 @@ export function matchRequests(list, rows) {
   /** @type {Map<string, RequestMatch>} */
   const matches = new Map();
   const taken = new Set(list.flatMap(({ paid }) => (paid ? [paid.hash] : [])));
+  // A payment with one of these memos names that request: it's no other's.
+  const memos = new Set(list.map(({ memo }) => memoOf(memo)).filter(Boolean));
   // Only what went through: a row whose outcome isn't read, or a record that timed out unconfirmed, may have failed.
   const incoming = rows.filter(({ category, status }) => category === "received" && status === "executed").sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
   const oldestFirst = [...list].sort((a, b) => a.at - b.at);
@@ -83,7 +92,7 @@ export function matchRequests(list, rows) {
    */
   const answer = (request, wanted) => {
     for (const row of incoming) {
-      const matched = taken.has(row.hash) ? null : matchOf(request, row);
+      const matched = taken.has(row.hash) ? null : matchOf(request, row, memos);
 
       if (matched && (wanted === "guess") === (matched !== "amount-memo")) {
         taken.add(row.hash);
@@ -130,7 +139,7 @@ export function matchRequests(list, rows) {
       const match = matches.get(request.id);
 
       for (const row of !match || match.state === "waiting" ? [] : incoming) {
-        const matched = taken.has(row.hash) ? null : matchOf(request, row);
+        const matched = taken.has(row.hash) ? null : matchOf(request, row, memos);
 
         if (matched && (matched === "amount-memo") === exact) {
           taken.add(row.hash);

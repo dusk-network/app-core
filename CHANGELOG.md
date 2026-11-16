@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Changed
 
 - `/names`: `nameDuskNames`, `profileNameCheck` and `passesForDuskName` read any point as a full stop: "sofiadesign·dusk" with a middle dot, a bullet or an ideographic full stop is sofiadesign.dusk
+- `/requests`: `matchRequests` counts no payment made before a request was asked, however little before, and none whose memo is another of the requests' for this one
 
 ## [0.17.0]
 
