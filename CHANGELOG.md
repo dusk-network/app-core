@@ -4,10 +4,17 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+
+- `/payment-links`: `LINK_DISAGREES`, "The message and its link don't agree.", what `readPastedLink` says of a request shared as a message whose line says another amount, memo, network or name than its link
+- `/payment-links`: `pastedDuskNames`, the .dusk names a shared request's line names who asks by, to look up for `readPastedLink` (`owners`) as `profileNameCheck` takes them
+
 ### Changed
 
 - `/names`: `nameDuskNames`, `profileNameCheck` and `passesForDuskName` read any point as a full stop: "sofiadesign·dusk" with a middle dot, a bullet or an ideographic full stop is sofiadesign.dusk
 - `/requests`: `matchRequests` counts no payment made before a request was asked, however little before, and none whose memo is another of the requests' for this one
+- `/payment-links`: `readPastedLink` refuses a request shared as a message whose line says what its link doesn't, as "0.002 DUSK" above a link for 0.15 (`LINK_DISAGREES`)
+- `/payment-links`: `readPastedLink` ends a link at its first space or line break, and refuses any words after it as `LINK_UNCLEAR`, whatever the link ends with: "danke!" after its memo never joins it
 
 ## [0.17.0]
 

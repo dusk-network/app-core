@@ -5,7 +5,7 @@ import { networks } from "@dusk-network/networks";
 
 import { activityRows } from "../src/activity.js";
 import { amountForField, parseDusk, normalizeAmount, decimalSeparator, readAmount } from "../src/amounts.js";
-import { LINK_BAD_ADDRESS, LINK_BAD_AMOUNT, LINK_SEVERAL, LINK_TWO_AMOUNTS, LINK_UNCLEAR, LINK_UNREADABLE, MAX_MEMO_BYTES, chainLabel, linkAmount, makePaymentLink, networkMismatch, parsePaymentLink, readPastedLink, readPaymentLink, recipientKind, requestMessage } from "../src/payment-links.js";
+import { LINK_BAD_ADDRESS, LINK_BAD_AMOUNT, LINK_DISAGREES, LINK_SEVERAL, LINK_TWO_AMOUNTS, LINK_UNCLEAR, LINK_UNREADABLE, MAX_MEMO_BYTES, chainLabel, linkAmount, makePaymentLink, networkMismatch, parsePaymentLink, pastedDuskNames, readPastedLink, readPaymentLink, recipientKind, requestMessage } from "../src/payment-links.js";
 import { A, B, recorded } from "./fixtures/activity.js";
 import { like } from "./fixtures/helpers.js";
 
@@ -335,12 +335,14 @@ describe("a link as Send reads it, pasted, scanned or opened", () => {
   it("refuses any space in a link's amount as it's written, a tab or a line break too, which a browser's reading of the link drops: Marek's 0.001, a tab, 5", () => {
     // Marek's: '0.001' + tab + '5' filled 0.0015 in both wallets, as the URL parser drops tabs and line breaks.
     const badAmount = { link: null, problem: LINK_BAD_AMOUNT, reason: "unreadable" };
+    // Pasted, a space ends the link, and what's after it is words after it.
+    const wordsAfter = { link: null, problem: LINK_UNCLEAR, reason: "words-after" };
 
     for (const space of ["\t", "\n", "\r", "\r\n", " ", "\u00a0", "\u202f", "\u2009", "\u3000", "\u2028", "\u0085", "\ufeff", "\u1680", "\u205f"]) {
       for (const amount of [`0.001${space}5`, `1${space}000`, `0.03${space}`, `${space}0.03`]) {
         for (const link of [`${testnetSend}?to=${A}&memo=x&amount=${amount}&network=testnet`, `${testnetSend}?to=${A}&amount=${amount}&memo=x`, `dusk:public-${A}@dusk:2?amount=${amount}&memo=x`]) {
           like(readPaymentLink(link, { network: 2 }), badAmount, JSON.stringify(link));
-          like(readPastedLink(link, { network: 2 }), badAmount, JSON.stringify(link));
+          like(readPastedLink(link, { network: 2 }), wordsAfter, JSON.stringify(link));
         }
       }
 
@@ -829,19 +831,234 @@ describe("what's pasted in Send's To", () => {
     }
   });
 
-  it("fills in what the link says, never what the words before it say: Marek's forged line", () => {
-    const link = `${testnetSend}?to=${A}&amount=0.15&memo=lunch&network=testnet`;
-    const read = readPastedLink(`Marek asks you to pay 0.001 DUSK · lunch\nPay here: ${link}`, { network: "testnet" });
+  it("refuses a request as shared whose line says another amount, memo or network than its link: Marek's 0.002 above a link for 0.15", () => {
+    // Marek's T2, as the web wallet's Copy gave it: from a profile without a name, on Testnet.
+    const link = /** @type {string} */ (makePaymentLink({ amount: "0.002", language: "en", memo: "r35 marek T2", network: 2, to: A }).https);
+    const t2 = requestMessage({ language: "en", link, lux: 2_000_000n, memo: "r35 marek T2", network: "Testnet" });
 
-    like(read?.link, { amountDusk: "0.15", memo: "lunch", to: A });
+    assert.equal(t2, `You're asked to pay 0.002 DUSK on Testnet · r35 marek T2\nPay here: ${link}`);
+    like(readPastedLink(t2, { network: 2 })?.link, { amountDusk: "0.002", memo: "r35 marek T2", to: A });
+
+    for (const pasted of [
+      // Only the link's amount changed: both wallets filled in 0.15 under a line saying 0.002.
+      t2.replace("amount=0.002", "amount=0.15"),
+      t2.replace("amount=0.002", "amountLux=150000000"),
+      t2.replace("&amount=0.002", ""),
+      // The line's amount, its memo, its network, or all of it with a name.
+      t2.replace("pay 0.002 DUSK", "pay 5 DUSK"),
+      t2.replace("to pay 0.002 DUSK", "for a payment in DUSK"),
+      t2.replace("· r35 marek T2", "· something else"),
+      t2.replace(" · r35 marek T2", ""),
+      t2.replace(" on Testnet", " on Mainnet"),
+      t2.replace("You're asked to pay 0.002 DUSK on Testnet · r35 marek T2", "Sofía asks you to pay 0.001 DUSK · coffee"),
+      // The link's memo, or none.
+      t2.replace("memo=r35+marek+T2", "memo=r35+swap"),
+      t2.replace("&memo=r35+marek+T2", ""),
+      // A dusk: link in it, as the extension's QR code gives one.
+      t2.replace(link, `dusk:public-${A}@dusk:2?amount=0.15&memo=r35+marek+T2`),
+      // Typed with a typographic apostrophe, and in other case.
+      t2.replace("You're", "You’re").replace("amount=0.002", "amount=0.15"),
+      t2.replace("You're asked to pay", "YOU'RE ASKED TO PAY").replace("amount=0.002", "amount=0.15"),
+    ]) {
+      // Its line break there, dropped as a phone's one-line field drops it, a space, or Windows' line ends.
+      for (const each of [pasted, pasted.replace("\n", ""), pasted.replace("\n", " "), pasted.replace(/\n/g, "\r\n"), `Hi Marek,\n${pasted}`, pasted.replace("Pay here: ", "")]) {
+        assert.deepEqual(readPastedLink(each, { network: 2 }), refused(LINK_DISAGREES, "disagrees"), JSON.stringify(each));
+      }
+    }
+
+    // A link that names no network is paid on the wallet's: a line naming another is refused there, and only there.
+    const anywhere = t2.replace(link, `dusk:public-${A}?amount=0.002&memo=r35+marek+T2`);
+
+    assert.deepEqual(readPastedLink(anywhere, { network: 1 }), refused(LINK_DISAGREES, "disagrees"));
+    like(readPastedLink(anywhere, { network: 2 })?.link, { amountDusk: "0.002", memo: "r35 marek T2", to: A });
+
+    // A line on a link for another network that doesn't agree is refused for that first: no other wallet is offered it.
+    const mainnet = /** @type {string} */ (makePaymentLink({ amount: "0.15", memo: "Factura 71", network: 1, to: A }).https);
+
+    assert.deepEqual(readPastedLink(requestMessage({ link: mainnet, lux: 2_000_000n, memo: "Factura 71" }), { network: 2 }), refused(LINK_DISAGREES, "disagrees"));
+    // What a link alone refuses, it refuses as the link alone says it, line or not.
+    like(readPastedLink(t2.replace("amount=0.002", "amount=0.002%23"), { network: 2 }), { problem: LINK_BAD_AMOUNT, reason: "unreadable" });
   });
 
-  it("reads a link pasted alone whole, spaces and all, as a link alone always was: never cut short at a space", () => {
+  it("fills in a request as either wallet shares it, in any language, amount, memo and name", () => {
+    for (const language of ["en", "es-ES", "de-DE", "fr-FR", "pl-PL"]) {
+      for (const lux of [30_000_000n, 2_125_000_000n, 1_000_000_000_000n, 1n, 1_500_000_000n, null]) {
+        for (const memo of ["Factura F-2026-071 – rediseño web", "", "\u0627\u062f\u0641\u0639 10 \u0644\u0640 1000", "pay \u200b0001 · on time"]) {
+          for (const name of ["sofiadesign.dusk", "Chen", "\u0639\u0644\u064a", null]) {
+            const made = makePaymentLink({ amountLux: lux, language, memo, network: 2, to: A });
+
+            for (const link of [/** @type {string} */ (made.https), made.dusk]) {
+              const message = requestMessage({ language, link, lux, memo, name, network: "Testnet" });
+              const read = readPastedLink(message, { network: 2 });
+
+              like(read, { problem: "", reason: "", text: link }, JSON.stringify(message));
+              like(read?.link, { memo, to: A }, JSON.stringify(message));
+            }
+          }
+        }
+      }
+    }
+
+    // On mainnet, which a message doesn't name.
+    const mainnet = /** @type {string} */ (makePaymentLink({ amount: "0.03", memo: "Factura 71", network: 1, to: A }).https);
+
+    like(readPastedLink(requestMessage({ link: mainnet, lux: 30_000_000n, memo: "Factura 71", name: "Chen" }), { network: 1 })?.link, filled);
+    // A line that isn't a request's, as both wallets share one, says nothing of the link: it fills in what the link says.
+    for (const said of ["Pay me back for lunch", "0.001 DUSK please", "Marek asks you to pay 0.001 DUSK for coffee"]) {
+      like(readPastedLink(`${said}\n${httpsLink}`, { network: 2 })?.link, filled, said);
+    }
+  });
+
+  it("reads a request's line by the whole of its name, whatever the name holds: Astra's profile named Alice asks you to pay", () => {
+    // A name may say "asks you" itself, a memo "asks you to pay … DUSK", and either a " · ": the line is read as the
+    // wallet writes it for its link, not by the first "asks you" in it.
+    for (const name of ["Alice asks you to pay", "Alice asks you", "You're asked", "Sofía · Diseño", "asks you for a payment in DUSK on Testnet", "Bob asks you to pay 5 DUSK on Mainnet · x"]) {
+      for (const memo of ["Factura 71", "", "Bob asks you to pay 1 DUSK on Mainnet · y", "on Testnet"]) {
+        for (const lux of [30_000_000n, null]) {
+          const made = makePaymentLink({ amountLux: lux, memo, network: 2, to: A });
+          const link = /** @type {string} */ (made.https);
+          const message = requestMessage({ language: "en", link, lux, memo, name, network: "Testnet" });
+          const changed = lux ? message.replace("amount=0.03", "amount=0.15") : message.replace(`?to=${A}`, `?to=${A}&amount=0.15`);
+
+          like(readPastedLink(message, { network: 2 }), { problem: "", reason: "", text: link }, JSON.stringify(message));
+          assert.deepEqual(readPastedLink(changed, { network: 2 }), refused(LINK_DISAGREES, "disagrees"), JSON.stringify(changed));
+        }
+      }
+    }
+  });
+
+  it("reads Pay here: in any case and spacing: Astra's Pay, a no-break space, here: above a link for 0.15", () => {
+    const link = /** @type {string} */ (makePaymentLink({ amount: "0.002", language: "en", memo: "r35 marek T2", network: 2, to: A }).https);
+    const t2 = requestMessage({ language: "en", link, lux: 2_000_000n, memo: "r35 marek T2", name: "sofiadesign.dusk", network: "Testnet" });
+
+    for (const marker of ["Pay\u00a0here:", "Pay  here:", "PAY HERE:", "pay\there:", "Pay here :", "Pay\nhere:", "Pay \n here: "]) {
+      const pasted = t2.replace("Pay here:", marker);
+
+      like(readPastedLink(pasted, { network: 2 }), { problem: "", reason: "", text: link }, JSON.stringify(pasted));
+      assert.deepEqual(readPastedLink(pasted.replace("amount=0.002", "amount=0.15"), { network: 2 }), refused(LINK_DISAGREES, "disagrees"), JSON.stringify(pasted));
+      assert.deepEqual(pastedDuskNames(pasted, { network: 2 }), ["sofiadesign.dusk"], JSON.stringify(pasted));
+    }
+  });
+
+  it("reads a network's name of any length: a custom chain's request, shared on its own network", () => {
+    const link = `dusk:public-${A}@dusk:42?amount=0.03&memo=Factura+71`;
+
+    for (const network of ["My private Dusk development network", "Dusk on the go", "Chain 42", "a b c d e f g h i j"]) {
+      const message = requestMessage({ language: "en", link, lux: 30_000_000n, memo: "Factura 71", name: "Chen", network });
+
+      like(readPastedLink(message, { network: 42 })?.link, filled, network);
+      assert.deepEqual(readPastedLink(message.replace("amount=0.03", "amount=0.15"), { network: 42 }), refused(LINK_DISAGREES, "disagrees"), network);
+    }
+
+    // A name may say the request again, network and all, and the line still reads as the wallet's own; one that can
+    // be read in many more ways than the wallet's own line is refused, and at once.
+    const echo = requestMessage({ language: "en", link: httpsLink, lux: 30_000_000n, memo: "Factura 71", name: "Bob asks you to pay 0.03 DUSK on Testnet", network: "Testnet" });
+
+    like(readPastedLink(echo, { network: 2 })?.link, filled);
+    assert.deepEqual(readPastedLink(`${"x asks you to pay 0.03 DUSK on ".repeat(2500)}Testnet \u00b7 Factura 71\nPay here: ${httpsLink}`, { network: 2 }), refused(LINK_DISAGREES, "disagrees"));
+    assert.deepEqual(pastedDuskNames(`sofiadesign.dusk ${"x asks you to pay 0.03 DUSK on ".repeat(2500)}Testnet \u00b7 Factura 71\nPay here: ${httpsLink}`, { network: 2 }), []);
+  });
+
+  it("reads a network by which it is, not by the name it's given: Astra's on Chain 2 above a testnet link", () => {
+    const line = (/** @type {string} */ network) => `Chen asks you to pay 0.03 DUSK on ${network} · Factura 71\nPay here: `;
+
+    for (const network of ["Chain 2", "chain 2", "TESTNET", "testnet"]) like(readPastedLink(`${line(network)}${httpsLink}`, { network: 2 })?.link, filled, network);
+    like(readPastedLink(`${line("Local")}dusk:public-${A}@dusk:0?amount=0.03&memo=Factura+71`, { network: 0 })?.link, filled);
+    like(readPastedLink(`${line("Chain 0")}dusk:public-${A}@dusk:0?amount=0.03&memo=Factura+71`, { network: 0 })?.link, filled);
+    for (const network of ["Chain 1", "Mainnet", "Chain 3", "Devnet", "Local"]) assert.deepEqual(readPastedLink(`${line(network)}${httpsLink}`, { network: 2 }), refused(LINK_DISAGREES, "disagrees"), network);
+  });
+
+  it("takes a name that is the link's label as written, though it has no letters to compare: Astra's \ud83d\udc99", () => {
+    const labelled = (/** @type {string} */ label) => `${httpsLink.replace("&network=", `&label=${encodeURIComponent(label)}&network=`)}`;
+
+    for (const name of ["\ud83d\udc99", "\u2764\ufe0f", "\u2605 \u2605", "\u0639\u0644\u064a"]) {
+      like(readPastedLink(requestMessage({ language: "en", link: labelled(name), lux: 30_000_000n, memo: "Factura 71", name, network: "Testnet" }), { network: 2 })?.link, filled, name);
+    }
+    assert.deepEqual(readPastedLink(requestMessage({ language: "en", link: labelled("\ud83d\udc99"), lux: 30_000_000n, memo: "Factura 71", name: "\ud83d\udc9a", network: "Testnet" }), { network: 2 }), refused(LINK_DISAGREES, "disagrees"));
+  });
+
+  it("refuses a request as shared whose line names someone else than its link does: by its label, its .dusk name, or as the name service says", () => {
+    const line = (/** @type {string} */ name) => `${name} asks you to pay 0.03 DUSK on Testnet · Factura 71\nPay here: `;
+    const labelled = `${httpsLink.replace("&network=", "&label=Sof%C3%ADa+Design&network=")}`;
+    const named = `${testnetSend}?to=sofiadesign.dusk&amount=0.03&memo=Factura+71&network=testnet`;
+    const disagree = refused(LINK_DISAGREES, "disagrees");
+
+    // The name a link gives, its label: in any case or spacing, and in no other.
+    like(readPastedLink(`${line("Sofía Design")}${labelled}`, { network: 2 })?.link, filled);
+    like(readPastedLink(`${line("sofia  design")}${labelled}`, { network: 2 })?.link, filled);
+    assert.deepEqual(readPastedLink(`${line("Marek")}${labelled}`, { network: 2 }), disagree);
+    // A .dusk name it pays: the line's .dusk name is it, or there's none to say otherwise.
+    like(readPastedLink(`${line("sofiadesign.dusk")}${named}`, { network: 2 })?.link, { to: "sofiadesign.dusk" });
+    like(readPastedLink(`${line("Sofía")}${named}`, { network: 2 })?.link, { to: "sofiadesign.dusk" });
+    assert.deepEqual(readPastedLink(`${line("alice.dusk")}${named}`, { network: 2 }), disagree);
+    assert.deepEqual(readPastedLink(`${line("alice·dusk")}${named}`, { network: 2 }), disagree);
+
+    // An address it pays: the .dusk name the line gives, as the name service says whose it is (`owners`).
+    const shared = `${line("sofiadesign.dusk")}${httpsLink}`;
+    const OTHER = `${SHIELDED.slice(0, -1)}${SHIELDED.endsWith("1") ? "2" : "1"}`;
+
+    assert.deepEqual(pastedDuskNames(shared), ["sofiadesign.dusk"]);
+    for (const owner of [{ account: A }, { account: A, address: SHIELDED }, A, { address: SHIELDED }]) {
+      like(readPastedLink(shared, { network: 2, owners: new Map([["sofiadesign.dusk", owner]]) })?.link, filled, JSON.stringify(owner));
+    }
+    for (const owner of [{ account: B }, B, { account: B, address: SHIELDED }, null]) {
+      assert.deepEqual(readPastedLink(shared, { network: 2, owners: new Map([["sofiadesign.dusk", owner]]) }), disagree, JSON.stringify(owner));
+      assert.deepEqual(readPastedLink(shared, { network: 2, owners: { "sofiadesign.dusk": owner } }), disagree, JSON.stringify(owner));
+    }
+    // Not looked up, or a lookup that failed: nothing to say otherwise.
+    for (const owners of [undefined, new Map(), new Map([["alice.dusk", { account: B }]])]) like(readPastedLink(shared, { network: 2, owners })?.link, filled);
+    // A name in look-alike letters or points is looked up as it reads.
+    assert.deepEqual(pastedDuskNames(`${line("ѕofiadesign·dusk")}${httpsLink}`), ["sofiadesign.dusk"]);
+    assert.deepEqual(readPastedLink(`${line("ѕofiadesign·dusk")}${httpsLink}`, { network: 2, owners: new Map([["sofiadesign.dusk", { account: B }]]) }), disagree);
+
+    // A shielded address it pays, against the name's shielded address where the name service has one.
+    const toShielded = /** @type {string} */ (makePaymentLink({ amount: "0.03", memo: "Factura 71", network: 2, to: SHIELDED }).https);
+    const hers = (/** @type {unknown} */ owner) => readPastedLink(`${line("sofiadesign.dusk")}${toShielded}`, { network: 2, owners: new Map([["sofiadesign.dusk", /** @type {any} */ (owner)]]) });
+
+    like(hers({ account: A, address: SHIELDED })?.link, { to: SHIELDED });
+    like(hers({ account: A })?.link, { to: SHIELDED });
+    assert.deepEqual(hers({ account: A, address: OTHER }), disagree);
+
+    // No .dusk name in a line that isn't a request's, a link alone, or a line naming none.
+    for (const text of [httpsLink, `${line("Chen")}${httpsLink}`, `sofiadesign.dusk: ${httpsLink}`, "sofiadesign.dusk", "", null]) assert.deepEqual(pastedDuskNames(text), [], String(text));
+  });
+
+  it("ends a link pasted alone at its first space or line break, as a chat ends one: what's after it is words after it, a space in its memo too", () => {
     for (const link of [httpsLink, duskLink]) {
-      // A space in its memo: the memo as it says it.
-      like(readPastedLink(link.replace("Factura+71", "Factura 71"), { network: 2 })?.link, filled, link);
-      // In its amount: refused, as it was, not 0 or 3 DUSK.
-      like(readPastedLink(link.replace("amount=0.03", "amount=0 .03"), { network: 2 }), { link: null, problem: LINK_BAD_AMOUNT, reason: "unreadable" }, link);
+      // A space in its memo, or in its amount: refused, not "Factura" or 0 or 3 DUSK.
+      assert.deepEqual(readPastedLink(link.replace("Factura+71", "Factura 71"), { network: 2 }), refused(LINK_UNCLEAR, "words-after"), link);
+      assert.deepEqual(readPastedLink(link.replace("amount=0.03", "amount=0 .03"), { network: 2 }), refused(LINK_UNCLEAR, "words-after"), link);
+      // Spaces and line breaks around it aren't after it.
+      like(readPastedLink(` \t${link}\r\n \u0085`, { network: 2 })?.link, filled, link);
+    }
+  });
+
+  it("refuses words after a link, whatever the link ends with, and never reads them into it: Lena's danke!", () => {
+    // Lena's: the wallet's own link with " danke!" after it said "This link's network can't be read. Ask for a new
+    // one."; a link ending with its memo took the word into it, "Lena r35 odd danke!".
+    const own = /** @type {string} */ (makePaymentLink({ amount: "0.01", memo: "Lena r35", network: 2, to: A }).https);
+
+    for (const link of [
+      own,
+      `${testnetSend}?to=${A}&amount=0.01&memo=Lena+r35+odd`,
+      `${testnetSend}?memo=x&amount=0.01&to=${A}`,
+      `${testnetSend}?to=${A}&memo=x&amount=0.01`,
+      `${testnetSend}?to=${A}&memo=x&amountLux=10000000`,
+      `${testnetSend}?to=${A}&amount=0.01&label=Lena`,
+      `dusk:public-${A}@dusk:2?amount=0.01&memo=Lena+r35`,
+      `dusk:public-${A}@dusk:2`,
+      `dusk:${A}`,
+    ]) {
+      like(readPastedLink(link, { network: 2 }), { problem: "", reason: "" }, link);
+
+      for (const space of [" ", "\n", "\r\n", "\t", "\u00a0", "\u3000", "\u2028", "\u0085", " \n "]) {
+        // A word, a figure, what reads as more of the link, as Marek's link broken before "&amount=0.15".
+        for (const words of ["danke!", "5", "&amount=0.15", "thanks, Marek"]) {
+          for (const pasted of [`${link}${space}${words}`, `Pay here: ${link}${space}${words}`, `${shared(link)}${space}${words}`]) {
+            assert.deepEqual(readPastedLink(pasted, { network: 2 }), refused(LINK_UNCLEAR, "words-after"), JSON.stringify(pasted));
+          }
+        }
+      }
     }
   });
 
@@ -869,8 +1086,8 @@ describe("what's pasted in Send's To", () => {
     ]) {
       assert.deepEqual(readPastedLink(pasted, { network: 2 }), refused(LINK_SEVERAL, "several-links"), pasted);
     }
-    // One link, spaces in its memo, and words in it that are no payment link: read whole, as ever.
-    like(readPastedLink(`${testnetSend}?to=${A}&amount=0.03&memo=see https://example.com/invoice 71`, { network: 2 })?.link, { memo: "see https://example.com/invoice 71", to: A });
+    // One link, and words after it that are no payment link: a space ends it, and never joins them into its memo.
+    assert.deepEqual(readPastedLink(`${testnetSend}?to=${A}&amount=0.03&memo=see https://example.com/invoice 71`, { network: 2 }), refused(LINK_UNCLEAR, "words-after"));
   });
 
   it("refuses what the link alone refuses, as the link alone says it, and gives a link for another network to the page that takes it", () => {
@@ -906,5 +1123,6 @@ describe("what's pasted in Send's To", () => {
   it("says why it fills in nothing in both wallets' words", () => {
     assert.equal(LINK_SEVERAL, "That has more than one payment link. Paste just the one to pay.");
     assert.equal(LINK_UNCLEAR, "The words after that link may be part of it. Paste the link alone.");
+    assert.equal(LINK_DISAGREES, "The message and its link don't agree.");
   });
 });

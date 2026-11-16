@@ -8,9 +8,9 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 /** The JS entry points, each with its declarations. */
 const ENTRIES = ["./amounts", "./text", "./payment-links", "./requests", "./prices", "./gas", "./names", "./recovery-words", "./history", "./shielded", "./activity", "./export", "./sozu", "./bridge", "./bridge-explorer", "./duskevm-withdrawals"];
 /** The modules the entry points share, which aren't entry points. */
-const SHARED = ["./src/bridge-common.js", "./src/bridge-evm.js", "./src/bridge-ledger.js", "./src/bridge-status.js", "./src/confusables.js", "./src/moved.js"];
+const SHARED = ["./src/bridge-common.js", "./src/bridge-evm.js", "./src/bridge-ledger.js", "./src/bridge-status.js", "./src/confusables.js", "./src/moved.js", "./src/owners.js"];
 /** The shared modules that need nothing: data, and one rule. */
-const DATA = ["./src/confusables.js", "./src/moved.js"];
+const DATA = ["./src/confusables.js", "./src/moved.js", "./src/owners.js"];
 /** The entry points that need nothing from anywhere. */
 const SELF_CONTAINED = ["./amounts", "./text", "./gas", "./recovery-words"];
 /** The one entry point that may use viem, an optional peer: an app that uses no other installs none. */
@@ -275,6 +275,7 @@ describe("the package", () => {
       "src/moved.js",
       "src/names.d.ts",
       "src/names.js",
+      "src/owners.js",
       "src/payment-links.d.ts",
       "src/payment-links.js",
       "src/prices.d.ts",

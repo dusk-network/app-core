@@ -621,16 +621,23 @@ const linkChoices: AmountRead["choices"] = linkAmount(sendRead?.link, "pl-PL").c
 void [asSendReads, linkChoices, linkAmount(null), linkAmount(readLink)];
 
 // What's pasted in Send's To: a link alone, or a request as both wallets share it.
-import { LINK_SEVERAL, LINK_UNCLEAR, readPastedLink, type PastedLinkRead } from "@dusk-network/app-core/payment-links";
+import { LINK_DISAGREES, LINK_SEVERAL, LINK_UNCLEAR, pastedDuskNames, readPastedLink, type PastedLinkRead } from "@dusk-network/app-core/payment-links";
 
 const pastedRead: PastedLinkRead | null = readPastedLink("x asks you to pay 1 DUSK\nPay here: dusk:public-x", { network: 2, walletUrl: "https://wallet.example" });
-const pastedReason: "" | "unreadable" | "two-amounts" | "other-network" | "several-links" | "words-after" | undefined = pastedRead?.reason;
+const pastedReason: "" | "unreadable" | "two-amounts" | "other-network" | "several-links" | "words-after" | "disagrees" | undefined = pastedRead?.reason;
 const pastedLinkText: string | undefined = pastedRead?.text;
 const pastedFills: PaymentLink | null | undefined = pastedRead?.link;
 const severalWords: "That has more than one payment link. Paste just the one to pay." = LINK_SEVERAL;
 const unclearWords: "The words after that link may be part of it. Paste the link alone." = LINK_UNCLEAR;
+const disagreeWords: "The message and its link don't agree." = LINK_DISAGREES;
 const pastedAsRead: Omit<LinkRead, "reason"> | null = pastedRead;
-void [pastedReason, pastedLinkText, pastedFills, severalWords, unclearWords, pastedAsRead, readPastedLink(null)];
+void [pastedReason, pastedLinkText, pastedFills, severalWords, unclearWords, disagreeWords, pastedAsRead, readPastedLink(null)];
+// Its line's .dusk names, looked up as a profile's name's are.
+const pastedNames: string[] = pastedDuskNames("sofiadesign.dusk asks you to pay 1 DUSK\nPay here: dusk:public-x", { network: 2, walletUrl: "https://wallet.example" });
+const pastedOwners = new Map<string, { account?: string; address?: string } | null>(pastedNames.map((name) => [name, null]));
+void [readPastedLink("x", { network: 2, owners: pastedOwners }), readPastedLink("x", { owners: { "sofiadesign.dusk": "account" } }), pastedDuskNames(null)];
+// @ts-expect-error what the name service says is by name
+void readPastedLink("x", { owners: ["sofiadesign.dusk"] });
 // @ts-expect-error a link read alone is never refused for words after it
 void ((reason: LinkRead["reason"]) => reason)("words-after");
 
