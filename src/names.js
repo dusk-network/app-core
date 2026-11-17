@@ -10,31 +10,14 @@
 
 import { shortAccount } from "@dusk-network/networks/format";
 
-import { CONFUSABLES } from "./confusables.js";
 import { ownerOf } from "./owners.js";
+import { lettersOf, nameSkeleton, plainChar } from "./plain.js";
 import { displayText } from "./text.js";
+
+export { nameSkeleton };
 
 /** @typedef {{ same: string, written: string, paired: string, lower: string, digits: string, strokes: string }} NameKeys */
 
-/** @type {Map<number, string> | null} */
-let looksLike = null;
-
-/** Unicode's table, read the first time it's needed. */
-function table() {
-  if (!looksLike) {
-    looksLike = new Map();
-
-    for (const entry of CONFUSABLES.split(";")) {
-      const [source, ...target] = entry.split(" ").map((hex) => Number.parseInt(hex, 16));
-
-      looksLike.set(source, String.fromCodePoint(...target));
-    }
-  }
-
-  return looksLike;
-}
-
-const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 // What can't be seen: what renders as nothing, and controls, which turn text
 // around or break it. A name is read without them.
 const UNSEEN = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}]/gu;
@@ -53,12 +36,6 @@ const ONE = new Set(["1", "i", "l"]);
 // What Unicode's table reads as a thin upright stroke, an i, an l or a !, as it reads a 1, an I, a | and a ¡: each
 // looks like the others, so "Davld", "Dav!d" and "Dav1d" look like "David".
 const STROKES = /[il!]/g;
-// The small capitals, as the capitals they are, which NFKC leaves as they are: "ᴅᴜꜱᴋ" is DUSK. There's no small X.
-const SMALL_CAPITALS = new Map(
-  [..."\u1d00\u0299\u1d04\u1d05\u1d07\ua730\u0262\u029c\u026a\u1d0a\u1d0b\u029f\u1d0d\u0274\u1d0f\u1d18\ua7af\u0280\ua731\u1d1b\u1d1c\u1d20\u1d21\u028f\u1d22"].map((char, i) => [char, "ABCDEFGHIJKLMNOPQRSTUVWYZ"[i]])
-);
-// The capitals white on a black circle or square, 🅓 and 🆂, A to Z, which NFKC leaves as they are too.
-const WHITE_ON_BLACK = [0x1f150, 0x1f170];
 
 /** What an app says of a name it refuses for what can't be seen in it. */
 export const NAME_HIDES = "This name has hidden characters. Type it again without them.";
@@ -71,19 +48,6 @@ export const NAME_SAVE_YES = "Yes, save it";
  * @returns {boolean}
  */
 export const nameHides = (name) => displayText(name ?? "").neutralized;
-
-/**
- * @param {unknown} name
- * @returns {string}
- */
-export function nameSkeleton(name) {
-  const map = table();
-  let shape = "";
-
-  for (const char of String(name ?? "").normalize("NFD").replace(IGNORABLE, "")) shape += map.get(/** @type {number} */ (char.codePointAt(0))) ?? char;
-
-  return shape.normalize("NFD");
-}
 
 /**
  * What's left to tell names apart once their case, accents, spaces and
@@ -102,27 +66,6 @@ const folded = (text) => text.normalize("NFD").replace(UNSEEN, "").replace(NOT_L
  * @param {string} shape A skeleton
  */
 const paired = (shape) => shape.replace(PAIRS, (char) => PAIRED[char]);
-
-/**
- * A name's letters as the plain ones they're styled as: its compatibility
- * forms as their letters (NFKC: fullwidth, mathematical, circled ⓢ, squared
- * 🄢, letterlike ℓ), its small capitals as the capitals they are (ᴅ is a D),
- * and the capitals white on black as theirs (🅓 is a D).
- *
- * @param {string} text
- */
-function lettersOf(text) {
-  let letters = "";
-
-  for (const char of text.normalize("NFKC")) {
-    const code = /** @type {number} */ (char.codePointAt(0));
-    const block = WHITE_ON_BLACK.find((first) => code >= first && code < first + 26);
-
-    letters += SMALL_CAPITALS.get(char) ?? (block === undefined ? char : String.fromCharCode(65 + code - block));
-  }
-
-  return letters;
-}
 
 /**
  * A name in plain letters (`lettersOf`) with what's written for a letter as
@@ -416,18 +359,83 @@ const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 
 // What Unicode's table reads a full stop, a middle dot and an ideographic full stop as: ".", "·" and "˳".
 const DOT_SHAPES = new Set([".", "\u00b7", "\u02f3"]);
-// A raised dot and an Arabic full stop, which it reads as nothing else, and as a hyphen.
-const DOTS_TOO = new Set(["\u2e33", "\u06d4"]);
+// The points it reads as nothing else, or as another: a raised dot and an Arabic full stop, a dot above "˙" and a
+// Devanagari high dot, each Braille pattern of one dot, as "⠄", a Tibetan tsheg, a Z notation spot, Arabic and
+// Canadian raised and baseline dots, a sesame dot, and the punctuation dots of Brahmi, Manichaean and Kawi.
+const DOTS_TOO = new Set([
+  ..."\u2e33\u06d4\u02d9\u0971\u2801\u2802\u2804\u2808\u2810\u2820\u2840\u2880\u0f0b\u0f0c\u2981\u0887\u0888\u18df\ufe45\ufbb2\ufbb3",
+  "\u{11049}",
+  "\u{10af4}",
+  "\u{11f49}",
+]);
 
 /**
  * Whether a character reads as a point between a name's labels: a full stop,
  * a middle dot or an ideographic full stop, or what Unicode's table or NFKC
- * reads as one, as "．", "·", "•", "‧", "∙", "⋅", "・", "。" and "｡", and a
- * raised dot "⸳" and an Arabic full stop "۔".
+ * reads as one, as "．", "·", "•", "‧", "∙", "⋅", "・", "。" and "｡", and the
+ * points it reads as nothing else (`DOTS_TOO`), as a raised dot "⸳", an
+ * Arabic full stop "۔", a dot above "˙" and a Braille dot "⠄".
  *
  * @param {string} char
  */
 const dotLike = (char) => DOTS_TOO.has(char) || DOT_SHAPES.has(nameSkeleton(char)) || DOT_SHAPES.has(nameSkeleton(char.normalize("NFKC")));
+
+// A space of any width, or a tab: what a reader reads past either side of a point.
+const BLANK = /^[\p{Zs}\t]$/u;
+
+// Spaces of any width, and tabs.
+const BLANKS = /[\p{Zs}\t]/gu;
+
+/**
+ * Where text's spaces either side of a point (`dotLike`) between two words
+ * are, which a reader reads past: "sofiadesign · dusk" and "sofiadesign·
+ * dusk" read as "sofiadesign·dusk". A full stop keeps a space after it, which
+ * ends a sentence, as in "Mr. Dusk", and one before it where a space follows
+ * it too; where a word follows it at once, it's read past: "sofiadesign
+ * .dusk" reads as "sofiadesign.dusk".
+ *
+ * @param {string[]} chars
+ * @returns {Set<number>} Their places in `chars`
+ */
+function blanksPast(chars) {
+  /** @type {Set<number>} */
+  const past = new Set();
+  // The last character that isn't a space.
+  let last = "";
+
+  for (let at = 0; at < chars.length; at += 1) {
+    if (!BLANK.test(chars[at])) {
+      last = chars[at];
+      continue;
+    }
+
+    let end = at;
+
+    while (end < chars.length && BLANK.test(chars[end])) end += 1;
+
+    const next = chars[end];
+    const before = last !== "" && next !== undefined && dotLike(next) && (next !== "." || (end + 1 < chars.length && !BLANK.test(chars[end + 1])));
+    const after = next !== undefined && last !== "." && last !== "" && dotLike(last);
+
+    for (let each = at; each < end && (before || after); each += 1) past.add(each);
+    at = end - 1;
+  }
+
+  return past;
+}
+
+/**
+ * Text without the spaces either side of a point a reader reads past
+ * (`blanksPast`): "sofiadesign · dusk" as "sofiadesign·dusk".
+ *
+ * @param {string} text
+ */
+function closedUp(text) {
+  const chars = Array.from(text);
+  const past = blanksPast(chars);
+
+  return chars.filter((_, at) => !past.has(at)).join("");
+}
 
 /**
  * Text with each character that reads as a point (`dotLike`) as a point:
@@ -451,22 +459,22 @@ const inDuskName = (char) => /^\p{M}$/u.test(char) || letterLike(char) || [lette
 /**
  * A name's words, parted at each character that can't be in one.
  *
- * @param {string} text
- * @param {(char: string) => boolean} inWord
+ * @param {string[]} chars
+ * @param {(char: string, at: number) => boolean} inWord
  */
-function wordsOfName(text, inWord) {
+function wordsOfName(chars, inWord) {
   /** @type {string[]} */
   const words = [];
   let word = "";
 
-  for (const char of text) {
-    if (inWord(char)) {
+  chars.forEach((char, at) => {
+    if (inWord(char, at)) {
       word += char;
     } else {
       words.push(word);
       word = "";
     }
-  }
+  });
 
   words.push(word);
 
@@ -483,19 +491,23 @@ function wordsOfName(text, inWord) {
  * middle dot or any other point (`dotLike`), "sofia.𝐃𝐔𝐒𝐊" in mathematical
  * bold, "sofia.dúsk", "sofia.clusk" or "sofia.du5k"; and each of
  * "alice.dusk,bob.dusk". A point that isn't a full stop parts words too, as
- * it did: "sofia.dusk·Diseño" holds sofia.dusk.
+ * it did: "sofia.dusk·Diseño" holds sofia.dusk. Spaces either side of a point
+ * are read past (`blanksPast`), and kept in the word, as written: "sofia ·
+ * dusk" is one.
  *
  * @param {unknown} name
  * @returns {string[]}
  */
 function duskNamesIn(name) {
-  const text = String(name ?? "").replace(INVISIBLE, "");
-  const words = [...wordsOfName(text, inDuskName), ...wordsOfName(text, (char) => inDuskName(char) || dotLike(char))];
+  const chars = Array.from(String(name ?? "").replace(INVISIBLE, ""));
+  // A space either side of a point is in the word, as written, and read past.
+  const past = blanksPast(chars);
+  const words = [...wordsOfName(chars, (char, at) => inDuskName(char) || past.has(at)), ...wordsOfName(chars, (char, at) => inDuskName(char) || dotLike(char) || past.has(at))];
 
   return [...new Set(words.map(withoutEdges))].filter((each) => {
     if (each === "") return false;
 
-    const plain = dotted(each);
+    const plain = dotted(each).replace(BLANKS, "");
     const written = nameSkeleton(plain);
 
     return (
@@ -519,49 +531,6 @@ const domainOf = (name) => String(name ?? "").trim().replace(/[A-Z]/g, (char) =>
 const REGISTRABLE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.dusk$/;
 
 /**
- * A skeleton as a plain spelling compares it: without the marks over its
- * letters, in lower case.
- *
- * @param {string} shape
- */
-const bare = (shape) => shape.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-
-/** @type {Map<string, string> | null} */
-let plainBySkeleton = null;
-
-/**
- * The letter, digit, point or hyphen a skeleton is of, as Unicode's table
- * gives "rn" for an m, a letter before a digit: "o" for "O", not "0".
- *
- * @param {string} shape A character's skeleton, `bare`
- */
-function plainOf(shape) {
-  if (!plainBySkeleton) {
-    plainBySkeleton = new Map();
-
-    for (const char of "0123456789.-abcdefghijklmnopqrstuvwxyz") plainBySkeleton.set(bare(nameSkeleton(char)), char);
-  }
-
-  return plainBySkeleton.get(shape);
-}
-
-/**
- * A character as a plain one where it's written in one that looks like it:
- * ASCII as it is, in lower case; another as the letter, digit, point or
- * hyphen Unicode's table reads it as, where it reads as one, so a Cyrillic ѕ
- * is an s and what looks like an m (Unicode's "rn") an m; else as it is.
- *
- * @param {string} char
- */
-const plainChar = (char) => {
-  if (/^[\x21-\x7e]$/.test(char)) return char.toLowerCase();
-
-  const shape = bare(nameSkeleton(char));
-
-  return plainOf(shape) ?? (/^[a-z0-9.-]+$/.test(shape) ? shape : char);
-};
-
-/**
  * The .dusk name a word that reads as one reads as, in plain letters: its
  * styled letters as their ordinary ones (NFKC: mathematical bold, fullwidth),
  * each point as a full stop (`dotted`), then what's before its last point,
@@ -574,7 +543,9 @@ const plainChar = (char) => {
  * @param {string} word As `duskNamesIn` gives it
  */
 function readingOf(word) {
-  const chars = [...dotted(lettersOf(word)).normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "")].map(plainChar);
+  // Its points as full stops before NFKC too, which reads a dot above as a space and a mark; the spaces by a point
+  // read past.
+  const chars = [...dotted(lettersOf(dotted(word.replace(BLANKS, "")))).normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "")].map(plainChar);
   const point = chars.lastIndexOf(".");
   const reading = point > 0 ? `${chars.slice(0, point).join("")}.dusk` : "";
 
@@ -615,11 +586,30 @@ export function nameDuskNames(name) {
  * @returns {boolean}
  */
 export function passesForDuskName(name, duskName) {
-  // In plain letters and points, so a .dusk in small capitals or circled letters, or after a fullwidth point or a
-  // middle dot, ends it too.
-  const typed = dotted(lettersOf(String(name ?? ""))).trim().toLowerCase().replace(/\.$/, "");
+  // In plain letters and points, so a .dusk in small capitals or circled letters, or after a fullwidth point, a
+  // middle dot, a dot above or one with spaces around it, ends it too.
+  const typed = dotted(lettersOf(dotted(closedUp(String(name ?? ""))))).trim().toLowerCase().replace(/\.$/, "");
 
   return typed.endsWith(".dusk") && typed !== String(duskName ?? "").trim().toLowerCase();
+}
+
+/**
+ * @param {unknown} text
+ * @returns {{ name: string, words: string } | null}
+ */
+export function duskNameLookAlike(text) {
+  const typed = String(text ?? "").trim();
+
+  if (REGISTRABLE.test(domainOf(typed))) return null;
+
+  // One word, as a recipient is, its points' spaces read past.
+  const word = closedUp(typed.replace(INVISIBLE, ""));
+
+  if (!word || /\s/u.test(word)) return null;
+
+  const readings = [...new Set(duskWordsOf(word).map(({ reading }) => reading))];
+
+  return readings.length === 1 && readings[0] ? { name: readings[0], words: `That looks like ${readings[0]}, but it isn't. Check it, or paste it again.` } : null;
 }
 
 /**
@@ -826,3 +816,4 @@ export function lookAlikes(entries) {
 
   return found;
 }
+

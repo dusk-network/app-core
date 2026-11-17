@@ -8,7 +8,7 @@
  *
  * @example
  * ```js
- * import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameStarts, passesForDuskName, profileNameCheck, profileNameClash } from "@dusk/app-core/names";
+ * import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, duskNameLookAlike, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameStarts, passesForDuskName, profileNameCheck, profileNameClash } from "@dusk/app-core/names";
  *
  * nameHides("\u202eecilA"); // true: it reads as "Alice". Refuse it, saying NAME_HIDES
  * looksAlike("Bob", "Bօb"); // true: an Armenian օ
@@ -32,6 +32,8 @@
  * // { kind: "profile", same: true, entry: { name: "Profile 1", … }, name: "sofiadesign.dusk" }: refuse it too
  * nameStarts("Lucas (petit-fils)", { profiles }); // { kind: "profile", entry: { name: "Lucas", … }, name: "Lucas" }: ask
  * passesForDuskName("sofiadesign.ᴅᴜꜱᴋ", contact.duskName); // true: a contact's name a .dusk name shows where, to refuse
+ * duskNameLookAlike("sofiadesign·dusk"); // in Send's To, at once
+ * // { name: "sofiadesign.dusk", words: "That looks like sofiadesign.dusk, but it isn't. Check it, or paste it again." }
  * lookAlikes([...profiles, ...contacts]); // the ones to show with their address
  * ```
  *
@@ -248,11 +250,15 @@ export type DuskNameOwners = ReadonlyMap<string, DuskNameOwner> | Readonly<Recor
  * "sofiadesign.du5k" are "sofiadesign.dusk"). Any point is read as a full
  * stop: a middle dot, a bullet, a fullwidth, ideographic or halfwidth full
  * stop, a hyphenation point, a dot operator, a katakana middle dot, a raised
- * dot, an Arabic full stop, and what Unicode's table reads as one of them
- * ("sofiadesign·dusk", "sofiadesign•dusk" and "sofiadesign。dusk" are
- * "sofiadesign.dusk"), and a point that isn't a full stop still parts what's
- * around it ("sofiadesign.dusk·Diseño" holds "sofiadesign.dusk"). Each once;
- * none for a name without one.
+ * dot, an Arabic full stop, a dot above, a Devanagari high dot, a Braille
+ * dot, a Tibetan tsheg, a Z notation spot, and what Unicode's table reads as
+ * one of them ("sofiadesign·dusk", "sofiadesign•dusk", "sofiadesign。dusk",
+ * "sofiadesign˙dusk" and "sofiadesign⠄dusk" are "sofiadesign.dusk"), and a
+ * point that isn't a full stop still parts what's around it
+ * ("sofiadesign.dusk·Diseño" holds "sofiadesign.dusk"). Spaces either side
+ * of a point are read past ("sofiadesign · dusk" and "sofiadesign .dusk" are
+ * "sofiadesign.dusk"), but a full stop's after it, which ends a sentence
+ * ("Mr. Dusk" holds none). Each once; none for a name without one.
  */
 export declare function nameDuskNames(name: unknown): string[];
 
@@ -263,10 +269,29 @@ export declare function nameDuskNames(name: unknown): string[];
  * and points first, so a .dusk in small capitals, circled or mathematical
  * letters, or after any point `nameDuskNames` reads as a full stop, counts
  * too: "sofiadesign.ᴅᴜꜱᴋ", "ⓢⓞⓕⓘⓐⓓⓔⓢⓘⓖⓝ.dusk", "sofiadesign．dusk",
- * "sofiadesign·dusk". `duskName` is the .dusk name the contact is saved
- * from, if any: its own name, so written, doesn't pass for another.
+ * "sofiadesign·dusk", "sofiadesign˙dusk", and with the spaces around a point
+ * `nameDuskNames` reads past, "sofiadesign · dusk". `duskName` is the .dusk
+ * name the contact is saved from, if any: its own name, so written, doesn't
+ * pass for another.
  */
 export declare function passesForDuskName(name: unknown, duskName?: unknown): boolean;
+
+/**
+ * The .dusk name a recipient typed or pasted in Send's To looks like, where
+ * it isn't that name as written, for Send to say so at once in both
+ * wallets' words: one word that reads as one .dusk name as `nameDuskNames`
+ * reads them, with another point, letters that look like its own, styled
+ * letters, what can't be seen, or spaces around its point, as
+ * "sofiadesign·dusk", "sofiadesign˙dusk", "ѕofiadesign.dusk" with a Cyrillic
+ * ѕ, "sofiadesign.ᴅᴜꜱᴋ" or "sofiadesign .dusk": `name` is the name it looks
+ * like, "sofiadesign.dusk", and `words` "That looks like sofiadesign.dusk,
+ * but it isn't. Check it, or paste it again." Null for a .dusk name as
+ * written, in any case ("SofiaDesign.DUSK"), and for what reads as no .dusk
+ * name, or as more than one, as an address or "alice.dusk bob.dusk". A
+ * contact's name that passes for a .dusk name (`passesForDuskName`) can be
+ * said to look like `name` too.
+ */
+export declare function duskNameLookAlike(text: unknown): { name: string; words: string } | null;
 
 /** What `profileNameCheck` says of a profile's name: refused or asked, in words, and whose name it's about. */
 export type ProfileNameCheck<P, C> =

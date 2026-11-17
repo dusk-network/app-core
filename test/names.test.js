@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { CONFUSABLES, CONFUSABLES_VERSION } from "../src/confusables.js";
-import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameSkeleton, nameStarts, passesForDuskName, profileNameCheck, profileNameClash, sameName } from "../src/names.js";
+import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, duskNameLookAlike, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameSkeleton, nameStarts, passesForDuskName, profileNameCheck, profileNameClash, sameName } from "../src/names.js";
 import { A, C } from "./fixtures/activity.js";
 import { like } from "./fixtures/helpers.js";
 
@@ -402,7 +402,9 @@ describe("a profile's name at Save", () => {
   it("asks about a contact's name it starts as, as before, and says nothing of the rest", () => {
     assert.deepEqual(check("Lucas"), { dusk: false, entry: contacts[2], kind: "contact", name: "Lucas (petit-fils)", refused: false, words: "You have a contact called Lucas (petit-fils). Is this someone else?" });
 
-    for (const name of ["Carla", "Ali", "Wen", "Profile 3", "", "dusk", ".dusk", "Dusk wallet", "x .dusk", "bob.dusky", "bob dusk"]) assert.equal(check(name), null, name);
+    for (const name of ["Carla", "Ali", "Wen", "Profile 3", "", "dusk", ".dusk", "Dusk wallet", "x. dusk", "bob.dusky", "bob dusk"]) assert.equal(check(name), null, name);
+    // A space before the point of a .dusk name is read past, as Marek's sofiadesign .dusk: asked about, as written.
+    assert.deepEqual(check("x .dusk"), { dusk: true, entry: null, kind: "dusk", name: "x .dusk", refused: false, words: "x .dusk is a .dusk name. Is it this profile's?" });
     // A contact saved with the profile's own address takes nothing from its name, by its .dusk name or its own.
     assert.equal(check("cliente.dusk"), null);
     assert.equal(check("Mi cliente"), null);
@@ -559,6 +561,34 @@ describe("a profile's name at Save", () => {
     for (const name of ["Sofía · Diseño", "Profile • 2", "dusk·", "·dusk", "Hello。"]) assert.deepEqual(nameDuskNames(name), [], name);
   });
 
+  it("reads a .dusk name with a dot above, a Braille dot or a point set apart by spaces as one: Marek's sofiadesign\u02d9dusk, sofiadesign\u2804dusk and sofiadesign\u00b7 dusk", () => {
+    // Each saved without a word in round 37, as the other points no longer were.
+    const his = [{ account: "p1", address: "s1", name: "Profile 1" }, { account: "p2", address: "s2", name: "Profile 2" }];
+    const owners = new Map([["sofiadesign.dusk", { account: "sofia" }]]);
+    const taken = { dusk: true, entry: null, kind: "dusk", name: "sofiadesign.dusk", refused: true, words: "That looks like sofiadesign.dusk, which belongs to another account. Choose another name." };
+
+    // A dot above, a Devanagari high dot, each one-dot Braille pattern, a Tibetan tsheg, a Z notation spot, Arabic
+    // and Canadian raised and baseline dots, a sesame dot, and the punctuation dots of other scripts.
+    const dots = ["\u02d9", "\u0971", "\u2801", "\u2802", "\u2804", "\u2808", "\u2810", "\u2820", "\u2840", "\u2880", "\u0f0b", "\u2981", "\u0887", "\u0888", "\u18df", "\ufe45", "\ufbb2", "\ufbb3", "\u{11049}", "\u{10af4}", "\u{11f49}"];
+
+    for (const dot of dots) {
+      for (const name of [`sofiadesign${dot}dusk`, `SofiaDesign${dot}DUSK`, `Mi cliente (sofiadesign${dot}dusk)`]) {
+        assert.deepEqual(nameDuskNames(name), ["sofiadesign.dusk"], name);
+        assert.deepEqual(profileNameCheck(name, { owners, profiles: his, self: "p2" }), taken, name);
+      }
+    }
+
+    // A space, or several, either side of a dot-like point, and before a full stop.
+    for (const name of ["sofiadesign\u00b7 dusk", "sofiadesign \u00b7dusk", "sofiadesign \u00b7 dusk", "sofiadesign\u00a0\u00b7\u2009dusk", "sofiadesign\u02d9 dusk", "sofiadesign  \u2022  dusk", "sofiadesign .dusk", "sofiadesign\u3000.dusk", "sofiadesign \uff0e dusk"]) {
+      assert.deepEqual(nameDuskNames(name), ["sofiadesign.dusk"], name);
+      assert.deepEqual(profileNameCheck(name, { owners, profiles: his, self: "p2" }), taken, name);
+      like(profileNameCheck(name, { profiles: his, self: "p2" }), { dusk: true, kind: "dusk", refused: false }, name);
+    }
+
+    // A full stop and a space after it end a sentence; and a point that isn't between a name and .dusk makes none.
+    for (const name of ["sofiadesign. dusk", "Mr. Dusk", "sofiadesign . dusk", "Sof\u00eda \u00b7 Dise\u00f1o", "Profile \u2022 2", "\u00b7 dusk", "dusk \u00b7"]) assert.deepEqual(nameDuskNames(name), [], name);
+  });
+
   it("gives the .dusk names a profile's name holds, to look up as the name service names them", () => {
     assert.deepEqual(nameDuskNames("Profile 2"), []);
     assert.deepEqual(nameDuskNames("sofiadesign.dusk y bob.dusk"), ["sofiadesign.dusk", "bob.dusk"]);
@@ -640,6 +670,15 @@ describe("a contact's name at Save", () => {
     for (const name of ["Sof\u00eda \u00b7 Dise\u00f1o", "Estudio\u2022", "dusk\u00b7"]) assert.equal(passesForDuskName(name), false, name);
   });
 
+  it("passes for a .dusk name with a dot above, a Braille dot or a point set apart by spaces: Marek's sofiadesign\u02d9dusk", () => {
+    for (const name of ["sofiadesign\u02d9dusk", "sofiadesign\u2804dusk", "sofiadesign\u2802DUSK", "sofiadesign\u00b7 dusk", "sofiadesign \u00b7dusk", "sofiadesign \u2022 dusk", "sofiadesign\u0f0bdusk"]) {
+      assert.equal(passesForDuskName(name), true, name);
+      assert.equal(passesForDuskName(name, "sofiadesign.dusk"), false, name);
+    }
+
+    for (const name of ["Mr. Dusk", "Sof\u00eda \u00b7 Dusk fan"]) assert.equal(passesForDuskName(name), false, name);
+  });
+
   // Amélie's: her grandson saved as "Lucas (petit-fils)"; the "new phone, new account" message asks her to save
   // another account as plain "Lucas". Sofía's Profile 1 is sofiadesign.dusk.
   const profiles = [
@@ -682,5 +721,34 @@ describe("a contact's name at Save", () => {
     assert.deepEqual(check("Luc\u200bas"), { dusk: false, entry: null, kind: "hides", name: "", refused: true, words: NAME_HIDES });
 
     for (const name of ["Carla", "Luc", "Wen", "Ann", "Profile 3", ""]) assert.equal(check(name), null, name);
+  });
+});
+
+describe("a recipient in Send's To", () => {
+  const says = (/** @type {string} */ name) => ({ name, words: `That looks like ${name}, but it isn't. Check it, or paste it again.` });
+
+  it("says which .dusk name it looks like where it isn't that name as written: Nandini's sofiadesign\u00b7dusk, which said only Not a valid address", () => {
+    for (const typed of [
+      "sofiadesign\u00b7dusk",
+      "sofiadesign\u02d9dusk",
+      "sofiadesign\u2804dusk",
+      "sofiadesign \u00b7 dusk",
+      "sofiadesign .dusk",
+      "sofiadesign\uff0edusk",
+      "\u0455ofiadesign.dusk",
+      "sofiadesign.\u1d05\u1d1c\ua731\u1d0b",
+      "\u{1d42c}\u{1d428}\u{1d41f}\u{1d422}\u{1d41a}\u{1d41d}\u{1d41e}\u{1d42c}\u{1d422}\u{1d420}\u{1d427}.dusk",
+      "sofia\u200bdesign.dusk",
+      " SofiaDesign\u00b7DUSK ",
+    ]) {
+      assert.deepEqual(duskNameLookAlike(typed), says("sofiadesign.dusk"), typed);
+    }
+    assert.deepEqual(duskNameLookAlike("amelie\u00b7dusk"), says("amelie.dusk"));
+  });
+
+  it("says nothing of a .dusk name as written, in any case, nor of what looks like none or like more than one", () => {
+    for (const typed of ["sofiadesign.dusk", "SofiaDesign.DUSK", " sofiadesign.dusk ", "pay.sofiadesign.dusk", A, "Sof\u00eda", "sofiadesign", "sofiadesign.dusk alice.dusk", "pay sofiadesign\u00b7dusk", "", null, undefined]) {
+      assert.equal(duskNameLookAlike(typed), null, String(typed));
+    }
   });
 });

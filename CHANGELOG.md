@@ -2,6 +2,21 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.19.0]
+
+### Added
+
+- `/names`: `duskNameLookAlike`, what Send's To says at once of a recipient that looks like a .dusk name it isn't: "That looks like sofiadesign.dusk, but it isn't. Check it, or paste it again." for "sofiadesign·dusk"
+
+### Changed
+
+- `/payment-links`: `readPastedLink` reads the whole message before a link, every line, and refuses it where any amount, network or .dusk name it states isn't the link's (`LINK_DISAGREES`): "You're asked to pay 0.012 DUSK to alice.dusk" above a link to another account
+- `/payment-links`: `readPastedLink` reads a message without what can't be seen and in the letters it looks like, and "You are asked", "Please pay" and "Pay … DUSK" as the wallets' own words: a zero-width space, a Cyrillic о or a Cyrillic К no longer lets a link for 0.15 fill in under a line saying 0.002
+- `/payment-links`: `readPastedLink` refuses a message that turns what's shown around, and an amount written in letters that look like digits, in another script's digits, as "1٠5" with an Arabic-Indic zero, with a mark over a digit, or with what can't be seen between its digits, and words before a link longer than any message the wallets write; it reads "1 234.5 DUSK" whole, and "testnet·dusk" as a name, not a network
+- `/payment-links`: `pastedDuskNames` gives every .dusk name a message gives, wherever it is, to look up
+- `/payment-links`: `readPastedLink` reads "DUSK:" before a link as a word, not a second link
+- `/names`: `nameDuskNames`, `profileNameCheck` and `passesForDuskName` read a dot above, a Braille dot and other one-dot points as a full stop, and the spaces around a point as none: "sofiadesign˙dusk", "sofiadesign⠄dusk" and "sofiadesign · dusk" are sofiadesign.dusk
+
 ## [0.18.0]
 
 ### Added
