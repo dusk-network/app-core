@@ -359,18 +359,83 @@ const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 
 // What Unicode's table reads a full stop, a middle dot and an ideographic full stop as: ".", "·" and "˳".
 const DOT_SHAPES = new Set([".", "\u00b7", "\u02f3"]);
-// A raised dot and an Arabic full stop, which it reads as nothing else, and as a hyphen.
-const DOTS_TOO = new Set(["\u2e33", "\u06d4"]);
+// The points it reads as nothing else, or as another: a raised dot and an Arabic full stop, a dot above "˙" and a
+// Devanagari high dot, each Braille pattern of one dot, as "⠄", a Tibetan tsheg, a Z notation spot, Arabic and
+// Canadian raised and baseline dots, a sesame dot, and the punctuation dots of Brahmi, Manichaean and Kawi.
+const DOTS_TOO = new Set([
+  ..."\u2e33\u06d4\u02d9\u0971\u2801\u2802\u2804\u2808\u2810\u2820\u2840\u2880\u0f0b\u0f0c\u2981\u0887\u0888\u18df\ufe45\ufbb2\ufbb3",
+  "\u{11049}",
+  "\u{10af4}",
+  "\u{11f49}",
+]);
 
 /**
  * Whether a character reads as a point between a name's labels: a full stop,
  * a middle dot or an ideographic full stop, or what Unicode's table or NFKC
- * reads as one, as "．", "·", "•", "‧", "∙", "⋅", "・", "。" and "｡", and a
- * raised dot "⸳" and an Arabic full stop "۔".
+ * reads as one, as "．", "·", "•", "‧", "∙", "⋅", "・", "。" and "｡", and the
+ * points it reads as nothing else (`DOTS_TOO`), as a raised dot "⸳", an
+ * Arabic full stop "۔", a dot above "˙" and a Braille dot "⠄".
  *
  * @param {string} char
  */
 const dotLike = (char) => DOTS_TOO.has(char) || DOT_SHAPES.has(nameSkeleton(char)) || DOT_SHAPES.has(nameSkeleton(char.normalize("NFKC")));
+
+// A space of any width, or a tab: what a reader reads past either side of a point.
+const BLANK = /^[\p{Zs}\t]$/u;
+
+// Spaces of any width, and tabs.
+const BLANKS = /[\p{Zs}\t]/gu;
+
+/**
+ * Where text's spaces either side of a point (`dotLike`) between two words
+ * are, which a reader reads past: "sofiadesign · dusk" and "sofiadesign·
+ * dusk" read as "sofiadesign·dusk". A full stop keeps a space after it, which
+ * ends a sentence, as in "Mr. Dusk", and one before it where a space follows
+ * it too; where a word follows it at once, it's read past: "sofiadesign
+ * .dusk" reads as "sofiadesign.dusk".
+ *
+ * @param {string[]} chars
+ * @returns {Set<number>} Their places in `chars`
+ */
+function blanksPast(chars) {
+  /** @type {Set<number>} */
+  const past = new Set();
+  // The last character that isn't a space.
+  let last = "";
+
+  for (let at = 0; at < chars.length; at += 1) {
+    if (!BLANK.test(chars[at])) {
+      last = chars[at];
+      continue;
+    }
+
+    let end = at;
+
+    while (end < chars.length && BLANK.test(chars[end])) end += 1;
+
+    const next = chars[end];
+    const before = last !== "" && next !== undefined && dotLike(next) && (next !== "." || (end + 1 < chars.length && !BLANK.test(chars[end + 1])));
+    const after = next !== undefined && last !== "." && last !== "" && dotLike(last);
+
+    for (let each = at; each < end && (before || after); each += 1) past.add(each);
+    at = end - 1;
+  }
+
+  return past;
+}
+
+/**
+ * Text without the spaces either side of a point a reader reads past
+ * (`blanksPast`): "sofiadesign · dusk" as "sofiadesign·dusk".
+ *
+ * @param {string} text
+ */
+function closedUp(text) {
+  const chars = Array.from(text);
+  const past = blanksPast(chars);
+
+  return chars.filter((_, at) => !past.has(at)).join("");
+}
 
 /**
  * Text with each character that reads as a point (`dotLike`) as a point:
@@ -394,22 +459,22 @@ const inDuskName = (char) => /^\p{M}$/u.test(char) || letterLike(char) || [lette
 /**
  * A name's words, parted at each character that can't be in one.
  *
- * @param {string} text
- * @param {(char: string) => boolean} inWord
+ * @param {string[]} chars
+ * @param {(char: string, at: number) => boolean} inWord
  */
-function wordsOfName(text, inWord) {
+function wordsOfName(chars, inWord) {
   /** @type {string[]} */
   const words = [];
   let word = "";
 
-  for (const char of text) {
-    if (inWord(char)) {
+  chars.forEach((char, at) => {
+    if (inWord(char, at)) {
       word += char;
     } else {
       words.push(word);
       word = "";
     }
-  }
+  });
 
   words.push(word);
 
@@ -426,19 +491,23 @@ function wordsOfName(text, inWord) {
  * middle dot or any other point (`dotLike`), "sofia.𝐃𝐔𝐒𝐊" in mathematical
  * bold, "sofia.dúsk", "sofia.clusk" or "sofia.du5k"; and each of
  * "alice.dusk,bob.dusk". A point that isn't a full stop parts words too, as
- * it did: "sofia.dusk·Diseño" holds sofia.dusk.
+ * it did: "sofia.dusk·Diseño" holds sofia.dusk. Spaces either side of a point
+ * are read past (`blanksPast`), and kept in the word, as written: "sofia ·
+ * dusk" is one.
  *
  * @param {unknown} name
  * @returns {string[]}
  */
 function duskNamesIn(name) {
-  const text = String(name ?? "").replace(INVISIBLE, "");
-  const words = [...wordsOfName(text, inDuskName), ...wordsOfName(text, (char) => inDuskName(char) || dotLike(char))];
+  const chars = Array.from(String(name ?? "").replace(INVISIBLE, ""));
+  // A space either side of a point is in the word, as written, and read past.
+  const past = blanksPast(chars);
+  const words = [...wordsOfName(chars, (char, at) => inDuskName(char) || past.has(at)), ...wordsOfName(chars, (char, at) => inDuskName(char) || dotLike(char) || past.has(at))];
 
   return [...new Set(words.map(withoutEdges))].filter((each) => {
     if (each === "") return false;
 
-    const plain = dotted(each);
+    const plain = dotted(each).replace(BLANKS, "");
     const written = nameSkeleton(plain);
 
     return (
@@ -474,7 +543,9 @@ const REGISTRABLE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.dusk$/;
  * @param {string} word As `duskNamesIn` gives it
  */
 function readingOf(word) {
-  const chars = [...dotted(lettersOf(word)).normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "")].map(plainChar);
+  // Its points as full stops before NFKC too, which reads a dot above as a space and a mark; the spaces by a point
+  // read past.
+  const chars = [...dotted(lettersOf(dotted(word.replace(BLANKS, "")))).normalize("NFD").replace(UNSEEN, "").replace(/\p{M}/gu, "")].map(plainChar);
   const point = chars.lastIndexOf(".");
   const reading = point > 0 ? `${chars.slice(0, point).join("")}.dusk` : "";
 
@@ -515,11 +586,30 @@ export function nameDuskNames(name) {
  * @returns {boolean}
  */
 export function passesForDuskName(name, duskName) {
-  // In plain letters and points, so a .dusk in small capitals or circled letters, or after a fullwidth point or a
-  // middle dot, ends it too.
-  const typed = dotted(lettersOf(String(name ?? ""))).trim().toLowerCase().replace(/\.$/, "");
+  // In plain letters and points, so a .dusk in small capitals or circled letters, or after a fullwidth point, a
+  // middle dot, a dot above or one with spaces around it, ends it too.
+  const typed = dotted(lettersOf(dotted(closedUp(String(name ?? ""))))).trim().toLowerCase().replace(/\.$/, "");
 
   return typed.endsWith(".dusk") && typed !== String(duskName ?? "").trim().toLowerCase();
+}
+
+/**
+ * @param {unknown} text
+ * @returns {{ name: string, words: string } | null}
+ */
+export function duskNameLookAlike(text) {
+  const typed = String(text ?? "").trim();
+
+  if (REGISTRABLE.test(domainOf(typed))) return null;
+
+  // One word, as a recipient is, its points' spaces read past.
+  const word = closedUp(typed.replace(INVISIBLE, ""));
+
+  if (!word || /\s/u.test(word)) return null;
+
+  const readings = [...new Set(duskWordsOf(word).map(({ reading }) => reading))];
+
+  return readings.length === 1 && readings[0] ? { name: readings[0], words: `That looks like ${readings[0]}, but it isn't. Check it, or paste it again.` } : null;
 }
 
 /**
@@ -726,3 +816,4 @@ export function lookAlikes(entries) {
 
   return found;
 }
+

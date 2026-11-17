@@ -706,6 +706,13 @@ import { passesForDuskName } from "@dusk-network/app-core/names";
 
 const passesForDusk: [boolean, boolean] = [passesForDuskName("sofiadesign.dusk"), passesForDuskName("Sofía", null)];
 void passesForDusk;
+// What Send's To says of a recipient that looks like a .dusk name it isn't.
+import { duskNameLookAlike } from "@dusk-network/app-core/names";
+
+const lookAlikeOf = duskNameLookAlike("sofiadesign·dusk");
+const lookAlikeName: string | undefined = lookAlikeOf?.name;
+const lookAlikeWords: string | undefined = lookAlikeOf?.words;
+void [lookAlikeName, lookAlikeWords, duskNameLookAlike(null)];
 
 // /recovery-words
 import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, isRecoveryWord, recoveryWordsMatch, wordSuggestions } from "@dusk-network/app-core/recovery-words";

@@ -1235,7 +1235,7 @@ describe("what's pasted in Send's To", () => {
   it("reads no network in a .dusk name, whatever its points: Astra's testnet\u00b7dusk asking on Mainnet", () => {
     const link = `${networks.mainnet.apps.wallet}/dashboard/send?to=testnet.dusk&amount=0.002&network=mainnet`;
 
-    for (const name of ["testnet\u00b7dusk", "Testnet\uff0eDUSK", "pay.testnet\u00b7dusk"]) {
+    for (const name of ["testnet\u00b7dusk", "Testnet\uff0eDUSK", "pay.testnet\u00b7dusk", "testnet \u00b7 dusk", "testnet\u02d9dusk", "testnet\u2804dusk"]) {
       const pasted = `${name} asks you to pay 0.002 DUSK\nPay here: ${link}`;
       const dusk = name.startsWith("pay") ? "pay.testnet.dusk" : "testnet.dusk";
 
