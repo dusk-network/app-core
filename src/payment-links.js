@@ -14,6 +14,7 @@ import { decodeBase58, isAccount } from "@dusk-network/networks/account";
 import { amountForField, decimalSeparator, formatDuskPlain, parseDusk, readAmount, unclearAmount } from "./amounts.js";
 import { looksAlike, nameDuskNames, sameName } from "./names.js";
 import { ownerOf } from "./owners.js";
+import { bare, lettersOf, nameSkeleton } from "./plain.js";
 import { displayText } from "./text.js";
 
 /** @typedef {import("./payment-links.js").PaymentLink} PaymentLink */
@@ -506,10 +507,19 @@ const SPACES = /[\s\u0085]+/;
 const SPACE = /^[\s\u0085]$/;
 // A line break of any kind, Windows' among them.
 const LINES = /\r\n|[\n\v\f\r\u0085\u2028\u2029]/;
-// "You're", as a request's line starts without a name, with a typographic apostrophe too.
-const YOURE = /^you['\u2019]re$/i;
+// "dusk:" with nothing after it but punctuation, as "Please pay 0.002 DUSK:" ends: a word, no link.
+const NO_LINK = /^dusk:[\p{P}\p{S}]*$/iu;
 // The isolates a line sets right-to-left words apart with (`displayText`), which a chat may drop.
 const ISOLATES = /[\u2066-\u2069]/g;
+// The overrides and embeddings, which turn what's shown around, as "200" shown as "002": the wallets' own messages
+// hold none, showing one in a name or a memo as its code (`displayText`).
+const TURNED = /[\u202a-\u202e]/;
+// What a reader reads past, as it renders as nothing: format characters, controls, and what's ignorable.
+const UNSEEN = /^[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}]$/u;
+const MARK = /^\p{M}$/u;
+const DIGIT = /^\p{Nd}$/u;
+// "You're", as a request's line starts without a name, with an apostrophe of any kind, or none.
+const YOURE = new Set(["you're", "youre"]);
 
 /**
  * Text without the spaces and line breaks of any kind at its ends.
@@ -557,7 +567,7 @@ const pasteRefused = (problem, reason) => ({ chainId: "", link: null, network: "
 function pastedParts(input, { walletUrl }) {
   const pasted = textOf(input);
   const words = pasted.split(SPACES).filter(Boolean);
-  const links = words.filter((word) => readPaymentLink(word, { walletUrl }));
+  const links = words.filter((word) => !NO_LINK.test(word) && readPaymentLink(word, { walletUrl }));
 
   // Two links, wherever they are: read whole, one would carry the other in its memo.
   if (links.length > 1) return { refused: pasteRefused(LINK_SEVERAL, "several-links") };
@@ -595,19 +605,110 @@ function withoutPayHere(text) {
 }
 
 /**
- * The words of the line of a request as both wallets share it
- * (`requestMessage`), from the words before its link: its last line, without
- * "Pay here:", in NFC and without the isolates that set right-to-left words
- * apart, which a chat may drop; null for none.
+ * A character as the plain one a reader takes it for: ASCII as it is, in
+ * lower case; another as the ASCII Unicode's table reads it as, where it
+ * reads as that alone, so a Cyrillic о is an o, a К a k and a typographic
+ * apostrophe a straight one; else as it is.
  *
- * @param {string} before
- * @returns {string[] | null}
+ * @param {string} char
  */
-function lineWords(before) {
-  const lines = withoutPayHere(withinSpaces(before)).split(LINES);
-  const words = lines[lines.length - 1].normalize("NFC").replace(ISOLATES, "").split(SPACES).filter(Boolean);
+function plainOf(char) {
+  if (/^[\x20-\x7e]$/.test(char)) return char.toLowerCase();
 
-  return words.length ? words : null;
+  const shape = bare(nameSkeleton(char));
+
+  return /^[\x21-\x7e]+$/.test(shape) ? shape : char;
+}
+
+/**
+ * A word as a reader reads it, for the wallet's words and what a message
+ * states to be told by: its styled letters as theirs, as `/names` reads them
+ * (`lettersOf`: fullwidth, mathematical, small capitals), each character as the
+ * plain one it looks like (`plainOf`), without the marks over them or what
+ * can't be seen, in lower case: "DUSК" with a Cyrillic К is "dusk", and
+ * "You're" with a zero-width space after it "you're". With where what can't
+ * be seen was, between its characters, which an amount may not hold; and for
+ * each of its characters, whether it's the one written, but for its style
+ * (NFKC, as a fullwidth or a mathematical digit), not one it looks like, as
+ * an Arabic-Indic zero is a point to Unicode's table, nor with a mark over it
+ * (`written`), and whether
+ * a digit of any script is written there (`digit`): an amount is read from
+ * the digits written, never from what they look like.
+ *
+ * @param {string} word
+ * @returns {{ text: string, unseen: number[], written: boolean[], digit: boolean[] }}
+ */
+function readAs(word) {
+  let text = "";
+  /** @type {number[]} */
+  const unseen = [];
+  /** @type {boolean[]} */
+  const written = [];
+  /** @type {boolean[]} */
+  const digit = [];
+
+  // Whether a mark came first, over nothing of the word's.
+  let marked = false;
+
+  for (const char of word) {
+    if (UNSEEN.test(char)) {
+      unseen.push(text.length);
+      continue;
+    }
+
+    for (const each of lettersOf(char).normalize("NFD")) {
+      // A mark is read past in words, but what it's over is no longer the character written: "0̣" is no 0.
+      if (MARK.test(each)) {
+        if (written.length) written[written.length - 1] = false;
+        else marked = true;
+        continue;
+      }
+
+      const plain = plainOf(each);
+
+      text += plain;
+      // Each of its UTF-16 units, as the text is read by them.
+      for (let unit = 0; unit < plain.length; unit += 1) {
+        written.push(plain === each && !marked);
+        digit.push(DIGIT.test(char));
+      }
+      marked = false;
+    }
+  }
+
+  return { digit, text, unseen, written };
+}
+
+/**
+ * @typedef {{ words: string[], said: string[], unseen: number[][], written: boolean[][], digit: boolean[][] }} Line
+ * A line's words as written, without the isolates that set right-to-left
+ * words apart; as a reader reads them (`readAs`); where what can't be seen
+ * is in each; and which of their characters are as written, and digits.
+ */
+
+/**
+ * A line's words (`Line`), without those of nothing a reader sees.
+ *
+ * @param {string} text
+ * @returns {Line}
+ */
+function lineOf(text) {
+  /** @type {Line} */
+  const line = { digit: [], said: [], unseen: [], words: [], written: [] };
+
+  for (const word of text.normalize("NFC").split(SPACES)) {
+    const read = readAs(word);
+
+    if (!read.text.trim()) continue;
+
+    line.words.push(word.replace(ISOLATES, ""));
+    line.said.push(read.text);
+    line.unseen.push(read.unseen);
+    line.written.push(read.written);
+    line.digit.push(read.digit);
+  }
+
+  return line;
 }
 
 // How many ways a line can be the wallet's own for its link: a name holding "asks you to pay … DUSK on …" makes
@@ -615,23 +716,26 @@ function lineWords(before) {
 const READINGS = 4;
 // How many words a known network's name has at most: "Testnet", "Chain 2". A longer one names no network known.
 const NAMED_WORDS = Math.max(2, ...Object.values(networks).flatMap((net) => [net.label, net.name].map((name) => String(name).trim().split(/\s+/).length)));
+// The known networks' names and labels, as a reader reads them: "mainnet", "testnet".
+const NETWORK_NAMES = [...new Set(Object.values(networks).flatMap((net) => [net.label, net.name].map((name) => String(name).trim().toLowerCase().replace(/\s+/g, " "))))];
 
 /**
- * Whether a line's words are a request's as both wallets share it, read in
- * any of the ways they can be: "<name> asks you to pay <amount> DUSK" or
- * "<name> asks you for a payment in DUSK", or "You're asked …" without a
- * name, then " on <network>" and " · <memo>" where it says them, in any case
- * and spacing. A name or a memo may hold any of those words: "Alice asks you
+ * Whether a line's words are a request's as both wallets share it, or are
+ * worded as one, read in any of the ways they can be: "<name> asks you to
+ * pay <amount> DUSK" or "<name> asks you for a payment in DUSK", "You're
+ * asked …" or "You are asked …" without a name, or "Pay <amount> DUSK" or
+ * "Please pay <amount> DUSK", then " on <network>" and " · <memo>" where it
+ * says them, in any case and spacing, as a reader reads its words
+ * (`readAs`). A name or a memo may hold any of those words: "Alice asks you
  * to pay asks you to pay 0.03 DUSK" is one, from a profile named "Alice asks
  * you to pay".
  *
- * @param {string[]} words
+ * @param {Line} line
  */
-function isSharedLine(words) {
-  const said = words.map((word) => word.toLowerCase());
+function isShaped({ said, words }) {
   const count = said.length;
   // What may follow what's asked: nothing, a network, or a memo.
-  const ends = (/** @type {number} */ at) => at >= count || said[at] === "\u00b7" || (said[at] === "on" && at + 1 < count && said[at + 1] !== "\u00b7");
+  const ends = (/** @type {number} */ at) => at >= count || words[at] === "\u00b7" || (said[at] === "on" && at + 1 < count && words[at + 1] !== "\u00b7");
   // Whether a "DUSK" at or after a word ends what's asked, for each word.
   const duskFrom = Array.from({ length: count + 2 }, () => false);
 
@@ -639,56 +743,90 @@ function isSharedLine(words) {
 
   /** @param {number} at */
   const asks = (at) => (said[at] === "to" && said[at + 1] === "pay" && duskFrom[at + 3]) || (["for", "a", "payment", "in", "dusk"].every((word, i) => said[at + i] === word) && ends(at + 5));
+  /** @param {number} at */
+  const pays = (at) => said[at] === "pay" && /\d/.test(said[at + 1] ?? "") && said[at + 2] === "dusk" && ends(at + 3);
 
-  return (YOURE.test(words[0]) && said[1] === "asked" && asks(2)) || said.some((word, at) => at > 0 && word === "asks" && said[at + 1] === "you" && asks(at + 2));
+  return (
+    (YOURE.has(said[0]) && said[1] === "asked" && asks(2)) ||
+    (said[0] === "you" && said[1] === "are" && said[2] === "asked" && asks(3)) ||
+    said.some((word, at) => at > 0 && word === "asks" && said[at + 1] === "you" && asks(at + 2)) ||
+    pays(0) ||
+    (said[0] === "please" && pays(1))
+  );
 }
 
 /**
- * The names a line's words give who asks by, read the one way that's the
- * wallet's own line for a link: its memo as the line shows it, its last
- * words; the network it's paid on, by its name, or none, before; and its
- * amount, or any amount, before that. Each name is what's before "asks you",
- * "" for "You're asked"; none where no reading says what the link does, and
+ * @typedef {[number, number]} Span Where words are in a line: from the first, up to the last
+ */
+
+/**
+ * The ways a line's words are the wallet's own line for a link, read from
+ * its end: its memo as the line shows it, its last words; the network it's
+ * paid on, by its name, or none, before; and its amount, or any amount,
+ * before that. Each reading is where its name is, before "asks you", none
+ * for "You're asked", "You are asked" and "Please pay", and where the
+ * network's name is; none where no reading says what the link does, and
  * more than `READINGS` where it can be read in more ways than the wallet's
  * own line is.
  *
- * @param {string[]} words
+ * @param {Line} line
  * @param {PaymentLink} link
  * @param {string} paidOn The chain it's paid on, "dusk:2", or ""
- * @returns {string[]}
+ * @returns {{ name: Span, net: Span }[]}
  */
-function namesSaying(words, link, paidOn) {
-  const said = words.map((word) => word.toLowerCase());
+function readingsOf(line, link, paidOn) {
+  const { said, words } = line;
   const shown = shownAs(displayText(link.memo, { isolate: true }).text);
   const memo = shown ? shown.split(" ") : [];
   const end = memo.length ? words.length - memo.length - 1 : words.length;
 
   if (end < 0 || (memo.length && (words[end] !== "\u00b7" || memo.some((word, i) => words[end + 1 + i] !== word)))) return [];
 
-  const asked = PLAIN_LUX.test(link.amountLux) ? [BigInt(link.amountLux)] : link.amountDusk ? amountsIn(link.amountDusk) : [];
-  /** @type {string[]} */
-  const names = [];
+  const asked = askedOf(link);
+  /** @type {{ name: Span, net: Span }[]} */
+  const readings = [];
 
   // Where what's asked ends: at the memo, or before " on " and a network's name, of any length, with no " · " in it.
   for (let on = end; on >= 1; on -= 1) {
-    if (on < end && said[on] === "\u00b7") break;
+    if (on < end && words[on] === "\u00b7") break;
     if ((on < end && (said[on] !== "on" || on + 1 === end)) || said[on - 1] !== "dusk") continue;
-    if (on < end && end - on - 1 <= NAMED_WORDS && otherNetwork(words.slice(on + 1, end).join(" "), paidOn)) continue;
+    if (on < end && end - on - 1 <= NAMED_WORDS && otherNetwork(said.slice(on + 1, end).join(" "), paidOn)) continue;
 
-    // "to pay <amount> DUSK", or "for a payment in DUSK", and what's before it.
-    for (const [from, amount] of /** @type {const} */ ([[on - 4, words[on - 2]], [on - 5, null]])) {
-      const asks = amount === null ? ["for", "a", "payment", "in"].every((word, i) => said[from + i] === word) : said[from] === "to" && said[from + 1] === "pay";
-      const fits = amount === null ? asked.length === 0 : sameAmount(amountsIn(amount), asked);
+    /** @type {Span} */
+    const net = on < end ? [on + 1, end] : [end, end];
+    /** @param {number} from Where "to pay" or "for a payment in" is */
+    const heads = (from) => {
+      if (from === 2 && YOURE.has(said[0]) && said[1] === "asked") readings.push({ name: [0, 0], net });
+      if (from === 3 && said[0] === "you" && said[1] === "are" && said[2] === "asked") readings.push({ name: [0, 0], net });
+      if (from >= 3 && said[from - 2] === "asks" && said[from - 1] === "you") readings.push({ name: [0, from - 2], net });
+    };
 
-      if (!asks || !fits) continue;
-      if (from === 2 && YOURE.test(words[0]) && said[1] === "asked") names.push("");
-      if (from >= 3 && said[from - 2] === "asks" && said[from - 1] === "you") names.push(words.slice(0, from - 2).join(" "));
-      if (names.length > READINGS) return names;
+    // Where its amount starts: groups of thousands parted by spaces are one amount, "1 234,5".
+    let amount = on - 2;
+
+    while (amount >= 1 && /^\d{1,3}$/.test(said[amount - 1]) && /^\d{3}(?:[.,]\d*)?$/.test(said[amount])) amount -= 1;
+
+    // "to pay <amount> DUSK", "Pay <amount> DUSK" or "Please pay <amount> DUSK"; or "for a payment in DUSK", any amount.
+    if (amount >= 1 && said[amount - 1] === "pay" && sameAmount(amountOf(line, amount, on - 1), asked)) {
+      const pay = amount - 1;
+
+      if (said[pay - 1] === "to") heads(pay - 1);
+      if (pay === 0 || (pay === 1 && said[0] === "please")) readings.push({ name: [0, 0], net });
     }
+    if (on >= 5 && ["for", "a", "payment", "in"].every((word, i) => said[on - 5 + i] === word) && asked.length === 0) heads(on - 5);
+    if (readings.length > READINGS) return readings;
   }
 
-  return names;
+  return readings;
 }
+
+/**
+ * The amounts in lux a link asks: one, two where its amount could be either
+ * (`amountsIn`), or none for any amount.
+ *
+ * @param {PaymentLink} link
+ */
+const askedOf = (link) => (PLAIN_LUX.test(link.amountLux) ? [BigInt(link.amountLux)] : link.amountDusk ? amountsIn(link.amountDusk) : []);
 
 /**
  * The amounts in lux an amount as it's written can be: one, or two where a
@@ -709,6 +847,45 @@ function amountsIn(text) {
 }
 
 /**
+ * The amounts in lux an amount a message states can be, as `amountsIn` reads
+ * it, and in groups of thousands, by a point, a comma, an apostrophe or a
+ * space, its decimals after the other mark: "1,000.5", "1.000,5", "1'000",
+ * "1 234,5"; null for one that's anything else.
+ *
+ * @param {string} text As a reader reads it (`readAs`)
+ * @returns {(bigint | null)[]}
+ */
+function amountReadings(text) {
+  if (PLAIN_AMOUNT.test(text)) return amountsIn(text);
+
+  const grouped = /^([1-9]\d{0,2})(([,.' ])\d{3}(?:\3\d{3})*)(?:([.,])(\d*))?$/.exec(text);
+
+  if (!grouped || grouped[4] === grouped[3]) return [null];
+
+  return [parseDusk(`${grouped[1]}${grouped[2].split(grouped[3]).join("")}${grouped[4] ? `.${grouped[5]}` : ""}`)];
+}
+
+/**
+ * The amounts words of a line can be, as one amount (`amountReadings`), its
+ * groups parted by spaces: null for words that hold what can't be seen
+ * between their characters, as marks or isolates set digits apart to show
+ * them turned around, or a character that isn't the one written, as an
+ * Arabic-Indic zero read as the point it looks like.
+ *
+ * @param {Line} line
+ * @param {number} from
+ * @param {number} to
+ * @returns {(bigint | null)[]}
+ */
+function amountOf(line, from, to) {
+  for (let at = from; at < to; at += 1) {
+    if (line.unseen[at].some((place) => place > 0 && place < line.said[at].length) || !line.written[at].every(Boolean)) return [null];
+  }
+
+  return amountReadings(line.said.slice(from, to).join(" "));
+}
+
+/**
  * Whether two lists of amounts (`amountsIn`) say one and the same amount, or
  * both none.
  *
@@ -716,6 +893,231 @@ function amountsIn(text) {
  * @param {(bigint | null)[]} b
  */
 const sameAmount = (a, b) => (a.length === 0 && b.length === 0) || (a.length === 1 && b.length === 1 && a[0] !== null && a[0] === b[0]);
+
+// What's part of an amount as it's written, or of a word around it.
+const NUMBERISH = /[\p{L}\p{N}.,']/u;
+// What joins a word to the one before or after it, as in a name or an address.
+const JOINED = /[\p{L}\p{N}_@/\\-]/u;
+
+/**
+ * Whether a word found in a reader's text stands alone, no part of another
+ * word, a .dusk name or an address: "testnet" in "on testnet." does, in
+ * "apps.testnet.dusk.network" it doesn't. A "dusk" may follow digits at
+ * once: "0.002dusk".
+ *
+ * @param {string} plain
+ * @param {number} start
+ * @param {number} end
+ * @param {boolean} [afterDigits]
+ */
+function alone(plain, start, end, afterDigits = false) {
+  const before = plain[start - 1] ?? " ";
+  const after = plain[end] ?? " ";
+
+  return ((!JOINED.test(before) && before !== ".") || (afterDigits && /\d/.test(before))) && !JOINED.test(after) && !(after === "." && /[\p{L}\p{N}]/u.test(plain[end + 1] ?? " "));
+}
+
+/**
+ * @typedef {{ amounts: (bigint | null)[][], chains: string[], dusk: string[] }} Stated
+ * What words state: the amounts, each as it can be read (`amountReadings`),
+ * the networks, by their chains, "2" for Testnet, and the .dusk names.
+ */
+
+/**
+ * What a line's words state (`Stated`), as a reader reads them (`readAs`):
+ * an amount before or after "DUSK", or after "pay", "send" or "transfer",
+ * "me" or "us" between or not, as "0.002 DUSK" or "Pay 0.002", in groups of
+ * thousands parted by spaces too, "1 234.5", where it starts with a digit of
+ * any script, or beside "DUSK" is all letters a digit looks like, as "lO";
+ * not a word that's a .dusk name, as "oliver2.dusk", nor one starting with
+ * another letter, as "Li". Written with such letters, as "2OO", with digits
+ * of another script, as "1٠5" with an Arabic-Indic zero, which looks like
+ * a point, or with what can't be seen between its digits, it's one that
+ * can't be read. A network by its name or label, as "Testnet", or "Chain
+ * 2". And the .dusk names, as `nameDuskNames` of `/names` reads them:
+ * "alice·dusk" is alice.dusk.
+ *
+ * @param {Line} line
+ * @param {Span} span
+ * @returns {Stated}
+ */
+function statedIn(line, [from, to]) {
+  let plain = "";
+  /** @type {number[]} */
+  const unseen = [];
+  /** @type {boolean[]} */
+  const written = [];
+  /** @type {boolean[]} */
+  const digit = [];
+  // Where each word starts in `plain`.
+  /** @type {number[]} */
+  const starts = [];
+
+  for (let at = from; at < to; at += 1) {
+    if (plain) {
+      plain += " ";
+      written.push(true);
+      digit.push(false);
+    }
+    starts.push(plain.length);
+    for (const place of line.unseen[at]) unseen.push(plain.length + place);
+    plain += line.said[at];
+    // One by one: a word may be longer than a call takes arguments.
+    for (const each of line.written[at]) written.push(each);
+    for (const each of line.digit[at]) digit.push(each);
+  }
+
+  /** @type {Stated} */
+  const stated = { amounts: [], chains: [], dusk: nameDuskNames(line.words.slice(from, to).join(" ")) };
+
+  /**
+   * An amount found at a place, with its groups of thousands parted by
+   * spaces either side of it: before, a group of one to three digits, no part
+   * of a word, before one of three; after, groups of three, the last with
+   * its decimals.
+   *
+   * @param {number} start
+   * @param {number} end
+   * @returns {[number, number]}
+   */
+  const grouped = (start, end) => {
+    let first = start;
+    let last = end;
+
+    while (/^\d{3}(?!\d)/.test(plain.slice(first, last)) && plain[first - 1] === " ") {
+      let at = first - 1;
+
+      while (at > 0 && /\d/.test(plain[at - 1])) at -= 1;
+      if (first - 1 - at < 1 || first - 1 - at > 3 || (at > 0 && NUMBERISH.test(plain[at - 1]))) break;
+      first = at;
+    }
+
+    while (/^\d{1,3}(?: \d{3})*$/.test(plain.slice(first, last)) && plain[last] === " ") {
+      let at = last + 1;
+
+      while (at < plain.length && NUMBERISH.test(plain[at])) at += 1;
+      if (!/^\d{3}(?:[.,]\d+)?[.,']*$/.test(plain.slice(last + 1, at))) break;
+      last = at;
+    }
+
+    return [first, last];
+  };
+
+  /**
+   * The amount at a place, if it's one: a word that's a .dusk name is none, and so is one that doesn't start with
+   * a digit, but beside "DUSK" one all of letters a digit looks like (`letters`).
+   *
+   * @param {number} start
+   * @param {number} end
+   * @param {boolean} [letters]
+   */
+  const amountAt = (start, end, letters = false) => {
+    const [first, stop] = grouped(start, end);
+    let last = stop;
+    let word = stop;
+
+    // Without the point or comma after it that ends a sentence.
+    while (last > first && /[.,']/.test(plain[last - 1]) && !digit[last - 1]) last -= 1;
+    while (word < plain.length && plain[word] !== " ") word += 1;
+    if (/[^\p{L}\p{N}]dusk$/u.test(plain.slice(first, word).replace(/\p{P}+$/u, ""))) return;
+
+    let lead = first;
+
+    while (lead < last && /[.,']/.test(plain[lead]) && !digit[lead]) lead += 1;
+
+    const places = Array.from({ length: last - first }, (_, i) => first + i);
+    const numeric = lead < last && (digit[lead] || /\d/.test(plain[lead]) || (letters && /[oil]/.test(plain[lead]) && places.every((at) => digit[at] || /[0-9oil.,' ]/.test(plain[at]))));
+
+    if (!numeric) return;
+
+    const text = plain.slice(first, last);
+    const readable = !unseen.some((place) => place > first && place < last) && places.every((at) => written[at]) && /^[0-9.,' ]+$/.test(text);
+
+    stated.amounts.push(readable ? amountReadings(text) : [null]);
+  };
+
+  for (const { 0: word, index } of plain.matchAll(/t?dusk/g)) {
+    if (!alone(plain, index, index + word.length, true)) continue;
+
+    let end = index;
+    let start = index + word.length;
+
+    while (end > 0 && plain[end - 1] === " ") end -= 1;
+    while (start < plain.length && /[ :=]/.test(plain[start])) start += 1;
+
+    let first = end;
+    let last = start;
+
+    while (first > 0 && NUMBERISH.test(plain[first - 1])) first -= 1;
+    while (last < plain.length && NUMBERISH.test(plain[last])) last += 1;
+
+    amountAt(first, end, true);
+    amountAt(start, last, true);
+  }
+
+  for (const { 0: words, index } of plain.matchAll(/(?:pay|send|transfer)(?: (?:me|us))? +/g)) {
+    if (index > 0 && JOINED.test(plain[index - 1])) continue;
+
+    const start = index + words.length;
+    let last = start;
+
+    while (last < plain.length && NUMBERISH.test(plain[last])) last += 1;
+
+    amountAt(start, last);
+  }
+
+  /**
+   * Whether a network's name at a place in `plain` is a label of a .dusk name, as `nameDuskNames` of `/names`
+   * reads them, with a point of any kind, or spaces around one: "testnet·dusk" names no network. It is where the
+   * words around it give a .dusk name with that label that they don't give with another word in its place.
+   *
+   * @param {number} place
+   * @param {string} label
+   */
+  const inName = (place, label) => {
+    let at = starts.length - 1;
+
+    while (at > 0 && starts[at] > place) at -= 1;
+
+    const word = from + at;
+    const around = line.words.slice(Math.max(from, word - 2), Math.min(to, word + 3));
+    const mine = word - Math.max(from, word - 2);
+    /** @param {string[]} words */
+    const named = (words) => nameDuskNames(words.join(" ")).filter((name) => name.split(".").slice(0, -1).includes(label));
+    const there = named(around);
+
+    if (!there.length) return false;
+
+    const elsewhere = named(around.map((each, i) => (i === mine ? "x" : each)));
+
+    return there.some((name) => !elsewhere.includes(name));
+  };
+
+  for (const name of NETWORK_NAMES) {
+    for (let at = plain.indexOf(name); at >= 0; at = plain.indexOf(name, at + 1)) {
+      if (alone(plain, at, at + name.length) && !inName(at, name)) stated.chains.push(chainNamed(name));
+    }
+  }
+
+  for (const { 0: words, 1: chain, index } of plain.matchAll(/chain (0|[1-9]\d{0,31})/g)) if (alone(plain, index, index + words.length)) stated.chains.push(chain);
+
+  return stated;
+}
+
+/**
+ * Whether what words state (`Stated`) agrees with a link: each amount the
+ * one it asks, and none where it asks any, and each network the one it's
+ * paid on, where that's known.
+ *
+ * @param {Stated} stated
+ * @param {(bigint | null)[]} asked `askedOf` the link
+ * @param {string} paidOn The chain it's paid on, "dusk:2", or ""
+ */
+function statedAgrees({ amounts, chains }, asked, paidOn) {
+  const chain = referenceOf(paidOn);
+
+  return amounts.every((amount) => sameAmount(amount, asked)) && chains.every((each) => chain === "" || each === chain);
+}
 
 /**
  * Text as a line of a shared request shows it, for comparing: in NFC,
@@ -756,52 +1158,115 @@ function otherNetwork(said, chainId) {
 }
 
 /**
- * Whether a line's name is another than its link's: the link's label it
- * isn't, as written or in any case, spacing or accents; a .dusk name it pays that isn't
- * among the line's; or, for an account or a shielded address it pays, the
- * .dusk names in the line as the name service says whose they are (`owners`):
- * another account's or address's of that kind, or no one's, and none of
- * them its own. A name that isn't looked up says nothing.
- *
- * @param {string} name
- * @param {PaymentLink} link
- * @param {unknown} owners
+ * @typedef {{ free: string[], lines: { name: string, dusk: string[] }[][] }} Said
+ * What a message's words say of who asks, where nothing else they say is
+ * another than its link: the .dusk names of the words that aren't a
+ * request's line, and for each request's line, each reading that agrees
+ * with the link, its name and its .dusk names.
  */
-function otherName(name, link, owners) {
-  if (!shownAs(name)) return false;
-  const label = shownAs(displayText(link.label, { isolate: true }).text);
 
-  // As written, though it has no letters or digits to compare, as an emoji's; else as the look-alike rules read it.
-  if (label && shownAs(name) !== label && !sameName(shownAs(name), label)) return true;
+/**
+ * What the words before a link in pasted text say (`Said`), read whole, line
+ * by line, as a reader reads them (`readAs`): null where they turn what's
+ * shown around (`TURNED`), or say another amount or network than the link
+ * (`statedIn`) anywhere; where a line is worded as a request's (`isShaped`),
+ * where it isn't the wallet's own for the link in any reading
+ * (`readingsOf`), its name and network's name saying nothing else than the
+ * link either, or is in more readings than `READINGS`.
+ *
+ * @param {string} before
+ * @param {PaymentLink} link
+ * @param {string} paidOn The chain it's paid on, "dusk:2", or ""
+ * @returns {Said | null}
+ */
+function messageSays(before, link, paidOn) {
+  if (TURNED.test(before)) return null;
 
-  const named = DUSK_NAME.test(link.to);
+  const asked = askedOf(link);
+  /** @type {Said} */
+  const said = { free: [], lines: [] };
 
-  // Its .dusk names say something only of a .dusk name it pays, or as the name service says whose they are.
-  if (!named && (!owners || typeof owners !== "object")) return false;
+  for (const text of withoutPayHere(withinSpaces(before)).split(LINES)) {
+    const line = lineOf(text);
 
-  const dusk = nameDuskNames(name);
+    if (!line.words.length) continue;
 
-  if (!dusk.length) return false;
-  if (named) return !dusk.includes(link.to.toLowerCase());
+    if (!isShaped(line)) {
+      const stated = statedIn(line, [0, line.words.length]);
 
-  const kind = recipientKind(link.to);
-  let other = false;
+      if (!statedAgrees(stated, asked, paidOn)) return null;
 
-  for (const each of dusk) {
-    const owner = ownerOf(owners, each);
-    // What it resolves to of the link's recipient's kind: a shielded address for a shielded one.
-    const same = owner ? [...owner].filter((id) => recipientKind(id) === kind) : [];
+      for (const dusk of stated.dusk) said.free.push(dusk);
+      continue;
+    }
 
-    if (same.includes(link.to)) return false;
+    const readings = readingsOf(line, link, paidOn);
 
-    other ||= owner === null || same.length > 0;
+    if (readings.length > READINGS) return null;
+
+    /** @type {{ name: string, dusk: string[] }[]} */
+    const agreeing = [];
+
+    for (const { name, net } of readings) {
+      const stated = [statedIn(line, name), statedIn(line, net)];
+
+      if (stated.every((each) => statedAgrees(each, asked, paidOn))) agreeing.push({ dusk: [...new Set(stated.flatMap((each) => each.dusk))], name: line.words.slice(...name).join(" ") });
+    }
+
+    if (!agreeing.length) return null;
+
+    said.lines.push(agreeing);
   }
 
-  return other;
+  return said;
 }
 
 /**
- * The link pasted text's line is checked against: the one it fills in, or
+ * Whether a request's line names another than its link's label, as written
+ * or in any case, spacing or accents (`sameName` of `/names`): a name
+ * that's none, or a link with none, says nothing.
+ *
+ * @param {string} name
+ * @param {PaymentLink} link
+ */
+function otherLabel(name, link) {
+  const said = shownAs(name);
+  const label = shownAs(displayText(link.label, { isolate: true }).text);
+
+  // As written, though it has no letters or digits to compare, as an emoji's; else as the look-alike rules read it.
+  return Boolean(said && label && said !== label && !sameName(said, label));
+}
+
+/**
+ * Whether a .dusk name a message gives is its link's recipient's: the .dusk
+ * name it pays; for an account or a shielded address it pays, as the name
+ * service says whose the name is (`owners`): not another account's or
+ * address's of that kind, nor no one's. A name not looked up, as one whose
+ * lookup failed, is held to the link's label, where it has one, and says
+ * nothing where it hasn't; nor does one with no account or address of the
+ * link's kind.
+ *
+ * @param {string} dusk
+ * @param {PaymentLink} link
+ * @param {unknown} owners
+ */
+function nameAgrees(dusk, link, owners) {
+  if (DUSK_NAME.test(link.to)) return dusk === link.to.toLowerCase();
+
+  const owner = ownerOf(owners, dusk);
+
+  if (owner === undefined) return !link.label || nameDuskNames(link.label).includes(dusk);
+  if (owner === null) return false;
+
+  const kind = recipientKind(link.to);
+  // What it resolves to of the link's recipient's kind: a shielded address for a shielded one.
+  const same = [...owner].filter((id) => recipientKind(id) === kind);
+
+  return same.length === 0 || same.includes(link.to);
+}
+
+/**
+ * The link pasted text's words are checked against: the one it fills in, or
  * one for another network, which the wallet of that network would; null for
  * one the link alone refuses.
  *
@@ -810,6 +1275,29 @@ function otherName(name, link, owners) {
  * @param {string | undefined} walletUrl
  */
 const linkSaid = (read, text, walletUrl) => read?.link ?? (read?.reason === "other-network" ? parsePaymentLink(text, { walletUrl }) : null);
+
+// How long the words before a link may be: far longer than any message the wallets write, a memo's 512 bytes
+// shown as their codes among it. Longer words aren't read, and agree with no link.
+const MAX_MESSAGE = 8192;
+
+/**
+ * What pasted text's words before its link say, as `messageSays` reads them
+ * against the link they're checked against (`linkSaid`): null for words
+ * longer than any message the wallets write (`MAX_MESSAGE`), which agree
+ * with no link; undefined for text with no link to check, or no words
+ * before it.
+ *
+ * @param {{ before: string, link: string }} parts
+ * @param {LinkRead | null} read
+ * @param {{ network?: unknown, walletUrl?: string }} options
+ */
+function pastedSays(parts, read, { network, walletUrl }) {
+  const link = linkSaid(read, parts.link, walletUrl);
+
+  if (!link || !parts.before) return undefined;
+
+  return { link, said: parts.before.length > MAX_MESSAGE ? null : messageSays(parts.before, link, link.chainId || chainIdOf(network)) };
+}
 
 /**
  * @param {unknown} input
@@ -822,13 +1310,13 @@ export function readPastedLink(input, { network, owners, walletUrl } = {}) {
   if (!parts || "refused" in parts) return parts?.refused ?? null;
 
   const read = readPaymentLink(parts.link, { network, walletUrl });
-  const words = parts.before ? lineWords(parts.before) : null;
   // What the link alone refuses, it refuses as the link alone says it; one that can be paid, here or on its own
-  // network's wallet, only where its line, if it's a request's, is the wallet's own for it: another amount, network,
-  // memo or name refuses it.
-  const link = linkSaid(read, parts.link, walletUrl);
-  const names = words && link && isSharedLine(words) ? namesSaying(words, link, link.chainId || chainIdOf(network)) : null;
-  const disagrees = names && link && (names.length > READINGS || !names.some((name) => !otherName(name, link, owners)));
+  // network's wallet, only where the words before it state no other amount, network or .dusk name, and a request's
+  // line among them is the wallet's own for it.
+  const says = pastedSays(parts, read, { network, walletUrl });
+  const agrees = (/** @type {string} */ dusk) => !says || nameAgrees(dusk, says.link, owners);
+  const disagrees =
+    says && (says.said === null || !says.said.free.every(agrees) || !says.said.lines.every((readings) => readings.some(({ dusk, name }) => !otherLabel(name, says.link) && dusk.every(agrees))));
 
   return disagrees ? pasteRefused(LINK_DISAGREES, "disagrees") : readFrom(read, parts.link);
 }
@@ -841,14 +1329,11 @@ export function readPastedLink(input, { network, owners, walletUrl } = {}) {
 export function pastedDuskNames(input, { network, walletUrl } = {}) {
   const parts = pastedParts(input, { walletUrl });
 
-  if (!parts || "refused" in parts || !parts.before) return [];
+  if (!parts || "refused" in parts) return [];
 
-  const words = lineWords(parts.before);
-  const link = linkSaid(readPaymentLink(parts.link, { network, walletUrl }), parts.link, walletUrl);
+  const said = pastedSays(parts, readPaymentLink(parts.link, { network, walletUrl }), { network, walletUrl })?.said;
 
-  const names = words && link && isSharedLine(words) ? namesSaying(words, link, link.chainId || chainIdOf(network)) : [];
-
-  return names.length > READINGS ? [] : [...new Set(names.flatMap((name) => nameDuskNames(name)))];
+  return said ? [...new Set([...said.free, ...said.lines.flat().flatMap(({ dusk }) => dusk)])] : [];
 }
 
 /**

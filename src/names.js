@@ -10,31 +10,14 @@
 
 import { shortAccount } from "@dusk-network/networks/format";
 
-import { CONFUSABLES } from "./confusables.js";
 import { ownerOf } from "./owners.js";
+import { lettersOf, nameSkeleton, plainChar } from "./plain.js";
 import { displayText } from "./text.js";
+
+export { nameSkeleton };
 
 /** @typedef {{ same: string, written: string, paired: string, lower: string, digits: string, strokes: string }} NameKeys */
 
-/** @type {Map<number, string> | null} */
-let looksLike = null;
-
-/** Unicode's table, read the first time it's needed. */
-function table() {
-  if (!looksLike) {
-    looksLike = new Map();
-
-    for (const entry of CONFUSABLES.split(";")) {
-      const [source, ...target] = entry.split(" ").map((hex) => Number.parseInt(hex, 16));
-
-      looksLike.set(source, String.fromCodePoint(...target));
-    }
-  }
-
-  return looksLike;
-}
-
-const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 // What can't be seen: what renders as nothing, and controls, which turn text
 // around or break it. A name is read without them.
 const UNSEEN = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}]/gu;
@@ -53,12 +36,6 @@ const ONE = new Set(["1", "i", "l"]);
 // What Unicode's table reads as a thin upright stroke, an i, an l or a !, as it reads a 1, an I, a | and a ¡: each
 // looks like the others, so "Davld", "Dav!d" and "Dav1d" look like "David".
 const STROKES = /[il!]/g;
-// The small capitals, as the capitals they are, which NFKC leaves as they are: "ᴅᴜꜱᴋ" is DUSK. There's no small X.
-const SMALL_CAPITALS = new Map(
-  [..."\u1d00\u0299\u1d04\u1d05\u1d07\ua730\u0262\u029c\u026a\u1d0a\u1d0b\u029f\u1d0d\u0274\u1d0f\u1d18\ua7af\u0280\ua731\u1d1b\u1d1c\u1d20\u1d21\u028f\u1d22"].map((char, i) => [char, "ABCDEFGHIJKLMNOPQRSTUVWYZ"[i]])
-);
-// The capitals white on a black circle or square, 🅓 and 🆂, A to Z, which NFKC leaves as they are too.
-const WHITE_ON_BLACK = [0x1f150, 0x1f170];
 
 /** What an app says of a name it refuses for what can't be seen in it. */
 export const NAME_HIDES = "This name has hidden characters. Type it again without them.";
@@ -71,19 +48,6 @@ export const NAME_SAVE_YES = "Yes, save it";
  * @returns {boolean}
  */
 export const nameHides = (name) => displayText(name ?? "").neutralized;
-
-/**
- * @param {unknown} name
- * @returns {string}
- */
-export function nameSkeleton(name) {
-  const map = table();
-  let shape = "";
-
-  for (const char of String(name ?? "").normalize("NFD").replace(IGNORABLE, "")) shape += map.get(/** @type {number} */ (char.codePointAt(0))) ?? char;
-
-  return shape.normalize("NFD");
-}
 
 /**
  * What's left to tell names apart once their case, accents, spaces and
@@ -102,27 +66,6 @@ const folded = (text) => text.normalize("NFD").replace(UNSEEN, "").replace(NOT_L
  * @param {string} shape A skeleton
  */
 const paired = (shape) => shape.replace(PAIRS, (char) => PAIRED[char]);
-
-/**
- * A name's letters as the plain ones they're styled as: its compatibility
- * forms as their letters (NFKC: fullwidth, mathematical, circled ⓢ, squared
- * 🄢, letterlike ℓ), its small capitals as the capitals they are (ᴅ is a D),
- * and the capitals white on black as theirs (🅓 is a D).
- *
- * @param {string} text
- */
-function lettersOf(text) {
-  let letters = "";
-
-  for (const char of text.normalize("NFKC")) {
-    const code = /** @type {number} */ (char.codePointAt(0));
-    const block = WHITE_ON_BLACK.find((first) => code >= first && code < first + 26);
-
-    letters += SMALL_CAPITALS.get(char) ?? (block === undefined ? char : String.fromCharCode(65 + code - block));
-  }
-
-  return letters;
-}
 
 /**
  * A name in plain letters (`lettersOf`) with what's written for a letter as
@@ -517,49 +460,6 @@ const domainOf = (name) => String(name ?? "").trim().replace(/[A-Z]/g, (char) =>
 
 // A .dusk name as the name service can register one, in lower case: labels of letters, digits and hyphens.
 const REGISTRABLE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.dusk$/;
-
-/**
- * A skeleton as a plain spelling compares it: without the marks over its
- * letters, in lower case.
- *
- * @param {string} shape
- */
-const bare = (shape) => shape.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-
-/** @type {Map<string, string> | null} */
-let plainBySkeleton = null;
-
-/**
- * The letter, digit, point or hyphen a skeleton is of, as Unicode's table
- * gives "rn" for an m, a letter before a digit: "o" for "O", not "0".
- *
- * @param {string} shape A character's skeleton, `bare`
- */
-function plainOf(shape) {
-  if (!plainBySkeleton) {
-    plainBySkeleton = new Map();
-
-    for (const char of "0123456789.-abcdefghijklmnopqrstuvwxyz") plainBySkeleton.set(bare(nameSkeleton(char)), char);
-  }
-
-  return plainBySkeleton.get(shape);
-}
-
-/**
- * A character as a plain one where it's written in one that looks like it:
- * ASCII as it is, in lower case; another as the letter, digit, point or
- * hyphen Unicode's table reads it as, where it reads as one, so a Cyrillic ѕ
- * is an s and what looks like an m (Unicode's "rn") an m; else as it is.
- *
- * @param {string} char
- */
-const plainChar = (char) => {
-  if (/^[\x21-\x7e]$/.test(char)) return char.toLowerCase();
-
-  const shape = bare(nameSkeleton(char));
-
-  return plainOf(shape) ?? (/^[a-z0-9.-]+$/.test(shape) ? shape : char);
-};
 
 /**
  * The .dusk name a word that reads as one reads as, in plain letters: its
