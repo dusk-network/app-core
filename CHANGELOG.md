@@ -2,6 +2,12 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `/names`: `nameDuskNames`, `profileNameCheck`, `passesForDuskName` and `duskNameLookAlike` read a ring point, a two dot leader, a black circle, a point in brackets and a dot under the letter before "dusk" as a full stop: "sofiadesign⸰dusk", "sofiadesign[.]dusk" and "sofiadesigṇdusk" are sofiadesign.dusk
+
 ## [0.19.0]
 
 ### Added

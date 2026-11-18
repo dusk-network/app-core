@@ -357,13 +357,15 @@ const plainShape = (shape) => shape.normalize("NFD").replace(UNSEEN, "").replace
 // What renders as nothing, which a name is read without; a control, as a line break, parts words.
 const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 
-// What Unicode's table reads a full stop, a middle dot and an ideographic full stop as: ".", "·" and "˳".
-const DOT_SHAPES = new Set([".", "\u00b7", "\u02f3"]);
+// What Unicode's table reads a full stop, a middle dot, an ideographic full stop and a small raised ring as: ".", "·",
+// "˳" and "°", as it reads a ring point "⸰", a ring operator "∘" and a white bullet "◦".
+const DOT_SHAPES = new Set([".", "\u00b7", "\u02f3", "\u00b0"]);
 // The points it reads as nothing else, or as another: a raised dot and an Arabic full stop, a dot above "˙" and a
 // Devanagari high dot, each Braille pattern of one dot, as "⠄", a Tibetan tsheg, a Z notation spot, Arabic and
-// Canadian raised and baseline dots, a sesame dot, and the punctuation dots of Brahmi, Manichaean and Kawi.
+// Canadian raised and baseline dots, a sesame dot, the punctuation dots of Brahmi, Manichaean and Kawi, a two dot
+// leader "‥", a stenographic full stop "⸼", and black circles, "●" and "⚫".
 const DOTS_TOO = new Set([
-  ..."\u2e33\u06d4\u02d9\u0971\u2801\u2802\u2804\u2808\u2810\u2820\u2840\u2880\u0f0b\u0f0c\u2981\u0887\u0888\u18df\ufe45\ufbb2\ufbb3",
+  ..."\u2e33\u06d4\u02d9\u0971\u2801\u2802\u2804\u2808\u2810\u2820\u2840\u2880\u0f0b\u0f0c\u2981\u0887\u0888\u18df\ufe45\ufbb2\ufbb3\u2025\u2e3c\u25cf\u26ab",
   "\u{11049}",
   "\u{10af4}",
   "\u{11f49}",
@@ -372,13 +374,68 @@ const DOTS_TOO = new Set([
 /**
  * Whether a character reads as a point between a name's labels: a full stop,
  * a middle dot or an ideographic full stop, or what Unicode's table or NFKC
- * reads as one, as "．", "·", "•", "‧", "∙", "⋅", "・", "。" and "｡", and the
- * points it reads as nothing else (`DOTS_TOO`), as a raised dot "⸳", an
- * Arabic full stop "۔", a dot above "˙" and a Braille dot "⠄".
+ * reads as one, as "．", "·", "•", "‧", "∙", "⋅", "・", "。" and "｡", a small
+ * ring, as a ring point "⸰", and the points it reads as nothing else
+ * (`DOTS_TOO`), as a raised dot "⸳", an Arabic full stop "۔", a dot above
+ * "˙", a Braille dot "⠄", a two dot leader "‥" and a black circle "●".
  *
  * @param {string} char
  */
 const dotLike = (char) => DOTS_TOO.has(char) || DOT_SHAPES.has(nameSkeleton(char)) || DOT_SHAPES.has(nameSkeleton(char.normalize("NFKC")));
+
+// A point or "dot" set in brackets, as a link is written so it doesn't open: "sofiadesign[.]dusk", "(dot)".
+const BRACKETED = /[[({][\p{Zs}\t]*(dot|[^\p{Zs}\t])[\p{Zs}\t]*[\])}]/giu;
+
+/**
+ * Text with each point or "dot" set in brackets (`BRACKETED`) as a point,
+ * a full stop unless another is given: "sofiadesign[.]dusk" and
+ * "sofiadesign(dot)dusk" as "sofiadesign.dusk".
+ *
+ * @param {string} text
+ * @param {string} [point]
+ */
+const unbracketed = (text, point = ".") => text.replace(BRACKETED, (all, inner) => (/^dot$/i.test(inner) || inner === "." || dotLike(inner) ? point : all));
+
+// A point read where none is written, as a point in brackets or a dot mark: a one dot leader, which reads as one, so
+// the word reads as a .dusk name, but isn't one as written.
+const READ_POINT = "\u2024";
+
+// The marks that put a dot or a small ring over or under a letter: a dot above or below, a dot above right, two dots
+// below, and a ring above or below.
+const DOT_MARKS = /^[\u0307\u0323\u0358\u0324\u0325\u030a]$/u;
+
+/**
+ * A word with the last dot mark over or under its letters (`DOT_MARKS`) as a
+ * point after that letter (`READ_POINT`), where no point follows it, which is
+ * where the eye puts it: "sofiadesigṇdusk", a dot below its n, as
+ * "sofiadesign.dusk", the points it ends with aside, as "alicẹdusk."; "" for
+ * a word without one, or with a point after it before those, which reads as
+ * it's written.
+ *
+ * @param {string} word
+ */
+function markedPoint(word) {
+  const chars = Array.from(word.normalize("NFD"));
+  let mark = -1;
+  // Before the points it ends with, as a sentence's full stop: "alicẹdusk." has one before "dusk".
+  let end = chars.length;
+
+  while (end > 0 && dotLike(chars[end - 1])) end -= 1;
+
+  for (let at = end - 1; at > 0 && mark < 0; at -= 1) {
+    if (dotLike(chars[at])) return "";
+    if (DOT_MARKS.test(chars[at])) mark = at;
+  }
+
+  if (mark < 0) return "";
+
+  // After the letter's other marks: the point follows the letter.
+  let after = mark + 1;
+
+  while (after < chars.length && /^\p{M}$/u.test(chars[after])) after += 1;
+
+  return [...chars.slice(0, mark), ...chars.slice(mark + 1, after), READ_POINT, ...chars.slice(after)].join("").normalize("NFC");
+}
 
 // A space of any width, or a tab: what a reader reads past either side of a point.
 const BLANK = /^[\p{Zs}\t]$/u;
@@ -493,18 +550,20 @@ function wordsOfName(chars, inWord) {
  * "alice.dusk,bob.dusk". A point that isn't a full stop parts words too, as
  * it did: "sofia.dusk·Diseño" holds sofia.dusk. Spaces either side of a point
  * are read past (`blanksPast`), and kept in the word, as written: "sofia ·
- * dusk" is one.
+ * dusk" is one. A point or "dot" in brackets is a full stop (`unbracketed`):
+ * "sofia[.]dusk" is one; and a word is read with its last dot mark as a point
+ * after its letter too (`markedPoint`): "sofiaḍusk", a dot below its a, is.
  *
  * @param {unknown} name
  * @returns {string[]}
  */
 function duskNamesIn(name) {
-  const chars = Array.from(String(name ?? "").replace(INVISIBLE, ""));
+  const chars = Array.from(unbracketed(String(name ?? "").replace(INVISIBLE, ""), READ_POINT));
   // A space either side of a point is in the word, as written, and read past.
   const past = blanksPast(chars);
-  const words = [...wordsOfName(chars, (char, at) => inDuskName(char) || past.has(at)), ...wordsOfName(chars, (char, at) => inDuskName(char) || dotLike(char) || past.has(at))];
+  const words = [...wordsOfName(chars, (char, at) => inDuskName(char) || past.has(at)), ...wordsOfName(chars, (char, at) => inDuskName(char) || dotLike(char) || past.has(at))].map(withoutEdges);
 
-  return [...new Set(words.map(withoutEdges))].filter((each) => {
+  return [...new Set([...words, ...words.map(markedPoint)])].filter((each) => {
     if (each === "") return false;
 
     const plain = dotted(each).replace(BLANKS, "");
@@ -586,11 +645,18 @@ export function nameDuskNames(name) {
  * @returns {boolean}
  */
 export function passesForDuskName(name, duskName) {
-  // In plain letters and points, so a .dusk in small capitals or circled letters, or after a fullwidth point, a
-  // middle dot, a dot above or one with spaces around it, ends it too.
-  const typed = dotted(lettersOf(dotted(closedUp(String(name ?? ""))))).trim().toLowerCase().replace(/\.$/, "");
+  // A point in brackets as one that isn't a full stop, so the spaces around it are read past: "alice [.] dusk".
+  const given = unbracketed(String(name ?? ""), READ_POINT);
+  const saved = String(duskName ?? "").trim().toLowerCase();
 
-  return typed.endsWith(".dusk") && typed !== String(duskName ?? "").trim().toLowerCase();
+  // In plain letters and points, so a .dusk in small capitals or circled letters, or after a fullwidth point, a
+  // middle dot, a dot above, a point in brackets or one with spaces around it, ends it too; and with its last dot mark
+  // as a point after its letter (`markedPoint`).
+  return [given, markedPoint(given)].some((each) => {
+    const typed = dotted(lettersOf(dotted(closedUp(each)))).trim().toLowerCase().replace(/\.$/, "");
+
+    return typed.endsWith(".dusk") && typed !== saved;
+  });
 }
 
 /**
@@ -602,8 +668,8 @@ export function duskNameLookAlike(text) {
 
   if (REGISTRABLE.test(domainOf(typed))) return null;
 
-  // One word, as a recipient is, its points' spaces read past.
-  const word = closedUp(typed.replace(INVISIBLE, ""));
+  // One word, as a recipient is, its points' spaces read past, and a point in brackets a full stop.
+  const word = closedUp(unbracketed(typed.replace(INVISIBLE, ""), READ_POINT));
 
   if (!word || /\s/u.test(word)) return null;
 

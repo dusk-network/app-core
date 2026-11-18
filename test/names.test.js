@@ -589,6 +589,41 @@ describe("a profile's name at Save", () => {
     for (const name of ["sofiadesign. dusk", "Mr. Dusk", "sofiadesign . dusk", "Sof\u00eda \u00b7 Dise\u00f1o", "Profile \u2022 2", "\u00b7 dusk", "dusk \u00b7"]) assert.deepEqual(nameDuskNames(name), [], name);
   });
 
+  it("reads a .dusk name with a ring point, a two dot leader, a black circle, a point in brackets or a dot under its last letter as one: Marek's sofiadesign\u2e30dusk, sofiadesign[.]dusk and sofiadesign\u0323dusk", () => {
+    // Each passed in a pasted request's line in round 39, in both wallets; and each a profile's name he could save.
+    const his = [{ account: "p1", address: "s1", name: "Profile 1" }, { account: "p2", address: "s2", name: "Profile 2" }];
+    const owners = new Map([["sofiadesign.dusk", { account: "sofia" }]]);
+    const taken = { dusk: true, entry: null, kind: "dusk", name: "sofiadesign.dusk", refused: true, words: "That looks like sofiadesign.dusk, which belongs to another account. Choose another name." };
+
+    for (const name of [
+      "sofiadesign\u2e30dusk",
+      "sofiadesign\u2218dusk",
+      "sofiadesign\u26acdusk",
+      "sofiadesign\u25e6dusk",
+      "sofiadesign\u2025dusk",
+      "sofiadesign\u2e3cdusk",
+      "sofiadesign\u25cfdusk",
+      "sofiadesign\u26abdusk",
+      "sofiadesign[.]dusk",
+      "sofiadesign(.)dusk",
+      "sofiadesign[dot]dusk",
+      "sofiadesign{ DOT }dusk",
+      "sofiadesign\u0323dusk",
+      "sofiadesig\u1e47dusk",
+      "sofiadesign\u0307dusk",
+      "SofiaDesign\u0323DUSK",
+      "Mi cliente (sofiadesign\u2e30dusk)",
+    ]) {
+      assert.deepEqual(nameDuskNames(name), ["sofiadesign.dusk"], name);
+      assert.deepEqual(profileNameCheck(name, { owners, profiles: his, self: "p2" }), taken, name);
+    }
+
+    // A mark over a letter elsewhere is that letter, as before, and makes no point; nor does one with a point after it.
+    for (const name of ["Ph\u1ea1m Th\u1ecb", "\u017baneta", "Zo\u00eb", "sofia\u1e0design", "x[y]dusk", "Profile [2]"]) assert.deepEqual(nameDuskNames(name), [], name);
+    assert.deepEqual(nameDuskNames("sofiadesig\u1e47.dusk"), ["sofiadesign.dusk"]);
+    assert.deepEqual(nameDuskNames("\u1ea1lice.dusk"), ["alice.dusk"]);
+  });
+
   it("gives the .dusk names a profile's name holds, to look up as the name service names them", () => {
     assert.deepEqual(nameDuskNames("Profile 2"), []);
     assert.deepEqual(nameDuskNames("sofiadesign.dusk y bob.dusk"), ["sofiadesign.dusk", "bob.dusk"]);
@@ -679,6 +714,17 @@ describe("a contact's name at Save", () => {
     for (const name of ["Mr. Dusk", "Sof\u00eda \u00b7 Dusk fan"]) assert.equal(passesForDuskName(name), false, name);
   });
 
+  it("passes for a .dusk name with a ring point, a point in brackets or a dot under its last letter: Marek's sofiadesign\u2e30dusk", () => {
+    for (const name of ["sofiadesign\u2e30dusk", "sofiadesign\u2025dusk", "sofiadesign\u25cfdusk", "sofiadesign[.]dusk", "sofiadesign(dot)dusk", "sofiadesign\u0323dusk", "sofiadesig\u1e47DUSK"]) {
+      assert.equal(passesForDuskName(name), true, name);
+      assert.equal(passesForDuskName(name, "sofiadesign.dusk"), false, name);
+    }
+
+    // Spaces around a point in brackets, and a full stop at the end, as nameDuskNames reads them.
+    for (const name of ["alice [.] dusk", "alice ( dot ) dusk", "alic\u1eb9dusk.", "alice\u2e30dusk."]) assert.equal(passesForDuskName(name), true, name);
+    for (const name of ["Ph\u1ea1m Th\u1ecb", "\u017baneta Dusk", "Profile [2]"]) assert.equal(passesForDuskName(name), false, name);
+  });
+
   // Amélie's: her grandson saved as "Lucas (petit-fils)"; the "new phone, new account" message asks her to save
   // another account as plain "Lucas". Sofía's Profile 1 is sofiadesign.dusk.
   const profiles = [
@@ -744,6 +790,12 @@ describe("a recipient in Send's To", () => {
       assert.deepEqual(duskNameLookAlike(typed), says("sofiadesign.dusk"), typed);
     }
     assert.deepEqual(duskNameLookAlike("amelie\u00b7dusk"), says("amelie.dusk"));
+  });
+
+  it("says which .dusk name it looks like with a ring point, a point in brackets or a dot under its last letter: Marek's sofiadesign\u2e30dusk", () => {
+    for (const typed of ["sofiadesign\u2e30dusk", "sofiadesign\u2025dusk", "sofiadesign\u25cfdusk", "sofiadesign[.]dusk", "sofiadesign(dot)dusk", "sofiadesign\u0323dusk", "sofiadesign [.] dusk", "sofiadesign ( . ) dusk"]) {
+      assert.deepEqual(duskNameLookAlike(typed), says("sofiadesign.dusk"), typed);
+    }
   });
 
   it("says nothing of a .dusk name as written, in any case, nor of what looks like none or like more than one", () => {
