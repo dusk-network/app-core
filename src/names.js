@@ -679,6 +679,66 @@ export function duskNameLookAlike(text) {
 }
 
 /**
+ * Text as typing compares it: without what can't be seen and the marks over
+ * its letters, in lower case, its spaces as one, and without the spaces and
+ * punctuation it ends with.
+ *
+ * @param {unknown} text
+ */
+const typedAs = (text) =>
+  String(text ?? "")
+    .normalize("NFD")
+    .replace(UNSEEN, "")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/gu, " ")
+    .replace(/[\s\p{P}]+$/u, "")
+    .trim();
+
+/**
+ * Whether text typed can mean a name: the name starts with it, whole, without
+ * their spaces, or in one of its words, as typing reads both (`typedAs`); or
+ * it looks like the name (`looksAlike`).
+ *
+ * @param {unknown} name
+ * @param {string} typed As `typedAs` gives it
+ * @param {unknown} text As it's typed
+ */
+function canMean(name, typed, text) {
+  const named = typedAs(name);
+
+  return (
+    named !== "" &&
+    (named.startsWith(typed) || named.replace(/ /g, "").startsWith(typed.replace(/ /g, "")) || named.split(/[^\p{L}\p{N}]+/u).some((word) => word.startsWith(typed)) || looksAlike(name, text))
+  );
+}
+
+/**
+ * @template {{ name?: unknown, duskName?: unknown, account?: unknown, address?: unknown }} P
+ * @template {{ name?: unknown, duskName?: unknown, address?: unknown }} C
+ * @param {unknown} typed
+ * @param {{ profiles?: ReadonlyArray<P>, contacts?: ReadonlyArray<C>, self?: unknown, limit?: number }} [among]
+ * @returns {{ profiles: P[], contacts: C[], guessDusk: boolean }}
+ */
+export function toSuggestions(typed, { contacts = [], limit = 3, profiles = [], self } = {}) {
+  const text = typedAs(typed);
+
+  if (!text) return { contacts: [], guessDusk: false, profiles: [] };
+
+  /** @param {{ name?: unknown, duskName?: unknown } | undefined} entry */
+  const means = (entry) => [entry?.name, entry?.duskName].some((name) => name !== undefined && name !== null && canMean(name, text, typed));
+  const others = othersThan({ contacts, profiles, self });
+  // Any of the person's own names, the profile it sends from among them, keeps a .dusk name from being guessed.
+  const own = profiles.some(means) || contacts.some(means);
+
+  return {
+    contacts: others.contacts.filter((contact) => String(contact?.address ?? "").trim() !== "" && means(contact)).slice(0, limit),
+    guessDusk: !own,
+    profiles: others.profiles.filter(means).slice(0, limit),
+  };
+}
+
+/**
  * Whether one name's words are the first words of the other's, either way,
  * as the look-alike rules read them.
  *

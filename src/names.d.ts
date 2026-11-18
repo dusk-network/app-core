@@ -8,7 +8,7 @@
  *
  * @example
  * ```js
- * import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, duskNameLookAlike, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameStarts, passesForDuskName, profileNameCheck, profileNameClash } from "@dusk/app-core/names";
+ * import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, duskNameLookAlike, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameStarts, passesForDuskName, profileNameCheck, profileNameClash, toSuggestions } from "@dusk/app-core/names";
  *
  * nameHides("\u202eecilA"); // true: it reads as "Alice". Refuse it, saying NAME_HIDES
  * looksAlike("Bob", "Bօb"); // true: an Armenian օ
@@ -34,6 +34,8 @@
  * passesForDuskName("sofiadesign.ᴅᴜꜱᴋ", contact.duskName); // true: a contact's name a .dusk name shows where, to refuse
  * duskNameLookAlike("sofiadesign·dusk"); // in Send's To, at once
  * // { name: "sofiadesign.dusk", words: "That looks like sofiadesign.dusk, but it isn't. Check it, or paste it again." }
+ * toSuggestions("Profile", { profiles, contacts, self }); // in Send's To, as it's typed
+ * // { profiles: [{ name: "Profile 2", … }], contacts: [], guessDusk: false }: offer them; no "Did you mean profile.dusk?"
  * lookAlikes([...profiles, ...contacts]); // the ones to show with their address
  * ```
  *
@@ -301,6 +303,26 @@ export declare function passesForDuskName(name: unknown, duskName?: unknown): bo
  * said to look like `name` too.
  */
 export declare function duskNameLookAlike(text: unknown): { name: string; words: string } | null;
+
+/**
+ * What Send's To offers for a name typed in it, the same in both wallets:
+ * first the person's own, the profiles (`profiles`, but the one it sends
+ * from, `self`, an account or an address, as `profileNameClash` takes it)
+ * and then the contacts with an address (`contacts`) that the text can
+ * mean, up to `limit` (3) of each, in their order; and whether a .dusk name
+ * may be guessed from it ("Did you mean profile.dusk?", `guessDusk`), only
+ * where the text is none of their own names: typing "Profile" offers "Your
+ * Profile 2", never profile.dusk, which would be a stranger's. Text means a
+ * name, or a profile's .dusk name, that starts with it, whole or in any of
+ * its words, in any case, spacing or accents ("prof" means "Profile 2",
+ * "sof" "Sofía Díaz", "díaz" her too), or that it looks like (`looksAlike`,
+ * "Pr0file 2"). The profile it sends from is offered nothing, but its name
+ * is still one of the person's own. Nothing for no text.
+ */
+export declare function toSuggestions<P extends { name?: unknown; duskName?: unknown; account?: unknown; address?: unknown }, C extends { name?: unknown; duskName?: unknown; address?: unknown }>(
+  typed: unknown,
+  among?: { profiles?: ReadonlyArray<P>; contacts?: ReadonlyArray<C>; self?: unknown; limit?: number }
+): { profiles: P[]; contacts: C[]; guessDusk: boolean };
 
 /** What `profileNameCheck` says of a profile's name: refused or asked, in words, and whose name it's about. */
 export type ProfileNameCheck<P, C> =

@@ -7,6 +7,7 @@ All notable changes to this package are listed here. It follows [Keep a Changelo
 ### Added
 
 - `/payment-links`: `Disagreement`, what in a pasted message isn't its link's, as `readPastedLink` gives it (`disagrees`): the part, "amount", "network", "memo", "name", "address" or "other", and what the message and the link each say of it
+- `/names`: `toSuggestions`, what Send's To offers for a name typed in it, the person's own profiles and contacts first, and whether a .dusk name may be guessed from it: "Profile" offers Profile 2, never profile.dusk
 
 ### Changed
 

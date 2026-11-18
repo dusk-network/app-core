@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { CONFUSABLES, CONFUSABLES_VERSION } from "../src/confusables.js";
-import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, duskNameLookAlike, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameSkeleton, nameStarts, passesForDuskName, profileNameCheck, profileNameClash, sameName } from "../src/names.js";
+import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, duskNameLookAlike, lookAlikes, looksAlike, nameClash, nameDuskNames, nameHides, nameSkeleton, nameStarts, passesForDuskName, profileNameCheck, profileNameClash, sameName, toSuggestions } from "../src/names.js";
 import { A, C } from "./fixtures/activity.js";
 import { like } from "./fixtures/helpers.js";
 
@@ -796,6 +796,39 @@ describe("a recipient in Send's To", () => {
     for (const typed of ["sofiadesign\u2e30dusk", "sofiadesign\u2025dusk", "sofiadesign\u25cfdusk", "sofiadesign[.]dusk", "sofiadesign(dot)dusk", "sofiadesign\u0323dusk", "sofiadesign [.] dusk", "sofiadesign ( . ) dusk"]) {
       assert.deepEqual(duskNameLookAlike(typed), says("sofiadesign.dusk"), typed);
     }
+  });
+
+  it("offers the person's own profiles and contacts before any .dusk name, and guesses none for one of their names: Sofía's Profile, which offered profile.dusk", () => {
+    // Sofía's extension: "Profile" in To said "Did you mean profile.dusk?", not her own Profile 2. Registered by
+    // anyone, it would have sent her transfer to a stranger.
+    const profiles = [
+      { account: "p1", address: "s1", name: "Profile 1" },
+      { account: "p2", address: "s2", name: "Profile 2" },
+      { account: "p3", address: "s3", duskName: "sofiadesign.dusk", name: "Ahorros" },
+    ];
+    const contacts = [
+      { address: A, name: "Sofía Díaz" },
+      { address: C, name: "Lucas (petit-fils)" },
+      { address: "", name: "Profesora Marta" },
+    ];
+    const among = { contacts, profiles, self: "p1" };
+
+    for (const typed of ["Profile", "profile", "PROF", "Profile ", "profile.", "Pr0file 2", "pro file"]) {
+      assert.deepEqual(toSuggestions(typed, among), { contacts: [], guessDusk: false, profiles: [profiles[1]] }, typed);
+    }
+    // By a word of the name, in any case or accents, or by a profile's .dusk name; a contact with no address is offered
+    // nothing, and the profile it sends from neither, but both are the person's own: nothing to guess from them.
+    assert.deepEqual(toSuggestions("sofia", among), { contacts: [contacts[0]], guessDusk: false, profiles: [profiles[2]] });
+    assert.deepEqual(toSuggestions("DIAZ", among), { contacts: [contacts[0]], guessDusk: false, profiles: [] });
+    assert.deepEqual(toSuggestions("petit", among), { contacts: [contacts[1]], guessDusk: false, profiles: [] });
+    assert.deepEqual(toSuggestions("Marta", among), { contacts: [], guessDusk: false, profiles: [] });
+    assert.deepEqual(toSuggestions("Profile 1", among), { contacts: [], guessDusk: false, profiles: [] });
+    // None of theirs: a .dusk name may be guessed.
+    for (const typed of ["alice", "bob", "Profiles2go"]) assert.deepEqual(toSuggestions(typed, among), { contacts: [], guessDusk: true, profiles: [] }, typed);
+    // Nothing typed, nothing offered; and no more than asked for.
+    for (const typed of ["", "  ", null, undefined]) assert.deepEqual(toSuggestions(typed, among), { contacts: [], guessDusk: false, profiles: [] }, String(typed));
+    assert.equal(toSuggestions("p", { profiles: Array.from({ length: 6 }, (_, i) => ({ account: `p${i}`, name: `Profile ${i}` })) }).profiles.length, 3);
+    assert.equal(toSuggestions("p", { limit: 5, profiles: Array.from({ length: 6 }, (_, i) => ({ account: `p${i}`, name: `Profile ${i}` })) }).profiles.length, 5);
   });
 
   it("says nothing of a .dusk name as written, in any case, nor of what looks like none or like more than one", () => {

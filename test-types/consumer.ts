@@ -721,6 +721,17 @@ const lookAlikeName: string | undefined = lookAlikeOf?.name;
 const lookAlikeWords: string | undefined = lookAlikeOf?.words;
 void [lookAlikeName, lookAlikeWords, duskNameLookAlike(null)];
 
+// What Send's To offers for a name typed: the person's own first, and whether a .dusk name may be guessed.
+import { toSuggestions } from "@dusk-network/app-core/names";
+
+const toOffers = toSuggestions("Profile", { contacts: [{ address: "q", id: "c1", name: "Estudio Marta" }], limit: 3, profiles: [{ account: "p", name: "Profile 2" }], self: "p1" });
+const offeredProfile: string | undefined = toOffers.profiles[0]?.account;
+const offeredContact: string | undefined = toOffers.contacts[0]?.id;
+const mayGuess: boolean = toOffers.guessDusk;
+void [offeredProfile, offeredContact, mayGuess, toSuggestions(null)];
+// @ts-expect-error a profile is offered as it's given
+void (toOffers.profiles[0]?.id satisfies string | undefined);
+
 // /recovery-words
 import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, isRecoveryWord, recoveryWordsMatch, wordSuggestions } from "@dusk-network/app-core/recovery-words";
 
