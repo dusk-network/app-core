@@ -2,6 +2,21 @@
 
 All notable changes to this package are listed here. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.20.0]
+
+### Added
+
+- `/payment-links`: `Disagreement`, what in a pasted message isn't its link's, as `readPastedLink` gives it (`disagrees`): the part, "amount", "network", "memo", "name", "address" or "other", and what the message and the link each say of it
+- `/names`: `toSuggestions`, what Send's To offers for a name typed in it, the person's own profiles and contacts first, and whether a .dusk name may be guessed from it: "Profile" offers Profile 2, never profile.dusk
+
+### Changed
+
+- `/payment-links`: `readPastedLink` says what in a message isn't its link's: "The message says 0.002 DUSK; its link asks 0.15 DUSK.", "The message says Mainnet; its link pays on Testnet.", "The message says sofiadesign.dusk; its link pays 26dtBf…xSS93z.", and `LINK_DISAGREES` only where no one part is
+- `/payment-links`: `readPastedLink` and `pastedDuskNames` read who a request's line says asks as a name: "sofiadesign . dusk asks you…", "sofiadesign. dusk" and "sofiadesign dot dusk" are sofiadesign.dusk
+- `/payment-links`: `readPastedLink` reads a number after "Total", "Amount" or "Sum" as an amount: "Total 0.15" above a request for 0.02 is refused
+- `/payment-links`: `readPastedLink` refuses a Dusk address in a message that isn't the one its link pays, as "Pay to <another account>" above a request, and reads the one it pays as no amount
+- `/names`: `nameDuskNames`, `profileNameCheck`, `passesForDuskName` and `duskNameLookAlike` read a ring point, a two dot leader, a black circle, a point in brackets and a dot under the letter before "dusk" as a full stop: "sofiadesign⸰dusk", "sofiadesign[.]dusk" and "sofiadesigṇdusk" are sofiadesign.dusk
+
 ## [0.19.0]
 
 ### Added

@@ -621,7 +621,7 @@ const linkChoices: AmountRead["choices"] = linkAmount(sendRead?.link, "pl-PL").c
 void [asSendReads, linkChoices, linkAmount(null), linkAmount(readLink)];
 
 // What's pasted in Send's To: a link alone, or a request as both wallets share it.
-import { LINK_DISAGREES, LINK_SEVERAL, LINK_UNCLEAR, pastedDuskNames, readPastedLink, type PastedLinkRead } from "@dusk-network/app-core/payment-links";
+import { LINK_DISAGREES, LINK_SEVERAL, LINK_UNCLEAR, pastedDuskNames, readPastedLink, type Disagreement, type PastedLinkRead } from "@dusk-network/app-core/payment-links";
 
 const pastedRead: PastedLinkRead | null = readPastedLink("x asks you to pay 1 DUSK\nPay here: dusk:public-x", { network: 2, walletUrl: "https://wallet.example" });
 const pastedReason: "" | "unreadable" | "two-amounts" | "other-network" | "several-links" | "words-after" | "disagrees" | undefined = pastedRead?.reason;
@@ -632,6 +632,13 @@ const unclearWords: "The words after that link may be part of it. Paste the link
 const disagreeWords: "The message and its link don't agree." = LINK_DISAGREES;
 const pastedAsRead: Omit<LinkRead, "reason"> | null = pastedRead;
 void [pastedReason, pastedLinkText, pastedFills, severalWords, unclearWords, disagreeWords, pastedAsRead, readPastedLink(null)];
+// What disagrees, where it's refused for that: which part, and what the message and the link say of it.
+const disagreement: Disagreement | undefined = pastedRead?.disagrees;
+const disagreePart: "amount" | "network" | "memo" | "name" | "address" | "other" | undefined = disagreement?.part;
+const disagreeSays: [string, string] | undefined = disagreement && [disagreement.message, disagreement.link];
+void [disagreePart, disagreeSays];
+// @ts-expect-error a part it names, no other
+void ((part: Disagreement["part"]) => part)("label");
 // Its line's .dusk names, looked up as a profile's name's are.
 const pastedNames: string[] = pastedDuskNames("sofiadesign.dusk asks you to pay 1 DUSK\nPay here: dusk:public-x", { network: 2, walletUrl: "https://wallet.example" });
 const pastedOwners = new Map<string, { account?: string; address?: string } | null>(pastedNames.map((name) => [name, null]));
@@ -713,6 +720,17 @@ const lookAlikeOf = duskNameLookAlike("sofiadesign·dusk");
 const lookAlikeName: string | undefined = lookAlikeOf?.name;
 const lookAlikeWords: string | undefined = lookAlikeOf?.words;
 void [lookAlikeName, lookAlikeWords, duskNameLookAlike(null)];
+
+// What Send's To offers for a name typed: the person's own first, and whether a .dusk name may be guessed.
+import { toSuggestions } from "@dusk-network/app-core/names";
+
+const toOffers = toSuggestions("Profile", { contacts: [{ address: "q", id: "c1", name: "Estudio Marta" }], limit: 3, profiles: [{ account: "p", name: "Profile 2" }], self: "p1" });
+const offeredProfile: string | undefined = toOffers.profiles[0]?.account;
+const offeredContact: string | undefined = toOffers.contacts[0]?.id;
+const mayGuess: boolean = toOffers.guessDusk;
+void [offeredProfile, offeredContact, mayGuess, toSuggestions(null)];
+// @ts-expect-error a profile is offered as it's given
+void (toOffers.profiles[0]?.id satisfies string | undefined);
 
 // /recovery-words
 import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, isRecoveryWord, recoveryWordsMatch, wordSuggestions } from "@dusk-network/app-core/recovery-words";
