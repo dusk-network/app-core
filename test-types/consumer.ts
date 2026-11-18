@@ -621,7 +621,7 @@ const linkChoices: AmountRead["choices"] = linkAmount(sendRead?.link, "pl-PL").c
 void [asSendReads, linkChoices, linkAmount(null), linkAmount(readLink)];
 
 // What's pasted in Send's To: a link alone, or a request as both wallets share it.
-import { LINK_DISAGREES, LINK_SEVERAL, LINK_UNCLEAR, pastedDuskNames, readPastedLink, type PastedLinkRead } from "@dusk-network/app-core/payment-links";
+import { LINK_DISAGREES, LINK_SEVERAL, LINK_UNCLEAR, pastedDuskNames, readPastedLink, type Disagreement, type PastedLinkRead } from "@dusk-network/app-core/payment-links";
 
 const pastedRead: PastedLinkRead | null = readPastedLink("x asks you to pay 1 DUSK\nPay here: dusk:public-x", { network: 2, walletUrl: "https://wallet.example" });
 const pastedReason: "" | "unreadable" | "two-amounts" | "other-network" | "several-links" | "words-after" | "disagrees" | undefined = pastedRead?.reason;
@@ -632,6 +632,13 @@ const unclearWords: "The words after that link may be part of it. Paste the link
 const disagreeWords: "The message and its link don't agree." = LINK_DISAGREES;
 const pastedAsRead: Omit<LinkRead, "reason"> | null = pastedRead;
 void [pastedReason, pastedLinkText, pastedFills, severalWords, unclearWords, disagreeWords, pastedAsRead, readPastedLink(null)];
+// What disagrees, where it's refused for that: which part, and what the message and the link say of it.
+const disagreement: Disagreement | undefined = pastedRead?.disagrees;
+const disagreePart: "amount" | "network" | "memo" | "name" | "address" | "other" | undefined = disagreement?.part;
+const disagreeSays: [string, string] | undefined = disagreement && [disagreement.message, disagreement.link];
+void [disagreePart, disagreeSays];
+// @ts-expect-error a part it names, no other
+void ((part: Disagreement["part"]) => part)("label");
 // Its line's .dusk names, looked up as a profile's name's are.
 const pastedNames: string[] = pastedDuskNames("sofiadesign.dusk asks you to pay 1 DUSK\nPay here: dusk:public-x", { network: 2, walletUrl: "https://wallet.example" });
 const pastedOwners = new Map<string, { account?: string; address?: string } | null>(pastedNames.map((name) => [name, null]));

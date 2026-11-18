@@ -198,8 +198,44 @@ export declare const LINK_SEVERAL: "That has more than one payment link. Paste j
 /** "The words after that link may be part of it. Paste the link alone.": pasted text with words after its link, as `readPastedLink` refuses it. */
 export declare const LINK_UNCLEAR: "The words after that link may be part of it. Paste the link alone.";
 
-/** "The message and its link don't agree.": a message whose words say what its link doesn't, as `readPastedLink` refuses it. */
+/** "The message and its link don't agree.": what `readPastedLink` says of a message whose words say what its link doesn't where no one part does (`Disagreement` "other"). */
 export declare const LINK_DISAGREES: "The message and its link don't agree.";
+
+/**
+ * What in a pasted message isn't its link's, as `readPastedLink` refuses it,
+ * with the message's and the link's, each as given, what can't be seen as
+ * its codes (`displayText`), for a wallet that shows more than its words.
+ */
+export type Disagreement = {
+  /**
+   * "amount": an amount the message states, or none, as "for a payment in
+   * DUSK", that isn't the one the link asks; "network": a network it names
+   * that isn't the one the link pays on; "memo": a request's line's memo that
+   * isn't the link's; "name": who a request's line says asks, which isn't
+   * the link's label, or a .dusk name it gives that isn't who the link pays,
+   * as the name service says (`owners`); "address": a Dusk address it gives,
+   * a public account or a shielded address, that isn't the one the link
+   * pays; "other": no one part, as a message that turns what's shown around,
+   * one longer than any the wallets write, or a request's line that isn't
+   * the wallet's own for its link in some other way.
+   */
+  part: "amount" | "network" | "memo" | "name" | "address" | "other";
+  /**
+   * What the message says: an amount as it's written, " DUSK" after it where
+   * it's beside "DUSK" ("0.002 DUSK", or "0.15" for "Total 0.15"); a
+   * network's name ("Mainnet"); a memo; who asks, or the .dusk name, as it
+   * reads ("sofiadesign.dusk" for "sofiadesign . dusk"); an address whole;
+   * "" for none, as no amount or memo, and for "other".
+   */
+  message: string;
+  /**
+   * What its link says of it: the amount it asks ("0.15 DUSK"), the network
+   * it pays on ("Testnet"), its memo, its label where who asks or a name not
+   * looked up is held to that, else who it pays, a .dusk name or an address
+   * whole; "" for none, and for "other".
+   */
+  link: string;
+};
 
 /** What's pasted in Send's To as Send reads it: a link as `readPaymentLink` reads it, or why the text fills in nothing. */
 export type PastedLinkRead = Omit<LinkRead, "reason"> & {
@@ -207,12 +243,14 @@ export type PastedLinkRead = Omit<LinkRead, "reason"> & {
    * As `readPaymentLink`'s, and "several-links": the text has more than one
    * payment link (`LINK_SEVERAL`); "words-after": words after its link may
    * be part of it (`LINK_UNCLEAR`); "disagrees": it's a message whose words
-   * say what its link doesn't (`LINK_DISAGREES`). For
+   * say what its link doesn't, `problem` saying what (`disagrees`). For
    * those three, `link` is null, and `chainId`, `network` and `text` are "".
    */
   reason: LinkRead["reason"] | "several-links" | "words-after" | "disagrees";
   /** The link read, as it's written in what was pasted: its last word. */
   text: string;
+  /** Where `reason` is "disagrees", and only there: what isn't the link's, `problem` saying it. */
+  disagrees?: Disagreement;
 };
 
 /**
@@ -236,10 +274,20 @@ export type PastedLinkRead = Omit<LinkRead, "reason"> & {
  * they look like, by Unicode's confusables, as `/names` reads names, so
  * "DUSК" with a Cyrillic К, "tо pay" with a Cyrillic о, fullwidth letters
  * and small capitals read as a person takes them. They're refused
- * (`LINK_DISAGREES`) where they state another amount, network or .dusk name
- * than the link, anywhere:
- * - an amount before or after "DUSK", or after "pay", "send" or "transfer",
- *   "me" or "us" between or not, that isn't the amount the link asks, read
+ * (`reason` "disagrees") where they state another amount, network, .dusk
+ * name or address than the link, anywhere, saying which and what each says
+ * (`disagrees`), in `problem`: "The message says 0.002 DUSK; its link asks
+ * 0.15 DUSK.", "The message says Mainnet; its link pays on Testnet.", "The
+ * message says sofiadesign.dusk; its link pays 26dtBf…xSS93z.", where an
+ * amount reads two ways, "The message says 1.000 DUSK, which could be 1 or
+ * 1000 DUSK; its link asks 1 DUSK. Ask for the amount written one way.", or
+ * `LINK_DISAGREES` where no one part is another's:
+ * - an amount before or after "DUSK", after "pay", "send" or "transfer",
+ *   "me" or "us" between or not, or after "Total", "Subtotal", "Amount" or
+ *   "Sum", "due" or "to pay" after it or not, and a colon, an equals sign or
+ *   a space, where no word follows it, as "Total 0.15" ("Total 2 coffees"
+ *   and "Total 15 EUR" count or price something else), that isn't the
+ *   amount the link asks, read
  *   in either decimal mark or in groups of thousands, by a point, a comma,
  *   an apostrophe or a space of any width ("1 234.5"), or any amount where
  *   the link asks none. An amount is read from the digits written, NFKC
@@ -249,8 +297,10 @@ export type PastedLinkRead = Omit<LinkRead, "reason"> & {
  *   Arabic-Indic zero, which looks like a point, one with a mark over a
  *   digit, as "0̣002", and one with what can't be seen between its digits,
  *   which can show it turned around, are none. A
- *   word that starts with another letter, as "Li", or is a .dusk name, as
- *   "oliver2.dusk", is no amount;
+ *   word that starts with another letter, as "Li", is a .dusk name, as
+ *   "oliver2.dusk", or an address's characters, is no amount, though an
+ *   amount beside one in a word is ("Pay 0.15,<address>"); digits of
+ *   another script after "Total" are an amount that can't be read;
  * - a network, by a known network's name or label, as "Testnet", or as
  *   "Chain 2", that isn't the one it's paid on: the link's, or for a link
  *   that names none, the wallet's (`network`); a label of a .dusk name, as
@@ -262,7 +312,19 @@ export type PastedLinkRead = Omit<LinkRead, "reason"> & {
  *   takes them, by the names `pastedDuskNames` gives): registered to another
  *   account or shielded address of the kind the link pays, or to no one. One
  *   not looked up, as one whose lookup failed, says nothing, or where the
- *   link has a label, must be among the label's.
+ *   link has a label, must be among the label's. Who asks, before "asks
+ *   you" in a request's line, is read as a name, which holds no sentence: a
+ *   full stop with spaces around it or after it, or "dot" between two
+ *   words, is a point there, so "sofiadesign . dusk asks you…",
+ *   "sofiadesign. dusk" and "sofiadesign dot dusk" give sofiadesign.dusk, as
+ *   a link's label is read too, and the names as written are kept
+ *   ("sofiadesign.dusk. Studio" gives sofiadesign.dusk), as
+ *   "sofiadesign[.]dusk", "sofiadesign⸰dusk" with a ring point and
+ *   "sofiadesigṇdusk" with a dot below its n do anywhere;
+ * - a Dusk address, a public account or a shielded address, in letters
+ *   that look like its own or with what can't be seen in it too, that isn't
+ *   the one the link pays, or for a .dusk name it pays, isn't one the name
+ *   service says is that name's (`owners`), where it says whose it is.
  * Text holding an override or an embedding (U+202A to U+202E), which turns
  * what's shown around, "200" shown as "002", is refused too: the wallets'
  * own messages show one as its code (`displayText`). So are words before
@@ -303,8 +365,11 @@ export declare function readPastedLink(input: unknown, options?: { network?: unk
  * `readPastedLink` reads the text (`owners`): "sofiadesign.dusk asks you to
  * pay…", "You're asked to pay 0.012 DUSK to alice.dusk…" or "alice.dusk:"
  * before it, "sofiadesign·dusk" with a middle dot or "ѕofiadesign.dusk"
- * with a Cyrillic ѕ among them, as "sofiadesign.dusk"; not those in a
- * request's memo, which is its link's. None for text without a link, for
+ * with a Cyrillic ѕ among them, as "sofiadesign.dusk", and who asks read as
+ * a name, "sofiadesign . dusk asks you…" too; not those in a request's
+ * memo, which is its link's. With them, the .dusk name the link pays, where
+ * the words give a Dusk address, to say whether it's that name's. None for
+ * text without a link, for
  * text `readPastedLink` refuses for its links or for another amount, memo or
  * network, and for words naming none. `network` and `walletUrl` are
  * `readPastedLink`'s.

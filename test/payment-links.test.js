@@ -815,6 +815,26 @@ describe("what's pasted in Send's To", () => {
   const shared = (link, name = "sofiadesign.dusk") => requestMessage({ language: "en", link, lux: 30_000_000n, memo: "Factura 71", name, network: "Testnet" });
   /** @param {string} problem @param {string} reason */
   const refused = (problem, reason) => ({ chainId: "", link: null, network: "", problem, reason, text: "" });
+  /**
+   * That pasted text is refused as a message whose words say what its link doesn't, saying what: which part, as the
+   * message and the link say it, in words of its own, or LINK_DISAGREES where it's no one part; and `expected` of it.
+   *
+   * @param {import("../src/payment-links.js").PastedLinkRead | null} read
+   * @param {string} [message]
+   * @param {Partial<import("../src/payment-links.js").Disagreement> & { problem?: string }} [expected]
+   */
+  const disagrees = (read, message, { problem, ...expected } = {}) => {
+    like(read, { chainId: "", link: null, network: "", reason: "disagrees", text: "" }, message);
+
+    const what = /** @type {import("../src/payment-links.js").Disagreement} */ (read?.disagrees);
+
+    assert.deepEqual(Object.keys(what).sort(), ["link", "message", "part"], message);
+    assert.ok(["amount", "network", "memo", "name", "address", "other"].includes(what.part), message);
+    assert.equal(read?.problem === LINK_DISAGREES, what.part === "other", message);
+    assert.match(String(read?.problem), /^The message[ ']/, message);
+    like(what, expected, message);
+    if (problem !== undefined) assert.equal(read?.problem, problem, message);
+  };
 
   it("takes the one link out of a request as both wallets share it, its line break there or dropped, as a phone's field drops it", () => {
     for (const link of [httpsLink, duskLink]) {
@@ -862,20 +882,20 @@ describe("what's pasted in Send's To", () => {
     ]) {
       // Its line break there, dropped as a phone's one-line field drops it, a space, or Windows' line ends.
       for (const each of [pasted, pasted.replace("\n", ""), pasted.replace("\n", " "), pasted.replace(/\n/g, "\r\n"), `Hi Marek,\n${pasted}`, pasted.replace("Pay here: ", "")]) {
-        assert.deepEqual(readPastedLink(each, { network: 2 }), refused(LINK_DISAGREES, "disagrees"), JSON.stringify(each));
+        disagrees(readPastedLink(each, { network: 2 }), JSON.stringify(each));
       }
     }
 
     // A link that names no network is paid on the wallet's: a line naming another is refused there, and only there.
     const anywhere = t2.replace(link, `dusk:public-${A}?amount=0.002&memo=r35+marek+T2`);
 
-    assert.deepEqual(readPastedLink(anywhere, { network: 1 }), refused(LINK_DISAGREES, "disagrees"));
+    disagrees(readPastedLink(anywhere, { network: 1 }));
     like(readPastedLink(anywhere, { network: 2 })?.link, { amountDusk: "0.002", memo: "r35 marek T2", to: A });
 
     // A line on a link for another network that doesn't agree is refused for that first: no other wallet is offered it.
     const mainnet = /** @type {string} */ (makePaymentLink({ amount: "0.15", memo: "Factura 71", network: 1, to: A }).https);
 
-    assert.deepEqual(readPastedLink(requestMessage({ link: mainnet, lux: 2_000_000n, memo: "Factura 71" }), { network: 2 }), refused(LINK_DISAGREES, "disagrees"));
+    disagrees(readPastedLink(requestMessage({ link: mainnet, lux: 2_000_000n, memo: "Factura 71" }), { network: 2 }));
     // What a link alone refuses, it refuses as the link alone says it, line or not.
     like(readPastedLink(t2.replace("amount=0.002", "amount=0.002%23"), { network: 2 }), { problem: LINK_BAD_AMOUNT, reason: "unreadable" });
   });
@@ -909,7 +929,7 @@ describe("what's pasted in Send's To", () => {
       like(readPastedLink(`${said}\n${httpsLink}`, { network: 2 })?.link, filled, said);
     }
     for (const said of ["0.001 DUSK please", "Marek asks you to pay 0.001 DUSK for coffee", "Pay 0.001 for coffee", "Send me 3 DUSK", "Pay 30k DUSK", "DUSK 1,000.5"]) {
-      assert.deepEqual(readPastedLink(`${said}\n${httpsLink}`, { network: 2 }), refused(LINK_DISAGREES, "disagrees"), said);
+      disagrees(readPastedLink(`${said}\n${httpsLink}`, { network: 2 }), said);
     }
   });
 
@@ -925,7 +945,7 @@ describe("what's pasted in Send's To", () => {
           const changed = lux ? message.replace("amount=0.03", "amount=0.15") : message.replace(`?to=${A}`, `?to=${A}&amount=0.15`);
 
           like(readPastedLink(message, { network: 2 }), { problem: "", reason: "", text: link }, JSON.stringify(message));
-          assert.deepEqual(readPastedLink(changed, { network: 2 }), refused(LINK_DISAGREES, "disagrees"), JSON.stringify(changed));
+          disagrees(readPastedLink(changed, { network: 2 }), JSON.stringify(changed));
         }
       }
     }
@@ -934,7 +954,7 @@ describe("what's pasted in Send's To", () => {
     for (const name of ["Bob asks you to pay 5 DUSK on Mainnet · x", "Bob, 5 DUSK", "Bob on Mainnet"]) {
       const message = requestMessage({ language: "en", link: httpsLink, lux: 30_000_000n, memo: "Factura 71", name, network: "Testnet" });
 
-      assert.deepEqual(readPastedLink(message, { network: 2 }), refused(LINK_DISAGREES, "disagrees"), name);
+      disagrees(readPastedLink(message, { network: 2 }), name);
     }
   });
 
@@ -946,7 +966,7 @@ describe("what's pasted in Send's To", () => {
       const pasted = t2.replace("Pay here:", marker);
 
       like(readPastedLink(pasted, { network: 2 }), { problem: "", reason: "", text: link }, JSON.stringify(pasted));
-      assert.deepEqual(readPastedLink(pasted.replace("amount=0.002", "amount=0.15"), { network: 2 }), refused(LINK_DISAGREES, "disagrees"), JSON.stringify(pasted));
+      disagrees(readPastedLink(pasted.replace("amount=0.002", "amount=0.15"), { network: 2 }), JSON.stringify(pasted));
       assert.deepEqual(pastedDuskNames(pasted, { network: 2 }), ["sofiadesign.dusk"], JSON.stringify(pasted));
     }
   });
@@ -958,7 +978,7 @@ describe("what's pasted in Send's To", () => {
       const message = requestMessage({ language: "en", link, lux: 30_000_000n, memo: "Factura 71", name: "Chen", network });
 
       like(readPastedLink(message, { network: 42 })?.link, filled, network);
-      assert.deepEqual(readPastedLink(message.replace("amount=0.03", "amount=0.15"), { network: 42 }), refused(LINK_DISAGREES, "disagrees"), network);
+      disagrees(readPastedLink(message.replace("amount=0.03", "amount=0.15"), { network: 42 }), network);
     }
 
     // A name may say the request again, network and all, and the line still reads as the wallet's own; one that can
@@ -966,7 +986,7 @@ describe("what's pasted in Send's To", () => {
     const echo = requestMessage({ language: "en", link: httpsLink, lux: 30_000_000n, memo: "Factura 71", name: "Bob asks you to pay 0.03 DUSK on Testnet", network: "Testnet" });
 
     like(readPastedLink(echo, { network: 2 })?.link, filled);
-    assert.deepEqual(readPastedLink(`${"x asks you to pay 0.03 DUSK on ".repeat(2500)}Testnet \u00b7 Factura 71\nPay here: ${httpsLink}`, { network: 2 }), refused(LINK_DISAGREES, "disagrees"));
+    disagrees(readPastedLink(`${"x asks you to pay 0.03 DUSK on ".repeat(2500)}Testnet \u00b7 Factura 71\nPay here: ${httpsLink}`, { network: 2 }));
     assert.deepEqual(pastedDuskNames(`sofiadesign.dusk ${"x asks you to pay 0.03 DUSK on ".repeat(2500)}Testnet \u00b7 Factura 71\nPay here: ${httpsLink}`, { network: 2 }), []);
   });
 
@@ -976,7 +996,7 @@ describe("what's pasted in Send's To", () => {
     for (const network of ["Chain 2", "chain 2", "TESTNET", "testnet"]) like(readPastedLink(`${line(network)}${httpsLink}`, { network: 2 })?.link, filled, network);
     like(readPastedLink(`${line("Local")}dusk:public-${A}@dusk:0?amount=0.03&memo=Factura+71`, { network: 0 })?.link, filled);
     like(readPastedLink(`${line("Chain 0")}dusk:public-${A}@dusk:0?amount=0.03&memo=Factura+71`, { network: 0 })?.link, filled);
-    for (const network of ["Chain 1", "Mainnet", "Chain 3", "Devnet", "Local"]) assert.deepEqual(readPastedLink(`${line(network)}${httpsLink}`, { network: 2 }), refused(LINK_DISAGREES, "disagrees"), network);
+    for (const network of ["Chain 1", "Mainnet", "Chain 3", "Devnet", "Local"]) disagrees(readPastedLink(`${line(network)}${httpsLink}`, { network: 2 }), network);
   });
 
   it("takes a name that is the link's label as written, though it has no letters to compare: Astra's \ud83d\udc99", () => {
@@ -985,24 +1005,23 @@ describe("what's pasted in Send's To", () => {
     for (const name of ["\ud83d\udc99", "\u2764\ufe0f", "\u2605 \u2605", "\u0639\u0644\u064a"]) {
       like(readPastedLink(requestMessage({ language: "en", link: labelled(name), lux: 30_000_000n, memo: "Factura 71", name, network: "Testnet" }), { network: 2 })?.link, filled, name);
     }
-    assert.deepEqual(readPastedLink(requestMessage({ language: "en", link: labelled("\ud83d\udc99"), lux: 30_000_000n, memo: "Factura 71", name: "\ud83d\udc9a", network: "Testnet" }), { network: 2 }), refused(LINK_DISAGREES, "disagrees"));
+    disagrees(readPastedLink(requestMessage({ language: "en", link: labelled("\ud83d\udc99"), lux: 30_000_000n, memo: "Factura 71", name: "\ud83d\udc9a", network: "Testnet" }), { network: 2 }));
   });
 
   it("refuses a request as shared whose line names someone else than its link does: by its label, its .dusk name, or as the name service says", () => {
     const line = (/** @type {string} */ name) => `${name} asks you to pay 0.03 DUSK on Testnet · Factura 71\nPay here: `;
     const labelled = `${httpsLink.replace("&network=", "&label=Sof%C3%ADa+Design&network=")}`;
     const named = `${testnetSend}?to=sofiadesign.dusk&amount=0.03&memo=Factura+71&network=testnet`;
-    const disagree = refused(LINK_DISAGREES, "disagrees");
 
     // The name a link gives, its label: in any case or spacing, and in no other.
     like(readPastedLink(`${line("Sofía Design")}${labelled}`, { network: 2 })?.link, filled);
     like(readPastedLink(`${line("sofia  design")}${labelled}`, { network: 2 })?.link, filled);
-    assert.deepEqual(readPastedLink(`${line("Marek")}${labelled}`, { network: 2 }), disagree);
+    disagrees(readPastedLink(`${line("Marek")}${labelled}`, { network: 2 }));
     // A .dusk name it pays: the line's .dusk name is it, or there's none to say otherwise.
     like(readPastedLink(`${line("sofiadesign.dusk")}${named}`, { network: 2 })?.link, { to: "sofiadesign.dusk" });
     like(readPastedLink(`${line("Sofía")}${named}`, { network: 2 })?.link, { to: "sofiadesign.dusk" });
-    assert.deepEqual(readPastedLink(`${line("alice.dusk")}${named}`, { network: 2 }), disagree);
-    assert.deepEqual(readPastedLink(`${line("alice·dusk")}${named}`, { network: 2 }), disagree);
+    disagrees(readPastedLink(`${line("alice.dusk")}${named}`, { network: 2 }));
+    disagrees(readPastedLink(`${line("alice·dusk")}${named}`, { network: 2 }));
 
     // An address it pays: the .dusk name the line gives, as the name service says whose it is (`owners`).
     const shared = `${line("sofiadesign.dusk")}${httpsLink}`;
@@ -1013,14 +1032,14 @@ describe("what's pasted in Send's To", () => {
       like(readPastedLink(shared, { network: 2, owners: new Map([["sofiadesign.dusk", owner]]) })?.link, filled, JSON.stringify(owner));
     }
     for (const owner of [{ account: B }, B, { account: B, address: SHIELDED }, null]) {
-      assert.deepEqual(readPastedLink(shared, { network: 2, owners: new Map([["sofiadesign.dusk", owner]]) }), disagree, JSON.stringify(owner));
-      assert.deepEqual(readPastedLink(shared, { network: 2, owners: { "sofiadesign.dusk": owner } }), disagree, JSON.stringify(owner));
+      disagrees(readPastedLink(shared, { network: 2, owners: new Map([["sofiadesign.dusk", owner]]) }), JSON.stringify(owner));
+      disagrees(readPastedLink(shared, { network: 2, owners: { "sofiadesign.dusk": owner } }), JSON.stringify(owner));
     }
     // Not looked up, or a lookup that failed: nothing to say otherwise.
     for (const owners of [undefined, new Map(), new Map([["alice.dusk", { account: B }]])]) like(readPastedLink(shared, { network: 2, owners })?.link, filled);
     // A name in look-alike letters or points is looked up as it reads.
     assert.deepEqual(pastedDuskNames(`${line("ѕofiadesign·dusk")}${httpsLink}`), ["sofiadesign.dusk"]);
-    assert.deepEqual(readPastedLink(`${line("ѕofiadesign·dusk")}${httpsLink}`, { network: 2, owners: new Map([["sofiadesign.dusk", { account: B }]]) }), disagree);
+    disagrees(readPastedLink(`${line("ѕofiadesign·dusk")}${httpsLink}`, { network: 2, owners: new Map([["sofiadesign.dusk", { account: B }]]) }));
 
     // A shielded address it pays, against the name's shielded address where the name service has one.
     const toShielded = /** @type {string} */ (makePaymentLink({ amount: "0.03", memo: "Factura 71", network: 2, to: SHIELDED }).https);
@@ -1028,25 +1047,25 @@ describe("what's pasted in Send's To", () => {
 
     like(hers({ account: A, address: SHIELDED })?.link, { to: SHIELDED });
     like(hers({ account: A })?.link, { to: SHIELDED });
-    assert.deepEqual(hers({ account: A, address: OTHER }), disagree);
+    disagrees(hers({ account: A, address: OTHER }));
 
     // Every .dusk name it states must be the link's recipient's: one of two that's another's refuses it.
     const both = `${line("sofiadesign.dusk alice.dusk")}${httpsLink}`;
 
     assert.deepEqual(pastedDuskNames(both), ["sofiadesign.dusk", "alice.dusk"]);
-    assert.deepEqual(readPastedLink(both, { network: 2, owners: new Map([["sofiadesign.dusk", { account: A }], ["alice.dusk", { account: B }]]) }), disagree);
+    disagrees(readPastedLink(both, { network: 2, owners: new Map([["sofiadesign.dusk", { account: A }], ["alice.dusk", { account: B }]]) }));
     like(readPastedLink(both, { network: 2, owners: new Map([["sofiadesign.dusk", { account: A }], ["alice.dusk", { account: A }]]) })?.link, filled);
 
     // One not looked up is held to the link's label, where it has one.
     const labelledLink = labelled.replace("Sof%C3%ADa+Design", "sofiadesign.dusk");
 
     like(readPastedLink(`${line("sofiadesign.dusk")}${labelledLink}`, { network: 2 })?.link, filled);
-    assert.deepEqual(readPastedLink(`sofiadesign.dusk: ${labelled}`, { network: 2 }), disagree);
-    assert.deepEqual(readPastedLink(`alice.dusk: ${labelledLink}`, { network: 2 }), disagree);
+    disagrees(readPastedLink(`sofiadesign.dusk: ${labelled}`, { network: 2 }));
+    disagrees(readPastedLink(`alice.dusk: ${labelledLink}`, { network: 2 }));
 
     // A .dusk name in words that aren't a request's line is looked up too; none in a link alone or a line naming none.
     assert.deepEqual(pastedDuskNames(`sofiadesign.dusk: ${httpsLink}`), ["sofiadesign.dusk"]);
-    assert.deepEqual(readPastedLink(`sofiadesign.dusk: ${httpsLink}`, { network: 2, owners: new Map([["sofiadesign.dusk", { account: B }]]) }), disagree);
+    disagrees(readPastedLink(`sofiadesign.dusk: ${httpsLink}`, { network: 2, owners: new Map([["sofiadesign.dusk", { account: B }]]) }));
     for (const text of [httpsLink, `${line("Chen")}${httpsLink}`, "sofiadesign.dusk", "", null]) assert.deepEqual(pastedDuskNames(text), [], String(text));
   });
 
@@ -1071,7 +1090,7 @@ describe("what's pasted in Send's To", () => {
       assert.deepEqual(pastedDuskNames(pasted, { network: 2 }), ["alice.dusk"], pasted);
       // Registered to another account, or to no one: refused.
       for (const owner of [{ account: B }, B, { account: B, address: SHIELDED }, null]) {
-        assert.deepEqual(readPastedLink(pasted, { network: 2, owners: new Map([["alice.dusk", owner]]) }), refused(LINK_DISAGREES, "disagrees"), pasted);
+        disagrees(readPastedLink(pasted, { network: 2, owners: new Map([["alice.dusk", owner]]) }), pasted);
       }
       // Amélie's own: it agrees.
       like(readPastedLink(pasted, { network: 2, owners: new Map([["alice.dusk", { account: A }]]) })?.link, amelie, pasted);
@@ -1081,7 +1100,7 @@ describe("what's pasted in Send's To", () => {
     const apart = control.replace("DUSK on", "DUSK to alice \u00b7 dusk on");
 
     assert.deepEqual(pastedDuskNames(apart, { network: 2 }), []);
-    assert.deepEqual(readPastedLink(apart, { network: 2 }), refused(LINK_DISAGREES, "disagrees"));
+    disagrees(readPastedLink(apart, { network: 2 }));
   });
 
   it("reads the wallet's own words through what can't be seen and letters that look alike: Marek's zero-width space, Cyrillic \u043e and \u041a, You are asked, above a link for 0.15", () => {
@@ -1089,7 +1108,6 @@ describe("what's pasted in Send's To", () => {
     const link = /** @type {string} */ (makePaymentLink({ amount: "0.002", language: "en", memo: "r37 marek T2", network: 2, to: A }).https);
     const l15 = link.replace("amount=0.002", "amount=0.15");
     const line = "You're asked to pay 0.002 DUSK on Testnet \u00b7 r37 marek T2";
-    const disagree = refused(LINK_DISAGREES, "disagrees");
 
     for (const said of [
       line.replace("You're", "You're\u200b"),
@@ -1107,22 +1125,21 @@ describe("what's pasted in Send's To", () => {
       line.replace("You're asked to pay", "Please pay"),
       line.replace("You're asked to pay", "Pay"),
     ]) {
-      assert.deepEqual(readPastedLink(`${said}\nPay here: ${l15}`, { network: 2 }), disagree, said);
+      disagrees(readPastedLink(`${said}\nPay here: ${l15}`, { network: 2 }), said);
       // The same words over the link they agree with fill it in.
       like(readPastedLink(`${said}\nPay here: ${link}`, { network: 2 })?.link, { amountDusk: "0.002", memo: "r37 marek T2", to: A }, said);
       // Read as the wallet's own line, they say its memo: another is refused.
-      assert.deepEqual(readPastedLink(`${said.replace("r37 marek T2", "something else")}\nPay here: ${link}`, { network: 2 }), disagree, said);
+      disagrees(readPastedLink(`${said.replace("r37 marek T2", "something else")}\nPay here: ${link}`, { network: 2 }), said);
     }
 
     // Marek's own words, its "DUSK:" no second link.
-    assert.deepEqual(readPastedLink(`Please pay 0.002 DUSK: ${l15}`, { network: 2 }), disagree);
+    disagrees(readPastedLink(`Please pay 0.002 DUSK: ${l15}`, { network: 2 }));
     like(readPastedLink(`Please pay 0.002 DUSK: ${link}`, { network: 2 })?.link, { amountDusk: "0.002", to: A });
     like(readPastedLink(`Please pay 0.002 DUSK. ${link}`, { network: 2 })?.link, { amountDusk: "0.002", to: A });
   });
 
   it("refuses a message whose amount shows as another than it is: Marek's 200.0 turned around to show as 0.002", () => {
     const link = /** @type {string} */ (makePaymentLink({ amount: "200", language: "en", memo: "r37 marek T2", network: 2, to: A }).https);
-    const disagree = refused(LINK_DISAGREES, "disagrees");
 
     for (const said of [
       // Turned around by an override, the amount or the whole line.
@@ -1138,12 +1155,11 @@ describe("what's pasted in Send's To", () => {
       "Please pay 2OO DUSK",
       "Please pay 20\u043e DUSK",
     ]) {
-      assert.deepEqual(readPastedLink(`${said}\nPay here: ${link}`, { network: 2 }), disagree, said);
+      disagrees(readPastedLink(`${said}\nPay here: ${link}`, { network: 2 }), said);
     }
   });
 
   it("reads an amount from the digits it's written in, never one a digit looks like: Astra's 1, an Arabic-Indic zero and 5, which shows as 1.5", () => {
-    const disagree = refused(LINK_DISAGREES, "disagrees");
 
     for (const [said, amount] of /** @type {const} */ ([
       // An Arabic-Indic zero looks like a point, and Unicode's table reads it as one: 105 shown as 1.5.
@@ -1160,7 +1176,7 @@ describe("what's pasted in Send's To", () => {
     ])) {
       const link = /** @type {string} */ (makePaymentLink({ amount, language: "en", network: 2, to: SHIELDED }).https);
 
-      assert.deepEqual(readPastedLink(`${said}\nPay here: ${link}`, { network: 2 }), disagree, `${said} ${amount}`);
+      disagrees(readPastedLink(`${said}\nPay here: ${link}`, { network: 2 }), `${said} ${amount}`);
     }
 
     // Digits styled as digits are the digits they are: fullwidth, mathematical; and plain ones, as before.
@@ -1170,7 +1186,6 @@ describe("what's pasted in Send's To", () => {
   });
 
   it("reads an amount in groups of thousands parted by spaces whole: Astra's Amount: 1 234.5 DUSK", () => {
-    const disagree = refused(LINK_DISAGREES, "disagrees");
     const linkFor = (/** @type {string} */ amount) => /** @type {string} */ (makePaymentLink({ amount, language: "en", network: 2, to: SHIELDED }).https);
 
     for (const space of ["\u202f", "\u00a0", " ", "\u2009"]) {
@@ -1178,8 +1193,8 @@ describe("what's pasted in Send's To", () => {
         const pasted = (/** @type {string} */ amount) => `${said}\nPay here: ${linkFor(amount)}`;
 
         like(readPastedLink(pasted("1234.5"), { network: 2 })?.link, { amountDusk: "1234.5" }, JSON.stringify(said));
-        assert.deepEqual(readPastedLink(pasted("234.5"), { network: 2 }), disagree, JSON.stringify(said));
-        assert.deepEqual(readPastedLink(pasted("1"), { network: 2 }), disagree, JSON.stringify(said));
+        disagrees(readPastedLink(pasted("234.5"), { network: 2 }), JSON.stringify(said));
+        disagrees(readPastedLink(pasted("1"), { network: 2 }), JSON.stringify(said));
       }
     }
 
@@ -1191,7 +1206,6 @@ describe("what's pasted in Send's To", () => {
 
   it("takes a word that isn't a number for none, a .dusk name among them: Astra's Please pay oliver2.dusk here:", () => {
     const link = /** @type {string} */ (makePaymentLink({ amount: "0.03", language: "en", memo: "x", network: 2, to: A }).https);
-    const disagree = refused(LINK_DISAGREES, "disagrees");
 
     for (const [said, name] of [
       ["Please pay oliver2.dusk here:", "oliver2.dusk"],
@@ -1203,16 +1217,15 @@ describe("what's pasted in Send's To", () => {
       assert.deepEqual(pastedDuskNames(pasted, { network: 2 }), [name], said);
       like(readPastedLink(pasted, { network: 2 })?.link, { amountDusk: "0.03", to: A }, said);
       like(readPastedLink(pasted, { network: 2, owners: new Map([[name, { account: A }]]) })?.link, { amountDusk: "0.03", to: A }, said);
-      assert.deepEqual(readPastedLink(pasted, { network: 2, owners: new Map([[name, { account: B }]]) }), disagree, said);
+      disagrees(readPastedLink(pasted, { network: 2, owners: new Map([[name, { account: B }]]) }), said);
     }
 
     // Names after "pay" that only hold letters a digit looks like, as Li or Io, are no amount; beside DUSK, they are one.
     for (const said of ["Pay Li back for lunch", "Pay Io, thanks", "Pay oliver2 back"]) like(readPastedLink(`${said}\n${link}`, { network: 2 })?.link, { amountDusk: "0.03" }, said);
-    for (const said of ["Please pay lO DUSK", "Please pay 30k DUSK"]) assert.deepEqual(readPastedLink(`${said}\n${link}`, { network: 2 }), disagree, said);
+    for (const said of ["Please pay lO DUSK", "Please pay 30k DUSK"]) disagrees(readPastedLink(`${said}\n${link}`, { network: 2 }), said);
   });
 
   it("reads no amount with a mark over a digit: Astra's 0 with a dot below, then 002, above a link for 2", () => {
-    const disagree = refused(LINK_DISAGREES, "disagrees");
 
     for (const [said, amount] of /** @type {const} */ ([
       ["You're asked to pay 0\u0323002 DUSK on Testnet", "2"],
@@ -1223,7 +1236,7 @@ describe("what's pasted in Send's To", () => {
     ])) {
       const link = /** @type {string} */ (makePaymentLink({ amount, language: "en", network: 2, to: SHIELDED }).https);
 
-      assert.deepEqual(readPastedLink(`${said}\nPay here: ${link}`, { network: 2 }), disagree, `${said} ${amount}`);
+      disagrees(readPastedLink(`${said}\nPay here: ${link}`, { network: 2 }), `${said} ${amount}`);
     }
 
     // Marks over letters are read past, as before: "DÚSK" is DUSK, and an accented name says nothing.
@@ -1241,12 +1254,12 @@ describe("what's pasted in Send's To", () => {
 
       assert.deepEqual(pastedDuskNames(pasted, { network: 1 }), [dusk], name);
       if (dusk === "testnet.dusk") like(readPastedLink(pasted, { network: 1 })?.link, { amountDusk: "0.002", to: "testnet.dusk" }, name);
-      else assert.deepEqual(readPastedLink(pasted, { network: 1 }), refused(LINK_DISAGREES, "disagrees"), name);
+      else disagrees(readPastedLink(pasted, { network: 1 }), name);
     }
 
     // Testnet named beside it, as a network, is still one.
     for (const said of ["On Testnet: testnet\u00b7dusk asks you to pay 0.002 DUSK", "Testnet. testnet\u00b7dusk"]) {
-      assert.deepEqual(readPastedLink(`${said}\nPay here: ${link}`, { network: 1 }), refused(LINK_DISAGREES, "disagrees"), said);
+      disagrees(readPastedLink(`${said}\nPay here: ${link}`, { network: 1 }), said);
     }
   });
 
@@ -1254,7 +1267,7 @@ describe("what's pasted in Send's To", () => {
     const link = /** @type {string} */ (makePaymentLink({ amount: "0.03", language: "en", network: 2, to: SHIELDED }).https);
 
     for (const pasted of [`${"x".repeat(150_000)}\n${link}`, `${"x ".repeat(75_000)}\n${link}`, `${"0".repeat(150_000)} DUSK\n${link}`, `${"\u200b".repeat(150_000)}x\n${link}`]) {
-      assert.deepEqual(readPastedLink(pasted, { network: 2 }), refused(LINK_DISAGREES, "disagrees"), pasted.slice(0, 20));
+      disagrees(readPastedLink(pasted, { network: 2 }), pasted.slice(0, 20));
       assert.deepEqual(pastedDuskNames(pasted, { network: 2 }), [], pasted.slice(0, 20));
     }
 
@@ -1267,7 +1280,6 @@ describe("what's pasted in Send's To", () => {
     const link = /** @type {string} */ (makePaymentLink({ amount: "0.002", language: "en", memo: "r37 marek T2", network: 2, to: A }).https);
     const l15 = link.replace("amount=0.002", "amount=0.15");
     const line = "You're asked to pay 0.002 DUSK on Testnet \u00b7 r37 marek T2";
-    const disagree = refused(LINK_DISAGREES, "disagrees");
     const his = { amountDusk: "0.002", memo: "r37 marek T2", to: A };
 
     for (const pasted of [
@@ -1283,10 +1295,10 @@ describe("what's pasted in Send's To", () => {
       `${line}\nIt's on Mainnet now.\nPay here: ${link}`,
       `${line}\nFor chain 1.\nPay here: ${link}`,
     ]) {
-      assert.deepEqual(readPastedLink(pasted, { network: 2 }), disagree, pasted);
+      disagrees(readPastedLink(pasted, { network: 2 }), pasted);
       // In a field of one line, as a phone's, its line breaks spaces, or dropped: then it fills in nothing, refused or
       // with "here:" before the link's address, no link.
-      assert.deepEqual(readPastedLink(pasted.replace(/[\n\u2028]/g, " "), { network: 2 }), disagree, pasted);
+      disagrees(readPastedLink(pasted.replace(/[\n\u2028]/g, " "), { network: 2 }), pasted);
       assert.equal(readPastedLink(pasted.replace(/[\n\u2028]/g, ""), { network: 2 })?.link ?? null, null, pasted);
     }
 
@@ -1303,6 +1315,258 @@ describe("what's pasted in Send's To", () => {
     }
   });
 
+  it("says what in the message isn't its link's, as each says it: Marek's 0.002 above a link for 0.15", () => {
+    // Nandini's, Lena's and Marek's: "The message and its link don't agree." never said what doesn't.
+    const link = `${testnetSend}?to=${A}&amount=0.002&memo=r39+marek+T2&network=testnet`;
+    const t2 = `You're asked to pay 0.002 DUSK on Testnet \u00b7 r39 marek T2\nPay here: ${link}`;
+    const short = (/** @type {string} */ id) => `${id.slice(0, 6)}\u2026${id.slice(-6)}`;
+
+    like(readPastedLink(t2, { network: 2 })?.link, { amountDusk: "0.002", memo: "r39 marek T2", to: A });
+
+    // The amount, as the message writes it and as the link asks it.
+    disagrees(readPastedLink(t2.replace("amount=0.002", "amount=0.15"), { network: 2 }), "0.15", {
+      link: "0.15 DUSK",
+      message: "0.002 DUSK",
+      part: "amount",
+      problem: "The message says 0.002 DUSK; its link asks 0.15 DUSK.",
+    });
+    for (const [said, message] of [
+      ["Please pay 0,002 DUSK", "0,002 DUSK"],
+      ["0.002DUSK, thanks", "0.002 DUSK"],
+      ["Pay me 2", "2"],
+      ["You're asked to pay 0.0\u200b02 DUSK", "0.0\\u200b02 DUSK"],
+      ["Please pay 2OO DUSK", "2OO DUSK"],
+      // All that the amount read is part of, as written.
+      ["Please pay 2 mDUSK", "2 mDUSK"],
+      ["Please pay 0 . 002 DUSK", "0 . 002 DUSK"],
+      ["Please pay 0.0\ufeff02 DUSK", "0.0\\ufeff02 DUSK"],
+      ["Please pay 2e-3 DUSK", "2e-3 DUSK"],
+      ["Please pay 0\u00b7002 DUSK", "0\u00b7002 DUSK"],
+    ]) {
+      disagrees(readPastedLink(`${said}\nPay here: ${link.replace("amount=0.002", "amount=0.15")}`, { network: 2 }), said, { link: "0.15 DUSK", message, part: "amount", problem: `The message says ${message}; its link asks 0.15 DUSK.` });
+    }
+    // One that reads two ways, in the message or the link or both: said so, and to ask for it written one way.
+    disagrees(readPastedLink(`Please pay 1.000 DUSK\nPay here: ${link.replace("amount=0.002", "amount=1")}`, { network: 2 }), "1.000 over 1", {
+      link: "1 DUSK",
+      message: "1.000 DUSK",
+      part: "amount",
+      problem: "The message says 1.000 DUSK, which could be 1 or 1000 DUSK; its link asks 1 DUSK. Ask for the amount written one way.",
+    });
+    disagrees(readPastedLink(`Please pay 1.000 DUSK\nPay here: ${link.replace("amount=0.002", "amount=1.000")}`, { network: 2 }), "1.000 over 1.000", {
+      link: "1.000 DUSK",
+      message: "1.000 DUSK",
+      part: "amount",
+      problem: "The message and its link say 1.000 DUSK, which could be 1 or 1000 DUSK. Ask for the amount written one way.",
+    });
+    disagrees(readPastedLink(`Please pay 1 DUSK\nPay here: ${link.replace("amount=0.002", "amount=1.000")}`, { network: 2 }), "1 over 1.000", {
+      problem: "The message says 1 DUSK; its link asks 1.000 DUSK, which could be 1 or 1000 DUSK. Ask for the amount written one way.",
+    });
+
+    // None in the message, or none in the link.
+    disagrees(readPastedLink(t2.replace("to pay 0.002 DUSK", "for a payment in DUSK"), { network: 2 }), "any amount", {
+      link: "0.002 DUSK",
+      message: "",
+      part: "amount",
+      problem: "The message names no amount; its link asks 0.002 DUSK.",
+    });
+    disagrees(readPastedLink(t2.replace("&amount=0.002", ""), { network: 2 }), "no amount", { link: "", message: "0.002 DUSK", part: "amount", problem: "The message says 0.002 DUSK; its link names no amount." });
+
+    // The network, by its name.
+    for (const network of ["Mainnet", "MAINNET", "Chain 1", "M\u0430innet"]) {
+      disagrees(readPastedLink(t2.replace("on Testnet", `on ${network}`), { network: 2 }), network, { link: "Testnet", message: "Mainnet", part: "network", problem: "The message says Mainnet; its link pays on Testnet." });
+    }
+
+    // The memo, as the line shows it and as the link has it.
+    disagrees(readPastedLink(t2.replace("r39 marek T2\n", "r39 marek T3\n"), { network: 2 }), "memo", {
+      link: "r39 marek T2",
+      message: "r39 marek T3",
+      part: "memo",
+      problem: "The message's memo is \u201cr39 marek T3\u201d; its link's is \u201cr39 marek T2\u201d.",
+    });
+    disagrees(readPastedLink(`Pay 1 DUSK \u00b7 Previous payment 2 DUSK\nPay here: ${link.replace("amount=0.002", "amount=1")}`, { network: 2 }), "memo with an amount", {
+      link: "r39 marek T2",
+      message: "Previous payment 2 DUSK",
+      part: "memo",
+    });
+    disagrees(readPastedLink(t2.replace(" \u00b7 r39 marek T2", ""), { network: 2 }), "no memo", { link: "r39 marek T2", message: "", part: "memo", problem: "The message has no memo; its link's is \u201cr39 marek T2\u201d." });
+    disagrees(readPastedLink(t2.replace("&memo=r39+marek+T2", ""), { network: 2 }), "memo, none in its link", { link: "", message: "r39 marek T2", part: "memo", problem: "The message's memo is \u201cr39 marek T2\u201d; its link has none." });
+
+    // Who asks, against its label; a .dusk name, against who it pays, or its label where it isn't looked up.
+    const labelled = link.replace("&network=", "&label=Sof%C3%ADa+Design&network=");
+    const named = (/** @type {string} */ name, /** @type {string} */ to = link) => `${name} asks you to pay 0.002 DUSK on Testnet \u00b7 r39 marek T2\nPay here: ${to}`;
+
+    disagrees(readPastedLink(named("Marek", labelled), { network: 2 }), "label", { link: "Sof\u00eda Design", message: "Marek", part: "name", problem: "The message is from Marek; its link is from Sof\u00eda Design." });
+    disagrees(readPastedLink(named("sofiadesign.dusk"), { network: 2, owners: new Map([["sofiadesign.dusk", { account: B }]]) }), "owner", {
+      link: A,
+      message: "sofiadesign.dusk",
+      part: "name",
+      problem: `The message says sofiadesign.dusk; its link pays ${short(A)}.`,
+    });
+    disagrees(readPastedLink(named("alice.dusk", link.replace(`to=${A}`, "to=sofiadesign.dusk")), { network: 2 }), "names", {
+      link: "sofiadesign.dusk",
+      message: "alice.dusk",
+      part: "name",
+      problem: "The message says alice.dusk; its link pays sofiadesign.dusk.",
+    });
+    disagrees(readPastedLink(`alice.dusk: ${labelled}`, { network: 2 }), "unlooked", { link: "Sof\u00eda Design", message: "alice.dusk", part: "name", problem: "The message says alice.dusk; its link is from Sof\u00eda Design." });
+
+    // What turns what's shown around, or a line that isn't the wallet's own in no one part: no one part to name.
+    disagrees(readPastedLink(t2.replace("0.002 DUSK", "\u202e200.0\u202c DUSK"), { network: 2 }), "turned", { link: "", message: "", part: "other", problem: LINK_DISAGREES });
+    disagrees(readPastedLink(t2.replace("0.002 DUSK", "0.002 DUSK to alice \u00b7 dusk"), { network: 2 }), "apart", { part: "other", problem: LINK_DISAGREES });
+  });
+
+  it("reads who a request's line says asks as a name, its point spaced or another that looks like one: Marek's sofiadesign . dusk asks you\u2026 above a link to his own account", () => {
+    // Marek's T2 with its line naming Sofía's .dusk name, over a link to his own Profile 1: both wallets filled it in.
+    const link = `${testnetSend}?to=${A}&amount=0.002&memo=r39+marek+T2&network=testnet`;
+    const owners = new Map([["sofiadesign.dusk", { account: B }]]);
+    const his = { amountDusk: "0.002", memo: "r39 marek T2", to: A };
+
+    for (const who of [
+      "sofiadesign . dusk",
+      "sofiadesign. dusk",
+      "sofiadesign[.]dusk",
+      "sofiadesign\u2e30dusk",
+      "sofiadesign\u0323dusk",
+      "sofiadesign dot dusk",
+      "SofiaDesign . DUSK",
+      "sofiadesign  .  dusk",
+      "sofiadesign (dot) dusk",
+      "sofiadesign\u2025dusk",
+      "sofiadesign\u25cfdusk",
+      "sofiadesign\u2218dusk",
+      "Sof\u00eda (sofiadesign . dusk)",
+    ]) {
+      const pasted = `${who} asks you to pay 0.002 DUSK on Testnet \u00b7 r39 marek T2\nPay here: ${link}`;
+
+      assert.deepEqual(pastedDuskNames(pasted, { network: 2 }), ["sofiadesign.dusk"], who);
+      disagrees(readPastedLink(pasted, { network: 2, owners }), who, { link: A, message: "sofiadesign.dusk", part: "name" });
+      // Over a link to her, whose name it is, it fills in.
+      like(readPastedLink(pasted.replace(`to=${A}`, `to=${B}`), { network: 2, owners })?.link, { to: B }, who);
+    }
+
+    // A .dusk name as written in who asks is read too, though a full stop and a word follow it: Astra's "sofiadesign.dusk. Studio".
+    const studio = `sofiadesign.dusk. Studio asks you to pay 0.002 DUSK on Testnet \u00b7 r39 marek T2\nPay here: ${link}`;
+
+    assert.ok(pastedDuskNames(studio, { network: 2 }).includes("sofiadesign.dusk"));
+    disagrees(readPastedLink(studio, { network: 2, owners }), "studio", { message: "sofiadesign.dusk", part: "name" });
+
+    // A request a wallet shares from a profile named as who asks reads, with that name as its link's label, fills in
+    // with no lookup: the label is read as who asks is.
+    for (const name of ["sofiadesign dot dusk", "sofiadesign . dusk", "sofiadesign (dot) dusk"]) {
+      const labelled = /** @type {string} */ (makePaymentLink({ amount: "0.002", label: name, language: "en", memo: "r39 marek T2", network: 2, to: A }).https);
+
+      like(readPastedLink(requestMessage({ language: "en", link: labelled, lux: 2_000_000n, memo: "r39 marek T2", name, network: "Testnet" }), { network: 2 })?.link, his, name);
+    }
+
+    // A name with a full stop that gives no .dusk name, and a sentence that isn't who asks, say nothing.
+    for (const pasted of [
+      `J. Smith asks you to pay 0.002 DUSK on Testnet \u00b7 r39 marek T2\nPay here: ${link}`,
+      `Mr. Dusk asks you to pay 0.002 DUSK on Testnet \u00b7 r39 marek T2\nPay here: ${link}`,
+      `Thanks. Dusk is great.\nPay here: ${link}`,
+    ]) {
+      like(readPastedLink(pasted, { network: 2, owners })?.link, his, pasted);
+    }
+    // "Mr. Dusk" read as a name is mr.dusk, looked up: someone else's is refused.
+    assert.deepEqual(pastedDuskNames(`Mr. Dusk asks you to pay 0.002 DUSK on Testnet \u00b7 r39 marek T2\nPay here: ${link}`, { network: 2 }), ["mr.dusk"]);
+    assert.deepEqual(pastedDuskNames(`Thanks. Dusk is great.\nPay here: ${link}`, { network: 2 }), []);
+  });
+
+  it("reads a number labelled as the total, the amount or the sum as an amount: Marek's Total 0.15 above his request for 0.02", () => {
+    // Marek's W19 on his phone: a first line "Total 0.15", with no unit, over his own request for 0.02, filled in 0.02.
+    const link = `${testnetSend}?to=${A}&amount=0.02&memo=marek-r10-req&network=testnet`;
+    const own = `You're asked to pay 0.02 DUSK on Testnet \u00b7 marek-r10-req\nPay here: ${link}`;
+    const his = { amountDusk: "0.02", memo: "marek-r10-req", to: A };
+
+    like(readPastedLink(own, { network: 2 })?.link, his);
+    disagrees(readPastedLink(`Total 0.15\n${own}`, { network: 2 }), "W19", { link: "0.02 DUSK", message: "0.15", part: "amount", problem: "The message says 0.15; its link asks 0.02 DUSK." });
+
+    for (const [said, message] of [
+      ["Total: 0.15", "0.15"],
+      ["TOTAL 0.15", "0.15"],
+      ["total = 0,15", "0,15"],
+      ["Amount 0.15", "0.15"],
+      ["Amount due: 0.15", "0.15"],
+      ["Amount to pay: 0.15", "0.15"],
+      ["Sum: .15", ".15"],
+      ["Subtotal 0.15.", "0.15"],
+      ["Grand total 0.15!", "0.15"],
+      ["Total 0.1O", "0.1O"],
+      ["Total \uff10.\uff11\uff15", "\uff10.\uff11\uff15"],
+      ["Total 1 234.5", "1 234.5"],
+      ["Total: 0.15 \u20ac", "0.15 \u20ac"],
+      ["Total: \u0662", "\u0662"],
+      ["Total \u0660.\u0661\u0665", "\u0660.\u0661\u0665"],
+    ]) {
+      disagrees(readPastedLink(`${said}\n${own}`, { network: 2 }), said, { link: "0.02 DUSK", message, part: "amount" });
+    }
+
+    // Its own amount, Marek's W29 among them, and a number that counts or prices something else, say nothing else.
+    for (const said of ["Total 0.02", "Total 0.02 DUSK", "Total: 0,02", "Amount 0.020", "Total 2 coffees", "Sum of 3 coffees", "Total 15 EUR", "Totally 15 people", "Pay the full amount 2 days early", "Total for 2 people", "Total 1 234 EUR", "Total: 12 345,5 PLN", "Total \u0662 coffees"]) {
+      like(readPastedLink(`${said}\n${own}`, { network: 2 })?.link, his, said);
+    }
+  });
+
+  it("refuses a Dusk address in the message that isn't the one its link pays: Marek's Pay to Sof\u00eda's account above his request", () => {
+    // Marek's W31 on his phone: a first line "Pay to <Sofía's account>" over his own request filled in his account.
+    const link = `${testnetSend}?to=${A}&amount=0.02&memo=marek-r10-req&network=testnet`;
+    const own = `You're asked to pay 0.02 DUSK on Testnet \u00b7 marek-r10-req\nPay here: ${link}`;
+    const his = { amountDusk: "0.02", memo: "marek-r10-req", to: A };
+    const short = (/** @type {string} */ id) => `${id.slice(0, 6)}\u2026${id.slice(-6)}`;
+
+    disagrees(readPastedLink(`Pay to ${B}\n${own}`, { network: 2 }), "W31", { link: A, message: B, part: "address", problem: `The message says ${short(B)}; its link pays ${short(A)}.` });
+
+    // However it's set in the words, and in letters that look like its own or with what can't be seen in it.
+    for (const said of [`To: ${B}.`, `(${B})`, `Account ${B}, thanks`, `Pay to ${B.slice(0, 40)}\u200b${B.slice(40)}`, `Pay to ${B.replace(/a/g, "\u0430")}`, `Shielded: ${SHIELDED}`]) {
+      disagrees(readPastedLink(`${said}\n${own}`, { network: 2 }), said, { part: "address" });
+    }
+    // An address that differs from the link's only in its middle is cut as far as they differ.
+    const middle = Math.floor(A.length / 2);
+    const near = `${A.slice(0, middle)}${A[middle] === "z" ? "y" : "z"}${A.slice(middle + 1)}`;
+    const read = readPastedLink(`Pay to ${near}\n${own}`, { network: 2 });
+
+    disagrees(read, "near", { link: A, message: near, part: "address" });
+    assert.notEqual(/The message says (\S+); its link pays (\S+)\./.exec(String(read?.problem))?.[1], /The message says (\S+); its link pays (\S+)\./.exec(String(read?.problem))?.[2]);
+
+    // An amount in the same word as an address is still read: only the address's own characters aren't an amount.
+    disagrees(readPastedLink(`0.002DUSK(${A})\nPay here: ${link.replace("amount=0.02", "amount=0.15")}`, { network: 2 }), "glued", {
+      link: "0.15 DUSK",
+      message: "0.002 DUSK",
+      part: "amount",
+      problem: "The message says 0.002 DUSK; its link asks 0.15 DUSK.",
+    });
+    // An amount and an address with only a comma between: the amount up to the address is read.
+    disagrees(readPastedLink(`Pay 0.15,${A}\n${own}`, { network: 2 }), "comma", { link: "0.02 DUSK", message: "0.15", part: "amount", problem: "The message says 0.15; its link asks 0.02 DUSK." });
+    disagrees(readPastedLink(`${A}:0.15 DUSK\n${own}`, { network: 2 }), "colon", { link: "0.02 DUSK", message: "0.15 DUSK", part: "amount" });
+    like(readPastedLink(`Pay 0.02,${A}\n${own}`, { network: 2 })?.link, his, "its own");
+
+    // A mark over one of an address's letters is that letter: "\u1e41" is an m, not the "rn" Unicode's table makes it.
+    const marked = A.replace("m", "m\u0307");
+
+    disagrees(readPastedLink(`Pay to ${marked}\nPay here: ${link.replace(`to=${A}`, `to=${B}`)}`, { network: 2 }), "marked", { link: B, message: A, part: "address" });
+    like(readPastedLink(`Pay to ${marked}\n${own}`, { network: 2 })?.link, his, "marked, the link's own");
+
+    // The link's own, and what isn't an address, say nothing.
+    for (const said of [`Pay to ${A}`, `Pay ${A}`, `From ${A}:`, `Tx ${"3fa9".repeat(16)}`, `Pay to ${B.slice(0, 60)}`]) {
+      like(readPastedLink(`${said}\n${own}`, { network: 2 })?.link, his, said.slice(0, 30));
+    }
+
+    // A link paying a .dusk name: the address is held to whose the name is, looked up with the message's names.
+    const named = `${testnetSend}?to=sofiadesign.dusk&amount=0.02&memo=marek-r10-req&network=testnet`;
+    const pasted = `Pay to ${B}\nYou're asked to pay 0.02 DUSK on Testnet \u00b7 marek-r10-req\nPay here: ${named}`;
+
+    assert.deepEqual(pastedDuskNames(pasted, { network: 2 }), ["sofiadesign.dusk"]);
+    disagrees(readPastedLink(pasted, { network: 2, owners: new Map([["sofiadesign.dusk", { account: A }]]) }), "hers is A", {
+      link: "sofiadesign.dusk",
+      message: B,
+      part: "address",
+      problem: `The message says ${short(B)}; its link pays sofiadesign.dusk.`,
+    });
+    disagrees(readPastedLink(pasted, { network: 2, owners: new Map([["sofiadesign.dusk", null]]) }), "no one's", { part: "address" });
+    like(readPastedLink(pasted, { network: 2, owners: new Map([["sofiadesign.dusk", { account: B }]]) })?.link, { to: "sofiadesign.dusk" });
+    like(readPastedLink(pasted, { network: 2 })?.link, { to: "sofiadesign.dusk" });
+    assert.deepEqual(pastedDuskNames(`Hi!\nYou're asked to pay 0.02 DUSK on Testnet \u00b7 marek-r10-req\nPay here: ${named}`, { network: 2 }), []);
+  });
+
   it("fills in a request as the wallets share it in every language they write amounts in, and refuses it with the link's amount changed", () => {
     const languages = "af am ar ar-EG as az be bg bn bo br bs ca cs cy da de de-AT de-CH dz el en en-IN en-ZA es es-419 et eu fa fi fil fr fr-CA fr-CH ga gl gu ha he hi hr hu hy id ig is it it-CH ja ka kk km kn ko ky lo lt lv mk ml mn mr ms my nb ne nl or pa pl ps pt pt-PT ro ru si sk sl sq sr sv sw ta te th tr uk ur uz vi yo zh zh-TW zu";
 
@@ -1315,7 +1579,7 @@ describe("what's pasted in Send's To", () => {
           const message = requestMessage({ language, link: /** @type {string} */ (made.https), lux, memo: "Factura 71", name, network: "Testnet" });
 
           like(readPastedLink(message, { network: 2 })?.link, { memo: "Factura 71", to: SHIELDED }, `${language}: ${message}`);
-          assert.deepEqual(readPastedLink(message.replace(/amount=[^&]+/, "amount=0.15"), { network: 2 }), refused(LINK_DISAGREES, "disagrees"), `${language}: ${message}`);
+          disagrees(readPastedLink(message.replace(/amount=[^&]+/, "amount=0.15"), { network: 2 }), `${language}: ${message}`);
         }
       }
     }
